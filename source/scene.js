@@ -78,14 +78,38 @@
     { id: 'pp4', name: '湖南门店', address: '湖南省株洲市醴陵市来龙门街道15幢268室', image: './scenes/bcg/开单/assets/pickup-store-2.png' }
   ];
 
+  var RECIPIENT_REGIONS = {
+    '广东省': {
+      '深圳市': ['南山区', '福田区', '罗湖区', '宝安区', '龙岗区'],
+      '广州市': ['越秀区', '天河区', '白云区', '荔湾区', '海珠区']
+    },
+    '浙江省': {
+      '杭州市': ['上城区', '西湖区', '拱墅区', '余杭区', '滨江区'],
+      '宁波市': ['海曙区', '江北区', '鄞州区']
+    },
+    '湖南省': {
+      '株洲市': ['醴陵市', '天元区', '芦淞区'],
+      '长沙市': ['芙蓉区', '天心区', '岳麓区', '雨花区']
+    },
+    '江苏省': {
+      '南京市': ['玄武区', '秦淮区', '建邺区', '鼓楼区'],
+      '苏州市': ['姑苏区', '吴中区', '相城区', '工业园区']
+    },
+    '四川省': {
+      '成都市': ['锦江区', '青羊区', '武侯区', '成华区', '双流区']
+    },
+    '北京市': { '北京市': ['东城区', '西城区', '朝阳区', '海淀区', '丰台区'] },
+    '上海市': { '上海市': ['黄浦区', '徐汇区', '长宁区', '静安区', '浦东新区'] }
+  };
+  var CLIPBOARD_RECIPIENT_SEEN_KEY = 'wego-order-clipboard-recipient-seen';
+
   var PAYMENT_METHODS = [
-    { id: 'wechat', label: '微信', icon: 'icon-weixin-mian' },
-    { id: 'balance', label: '余额', icon: 'icon-qianbao-mian' },
-    { id: 'alipay', label: '支付宝', icon: 'icon-zhifubao' },
-    { id: 'bankcard', label: '银行卡', icon: 'icon-yinhangka-mian' },
-    { id: 'scanpay', label: '扫码付款', icon: 'icon-shoukuan-mian' },
-    { id: 'qrpay', label: '出示收款码', icon: 'icon-shoukuanma' },
-    { id: 'cash', label: '现金', icon: 'icon-qian' }
+    { id: 'qrpay', label: '出示收款码', icon: 'icon-shoukuanma', category: 'online' },
+    { id: 'scanpay', label: '扫客户付款码', icon: 'icon-shoukuan-mian', category: 'online' },
+    { id: 'wechat', label: '微信', icon: 'icon-weixin-mian', category: 'private' },
+    { id: 'alipay', label: '支付宝', icon: 'icon-zhifubao', category: 'private' },
+    { id: 'bankcard', label: '银行卡', icon: 'icon-yinhangka-mian', category: 'private' },
+    { id: 'cash', label: '现金', icon: 'icon-qian', category: 'private' }
   ];
 
   function storedDisplayMode() {
@@ -144,7 +168,7 @@
   function storedPaymentPreference() {
     try {
       var saved = JSON.parse(window.localStorage.getItem('wego-order-payment-preference') || 'null');
-      if (!saved || ['unpaid', 'private', 'debt'].indexOf(saved.kind) < 0) return null;
+      if (!saved || ['unpaid', 'online', 'private', 'debt'].indexOf(saved.kind) < 0) return null;
       return {
         kind: saved.kind,
         mode: saved.mode === 'combo' ? 'combo' : 'single',
@@ -285,6 +309,7 @@
     paymentStatus: 'idle',
     orderNo: '',
     paymentSummary: '',
+    paymentPostActions: null,
     clerkDailyTotal: storedClerkDailyTotal(),
     dailyTotalRecorded: false,
     previewImageIndex: null,
@@ -294,6 +319,16 @@
     productCreateDraft: null,
     catalogCreateMenuOpen: false,
     rowContextMenu: null,
+    clipboardAddressDraft: null,
+    clipboardAddressSourceText: '',
+    clipboardAddressKey: '',
+    clipboardAddressEdited: false,
+    clipboardAddressPhoneWarning: false,
+    clipboardAddressValidation: '',
+    clipboardRegionPickerOpen: false,
+    clipboardRegionLevel: 0,
+    clipboardRegionSelection: null,
+    clipboardReadPending: false,
     saveTimer: null
   };
 
@@ -675,6 +710,31 @@
     renderActive();
     var nextBody = root && root.querySelector ? root.querySelector(selector) : null;
     if (nextBody) nextBody.scrollTop = scrollTop;
+  }
+
+  function refreshPaymentAmountsInPlace(root) {
+    var draft = state.paymentDraft;
+    if (!draft || !root) return;
+    var payable = totals().payable;
+    var currentSummary = root.querySelector('.order-payment-allocation');
+    if (currentSummary) {
+      var summaryFrame = document.createElement('div');
+      summaryFrame.innerHTML = paymentAllocationSummary(draft, payable);
+      currentSummary.replaceWith(summaryFrame.firstElementChild);
+    }
+    root.querySelectorAll('[data-fill-payment-remaining]').forEach(function (control) {
+      var methodId = control.dataset.fillPaymentRemaining;
+      var targetCents = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable));
+      var fillCents = Math.max(0, targetCents - paymentAllocatedCents(draft, methodId));
+      control.textContent = '填入剩余 ' + (fillCents / 100).toFixed(2);
+    });
+    var confirm = root.querySelector('[data-confirm-payment]');
+    if (confirm) {
+      var confirmState = paymentConfirmState(draft, payable);
+      confirm.textContent = confirmState.label;
+      confirm.disabled = !confirmState.enabled;
+      confirm.classList.toggle('btn--disabled', !confirmState.enabled);
+    }
   }
 
   function renderDeliveryPreservingScroll(root) {
@@ -1840,54 +1900,195 @@
     var draft = state.paymentDraft;
     var t = totals();
     if (!draft) return '';
+    if (draft.flowMethodId && state.paymentStatus !== 'idle') return paymentFlowPanel(draft, t);
     var addressRequired = state.delivery === 'express' || state.delivery === 'freight';
-    var isPrivatePayment = draft.kind === 'private';
-    var received = paymentReceivedAmount(draft);
-    var difference = Math.round((received - t.payable) * 100) / 100;
-    var hasPaymentAmount = draft.mode === 'single' ? Boolean(draft.method) : comboFilledMethods().length > 0;
-    var paymentDifference = '';
-    if (isPrivatePayment && hasPaymentAmount && difference < -0.01) {
-      paymentDifference = '<div class="order-payment-balance-note order-payment-balance-note--debt">欠款 ' + money(Math.abs(difference)) + (state.customer ? '，将计入客户余额' : '，请补足金额') + '</div>';
-    } else if (isPrivatePayment && hasPaymentAmount && difference > 0.01) {
-      paymentDifference = '<div class="order-payment-overage"><span>超收 ' + difference.toFixed(2) + ' 元</span>'
-        + paymentHandlingOption('change', '找零', draft.overpaymentHandling === 'change')
-        + (state.customer ? paymentHandlingOption('balance', '计入客户余额', draft.overpaymentHandling === 'balance') : '')
-        + '</div>';
-    }
+    var isCollecting = draft.kind === 'online' || draft.kind === 'private';
+    var balanceCents = paymentBalanceCents(draft, t.payable);
+    var targetCents = Math.max(0, toCents(t.payable) - balanceCents);
+    var selectedMethods = selectedPaymentMethods(draft);
+    var confirmState = paymentConfirmState(draft, t.payable);
+    var channelLabel = draft.kind === 'online' ? '在线支付方式' : '私下收款方式';
     return ''
-      + '<div class="order-payment-total"><span>本单应收</span><strong>' + money(t.payable) + '</strong><small>' + (state.customer ? state.customer.name : '散客 · 零售价') + '</small></div>'
-      + (!state.delivery && state.customer ? '<div class="order-inline-error">请先选择发货方式</div>' : (addressRequired && !state.address ? '<div class="order-inline-error">快递／快运需要先填写收货地址</div>' : ''))
-      + '<div class="order-payment-kind' + (state.customer ? '' : ' order-payment-kind--guest') + '" role="radiogroup" aria-label="收款状态">'
-      +   paymentKindOption('unpaid', '暂不收款', draft.kind === 'unpaid')
-      +   paymentKindOption('private', '立即收款', isPrivatePayment)
-      +   (state.customer ? paymentKindOption('debt', '记欠款', draft.kind === 'debt') : '')
-      + '</div>'
-      + (isPrivatePayment
+      + '<div class="order-payment-layout">'
+      +   '<section class="order-payment-main">'
+      +     '<div class="order-payment-total" data-component-slug="metric"><span>本单应收</span><strong>' + money(t.payable) + '</strong><small>' + (state.customer ? escapeHtml(state.customer.name) : '散客 · 零售价') + '</small></div>'
+      +     (!state.delivery && state.customer ? '<div class="order-inline-error">请先选择发货方式</div>' : (addressRequired && !state.address ? '<div class="order-inline-error">快递／快运需要先填写收货地址</div>' : ''))
+      +     '<div class="order-payment-section-title"><strong>收款状态</strong></div>'
+      +     '<div class="order-payment-kind" role="radiogroup" aria-label="收款状态">'
+      +       paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid')
+      +       paymentKindOption('online', '在线收款', draft.kind === 'online')
+      +       paymentKindOption('private', '已私下收款', draft.kind === 'private')
+      +       paymentKindOption('debt', '记欠款', draft.kind === 'debt', !state.customer)
+      +     '</div>'
+      +     (isCollecting
         ? '<div class="order-payment-channel">'
-          + '<div class="order-payment-channel__head"><strong>支付方式</strong><div class="order-segment"><button class="' + (draft.mode === 'single' ? 'is-active' : '') + '" data-payment-mode="single">单一支付</button><button class="' + (draft.mode === 'combo' ? 'is-active' : '') + '" data-payment-mode="combo">组合支付</button></div></div>'
-          + (draft.mode === 'single'
-            ? '<div class="order-option-grid order-option-grid--pay">' + PAYMENT_METHODS.map(function (method) {
-                var selected = draft.method === method.id;
-                var unavailable = method.id === 'balance' && !state.customer;
-                if (!selected) return '<button type="button" class="order-option order-payment-method-card' + (unavailable ? ' is-disabled' : '') + '" data-payment-method="' + method.id + '"' + (unavailable ? ' aria-disabled="true"' : '') + '><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span>' + method.label + '</span></button>';
-                return '<div class="order-option order-payment-method-card is-active"><button type="button" data-payment-method="' + method.id + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span>' + method.label + '实收金额</span></button><label><input type="text" inputmode="decimal" value="' + escapeHtml(draft.singleAmount) + '" data-single-payment-amount aria-label="' + method.label + '实收金额"></label></div>';
-              }).join('') + '</div>'
-            : '<div class="order-payment-split">'
-              + PAYMENT_METHODS.map(function (method) { return paymentInput(method.label, method.id, draft[method.id]); }).join('')
-              + '</div>')
-          + paymentDifference
+          + '<div class="order-payment-channel__head"><span><strong>' + channelLabel + '</strong><small>' + (draft.mode === 'combo' ? '最多选择 3 种' : '选择 1 种') + '</small></span><div class="order-segment" data-component-slug="tabs" role="tablist" aria-label="支付模式"><button type="button" role="tab" aria-selected="' + (draft.mode === 'single') + '" class="' + (draft.mode === 'single' ? 'is-active' : '') + '" data-payment-mode="single">单一支付</button><button type="button" role="tab" aria-selected="' + (draft.mode === 'combo') + '" class="' + (draft.mode === 'combo' ? 'is-active' : '') + '" data-payment-mode="combo">组合支付</button></div></div>'
+          + (draft.modeSwitchWarning ? paymentModeWarning() : '')
+          + (targetCents === 0
+            ? '<div class="order-payment-balance-covered"><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i><span>余额已全额抵扣，无需选择其他支付方式</span></div>'
+            : '<div class="order-payment-method-list">' + paymentMethodsForKind(draft.kind).map(function (method) { return paymentMethodCard(method, draft, selectedMethods, targetCents); }).join('') + '</div>')
           + '</div>'
-        : (draft.kind === 'debt' ? '<div class="order-payment-balance-note order-payment-balance-note--debt">欠款' + money(t.payable) + '，将记入客户账单</div>' : ''))
-      + '<div class="order-payment-options">'
-      +   paymentCheckbox(draft.autoPrintReceipt, 'auto-print-receipt', '自动打印小票')
-      +   paymentCheckbox(draft.autoDispatch, 'auto-dispatch', '自动打单发货', draft.kind === 'unpaid')
+        : (draft.kind === 'debt' ? '<div class="order-payment-debt-message">本单 ' + money(t.payable) + ' 将全额记入客户欠款</div>' : '<div class="order-payment-unpaid-message">订单将生成为“未收款”，后续可在订单详情中继续收款</div>'))
+      +   '</section>'
+      +   '<aside class="order-payment-aside">'
+      +     (isCollecting && state.customer && Number(state.customer.balance || 0) > 0 ? paymentBalanceControl(draft, t.payable) : '')
+      +     (isCollecting ? paymentAllocationSummary(draft, t.payable) : '')
+      +     '<div class="order-payment-options">'
+      +       paymentCheckbox(draft.autoPrintReceipt, 'auto-print-receipt', '自动打印小票')
+      +       paymentCheckbox(draft.autoDispatch, 'auto-dispatch', '自动打单发货', draft.kind === 'unpaid')
+      +     '</div>'
+      +     '<div class="order-payment-note"><label><input type="text" class="order-payment-note__input" value="' + escapeHtml(draft.note || '') + '" placeholder="输入收款备注" data-payment-note aria-label="收款备注"><button type="button" class="order-payment-note__camera" data-add-payment-proof aria-label="添加收款凭证"><i class="wego-iconfont-s icon-xiangji" aria-hidden="true"></i></button></label></div>'
+      +   '</aside>'
       + '</div>'
-      + '<div class="order-payment-note"><label><input type="text" class="order-payment-note__input" value="' + escapeHtml(draft.note || '') + '" placeholder="点击输入收款备注" data-payment-note aria-label="收款备注"><button type="button" class="order-payment-note__camera" aria-label="添加收款凭证"><i class="wego-iconfont-s icon-xiangji" aria-hidden="true"></i></button></label></div>'
-      + '<div class="order-side-actions order-side-actions--pay">' + button('取消', 'weak', 'md', 'data-close-panel') + '<button type="button" class="btn btn--strong btn--md ' + (state.paymentStatus === 'processing' || !draft.kind ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (state.paymentStatus === 'processing' || !draft.kind ? 'disabled' : '') + '>' + (state.paymentStatus === 'processing' ? '正在确认…' : '确认') + '</button></div>';
+      + '<div class="order-side-actions order-side-actions--pay">' + button('取消', 'weak', 'md', 'data-close-panel') + '<button type="button" class="btn btn--strong btn--md ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '>' + confirmState.label + '</button></div>';
   }
 
-  function paymentKindOption(kind, label, selected) {
-    return '<button type="button" class="order-payment-kind__option' + (selected ? ' is-active' : '') + '" role="radio" aria-checked="' + selected + '" data-payment-kind="' + kind + '"><span>' + label + '</span></button>';
+  function paymentKindOption(kind, label, selected, disabled) {
+    return '<button type="button" class="order-payment-kind__option' + (selected ? ' is-active' : '') + (disabled ? ' is-disabled' : '') + '" role="radio" aria-checked="' + selected + '" aria-disabled="' + Boolean(disabled) + '" data-component-slug="stack" data-payment-kind="' + kind + '"><span>' + label + '</span>' + (disabled ? '<small>需先选客户</small>' : '') + '</button>';
+  }
+
+  function toCents(value) {
+    return Math.max(0, Math.round(Number(value || 0) * 100));
+  }
+
+  function paymentMethodsForKind(kind) {
+    return PAYMENT_METHODS.filter(function (method) { return method.category === kind; });
+  }
+
+  function paymentMethodById(id) {
+    return PAYMENT_METHODS.find(function (method) { return method.id === id; }) || null;
+  }
+
+  function paymentBalanceCents(draft, payable) {
+    if (!draft || !draft.useBalance || !state.customer) return 0;
+    return Math.min(toCents(state.customer.balance), toCents(payable));
+  }
+
+  function selectedPaymentMethods(draft) {
+    if (!draft || (draft.kind !== 'online' && draft.kind !== 'private')) return [];
+    if (draft.mode === 'single') {
+      var singleMethod = paymentMethodById(draft.method);
+      return singleMethod && singleMethod.category === draft.kind ? [singleMethod] : [];
+    }
+    var ids = Array.isArray(draft.selectedMethods) ? draft.selectedMethods : [];
+    return ids.map(paymentMethodById).filter(function (method) { return method && method.category === draft.kind; });
+  }
+
+  function paymentAmountCents(draft, methodId) {
+    if (!draft) return 0;
+    return toCents(draft.mode === 'single' ? draft.singleAmount : draft[methodId]);
+  }
+
+  function paymentAllocatedCents(draft, excludeMethodId) {
+    var payable = totals().payable;
+    if (toCents(payable) > 0 && paymentBalanceCents(draft, payable) >= toCents(payable)) return 0;
+    return selectedPaymentMethods(draft).reduce(function (sum, method) {
+      return method.id === excludeMethodId ? sum : sum + paymentAmountCents(draft, method.id);
+    }, 0);
+  }
+
+  function paymentMethodCard(method, draft, selectedMethods, targetCents) {
+    var selected = selectedMethods.some(function (item) { return item.id === method.id; });
+    if (!selected) {
+      return '<button type="button" class="order-payment-method-card" data-component-slug="stack" data-select-payment-method="' + method.id + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span>' + method.label + '</span><small>选择</small></button>';
+    }
+    var value = draft.mode === 'single' ? draft.singleAmount : draft[method.id];
+    var fillCents = Math.max(0, targetCents - paymentAllocatedCents(draft, method.id));
+    return '<div class="order-payment-method-card is-active" data-component-slug="stack">'
+      + '<div class="order-payment-method-card__head"><span><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><strong>' + method.label + '</strong></span><button type="button" data-remove-payment-method="' + method.id + '" aria-label="移除' + method.label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
+      + '<div class="order-payment-method-card__amount"><span>收款金额</span><label data-component-slug="input"><b>¥</b><input type="text" inputmode="decimal" value="' + escapeHtml(value || '') + '" data-payment-amount="' + method.id + '" aria-label="' + method.label + '收款金额"></label><button type="button" class="link link--12" data-component-slug="link" data-fill-payment-remaining="' + method.id + '">填入剩余 ' + (fillCents / 100).toFixed(2) + '</button></div>'
+      + '</div>';
+  }
+
+  function paymentBalanceControl(draft, payable) {
+    var available = Math.max(0, Number(state.customer && state.customer.balance || 0));
+    var deduction = paymentBalanceCents(draft, payable) / 100;
+    return '<section class="order-payment-balance" data-component-slug="cell"><div><strong>余额抵扣</strong><small>可用 ' + money(available) + (draft.useBalance ? ' · 本次抵扣 ' + money(deduction) : '') + '</small></div><button type="button" class="switch ' + (draft.useBalance ? 'switch--on' : 'switch--off') + '" role="switch" aria-checked="' + draft.useBalance + '" aria-label="使用余额抵扣" data-component-slug="switch" data-toggle-payment-balance><span class="switch__thumb"></span></button></section>';
+  }
+
+  function paymentAllocationSummary(draft, payable) {
+    var payableCents = toCents(payable);
+    var balanceCents = paymentBalanceCents(draft, payable);
+    var targetCents = Math.max(0, payableCents - balanceCents);
+    var allocatedCents = paymentAllocatedCents(draft);
+    var deltaCents = targetCents - allocatedCents;
+    var difference = '';
+    if (deltaCents > 0) {
+      difference = '<div class="order-payment-difference order-payment-difference--short"><strong>' + (allocatedCents > 0 ? '还差 ' : '待分配 ') + money(deltaCents / 100) + '</strong>'
+        + (allocatedCents > 0
+          ? (state.customer
+            ? '<button type="button" class="order-payment-handling' + (draft.shortageHandling === 'debt' ? ' is-active' : '') + '" role="radio" aria-checked="' + (draft.shortageHandling === 'debt') + '" data-shortage-handling="debt"><span class="radio ' + (draft.shortageHandling === 'debt' ? 'radio--checked' : '') + '" data-component-slug="radio"><span class="radio__inner"></span><span class="radio__dot"></span></span>记为客户欠款</button>'
+            : '<small>散客订单需补足金额</small>')
+          : '<small>请选择支付方式并填写金额</small>')
+        + '</div>';
+    } else if (deltaCents < 0) {
+      difference = '<div class="order-payment-difference order-payment-difference--over"><strong>超收 ' + money(Math.abs(deltaCents) / 100) + '</strong><div>'
+        + paymentHandlingOption('change', '找零', draft.overpaymentHandling === 'change')
+        + (state.customer ? paymentHandlingOption('balance', '存入客户预存余额', draft.overpaymentHandling === 'balance') : '')
+        + '</div></div>';
+    } else {
+      difference = '<div class="order-payment-difference order-payment-difference--exact"><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i><strong>' + (targetCents === 0 ? '余额已足额抵扣' : '金额已足额') + '</strong></div>';
+    }
+    return '<section class="order-payment-allocation" aria-label="收款金额汇总">'
+      + '<div><span>本单应收</span><strong>' + money(payableCents / 100) + '</strong></div>'
+      + '<div><span>余额抵扣</span><strong>-' + money(balanceCents / 100) + '</strong></div>'
+      + '<div><span>待分配金额</span><strong>' + money(targetCents / 100) + '</strong></div>'
+      + '<div><span>已分配</span><strong>' + money(allocatedCents / 100) + '</strong></div>'
+      + difference
+      + '</section>';
+  }
+
+  function paymentModeWarning() {
+    return '<div class="order-payment-mode-warning" role="alert"><span>切换后本次仅使用第一种支付方式，其他已填金额会保留，切回组合支付可继续编辑。</span><div><button type="button" class="link link--12" data-cancel-single-mode>取消</button><button type="button" class="link link--12" data-confirm-single-mode>继续切换</button></div></div>';
+  }
+
+  function paymentConfirmState(draft, payable) {
+    if (!draft || !draft.kind) return { enabled: false, label: '请选择收款状态' };
+    if (state.paymentStatus === 'processing') return { enabled: false, label: '正在确认…' };
+    if (draft.kind === 'unpaid') return { enabled: true, label: '确认开单' };
+    if (draft.kind === 'debt') return { enabled: Boolean(state.customer), label: '确认记欠款' };
+    var targetCents = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable));
+    var allocatedCents = paymentAllocatedCents(draft);
+    var selected = selectedPaymentMethods(draft);
+    if (targetCents > 0 && (!selected.length || allocatedCents <= 0)) return { enabled: false, label: '请选择支付方式' };
+    var shortageCents = Math.max(0, targetCents - allocatedCents);
+    if (shortageCents > 0 && (!state.customer || draft.shortageHandling !== 'debt')) return { enabled: false, label: state.customer ? '请确认差额处理' : '请补足收款金额' };
+    if (shortageCents > 0) return { enabled: true, label: '确认收款并记欠款' };
+    if (targetCents === 0) return { enabled: true, label: '确认余额收款 ' + money(payable) };
+    return { enabled: true, label: '确认收款 ' + money(payable) };
+  }
+
+  function paymentFlowPanel(draft, t) {
+    var method = paymentMethodById(draft.flowMethodId);
+    var status = state.paymentStatus;
+    var amount = paymentAmountCents(draft, draft.flowMethodId) / 100;
+    var completed = Array.isArray(draft.flowCompletedIds) ? draft.flowCompletedIds.length : 0;
+    var total = Array.isArray(draft.flowMethodIds) ? draft.flowMethodIds.length : 1;
+    var stateContent = '';
+    if (status === 'awaiting-qr') {
+      stateContent = '<div class="order-payment-qr" aria-label="演示收款二维码"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><strong>等待客户扫码</strong><small>请客户使用微信或支付宝扫描收款码</small>';
+    } else if (status === 'scanning') {
+      stateContent = '<div class="order-payment-scanner" aria-label="扫码区域"><i></i><span>将客户付款码对准此区域</span></div><strong>等待扫描付款码</strong><small>支持摄像头、扫码枪或扫码盒</small>';
+    } else if (status === 'processing') {
+      stateContent = '<div class="order-payment-flow-spinner" aria-hidden="true"></div><strong>正在确认收款结果</strong><small>请勿关闭弹窗或重复收款</small>';
+    } else if (status === 'failed' || status === 'timeout') {
+      stateContent = '<div class="order-payment-flow-icon order-payment-flow-icon--error" aria-hidden="true">!</div><strong>' + (status === 'timeout' ? '收款等待超时' : '本次收款失败') + '</strong><small>没有产生重复收款，可重新发起或取消</small>';
+    } else {
+      stateContent = '<div class="order-payment-flow-icon order-payment-flow-icon--warning" aria-hidden="true">?</div><strong>暂时无法确认收款结果</strong><small>请先查询原收款结果，不要重复收款</small>';
+    }
+    var actions = status === 'processing'
+      ? '<button type="button" class="btn btn--strong btn--md btn--disabled" disabled>正在查询…</button>'
+      : (status === 'failed' || status === 'timeout'
+        ? button('取消收款', 'weak', 'md', 'data-cancel-online-payment') + button('重新发起', 'strong', 'md', 'data-retry-online-payment')
+        : (status === 'unknown'
+          ? button('取消', 'weak', 'md', 'data-cancel-online-payment') + button('查询收款结果', 'strong', 'md', 'data-query-online-payment')
+          : button('取消收款', 'weak', 'md', 'data-cancel-online-payment') + button('模拟收款成功', 'strong', 'md', 'data-online-pay-success')));
+    return '<div class="order-payment-flow">'
+      + '<div class="order-payment-flow__summary"><span>' + escapeHtml(method ? method.label : '在线收款') + ' · ' + (completed + 1) + '/' + total + '</span><strong>' + money(amount) + '</strong></div>'
+      + '<div class="order-payment-flow__body">' + stateContent + '</div>'
+      + ((status === 'awaiting-qr' || status === 'scanning') ? '<div class="order-payment-flow__test"><button type="button" class="link link--12" data-online-pay-fail>模拟失败</button><button type="button" class="link link--12" data-online-pay-timeout>模拟超时</button><button type="button" class="link link--12" data-online-pay-unknown>模拟结果未知</button></div>' : '')
+      + '<div class="order-side-actions order-side-actions--pay order-payment-flow__actions">' + actions + '</div>'
+      + '</div>';
   }
 
   function paymentHandlingOption(value, label, selected) {
@@ -1895,7 +2096,7 @@
   }
 
   function paymentCheckbox(checked, attr, label, disabled) {
-    return '<label class="checkbox-field' + (disabled ? ' is-disabled' : '') + '" role="checkbox" tabindex="' + (disabled ? '-1' : '0') + '" aria-checked="' + (checked ? 'true' : 'false') + '"' + (disabled ? ' aria-disabled="true"' : '') + ' data-clickable data-' + attr + '><span class="checkbox ' + (checked ? 'checkbox--checked' : '') + '"><span class="checkbox__inner"></span>' + (checked ? '<span class="checkbox__icon"><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></span>' : '') + '</span><span class="checkbox-field__text">' + label + '</span></label>';
+    return '<label class="checkbox-field' + (disabled ? ' is-disabled' : '') + '" role="checkbox" tabindex="' + (disabled ? '-1' : '0') + '" aria-checked="' + (checked ? 'true' : 'false') + '"' + (disabled ? ' aria-disabled="true"' : '') + ' data-clickable data-' + attr + '><span class="checkbox ' + (checked ? 'checkbox--checked' : '') + '" data-component-slug="checkbox"><span class="checkbox__inner"></span>' + (checked ? '<span class="checkbox__icon"><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></span>' : '') + '</span><span class="checkbox-field__text">' + label + '</span></label>';
   }
 
   function customerPanel() {
@@ -2133,6 +2334,225 @@
       || source.match(/\b([1-9]\d{5}(?:18|19|20)?\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx])\b/);
     if (idCardMatch && detail) detail = cleanRecipientPart(detail.replace(idCardMatch[0], '').replace(/(?:身份证号?|证件号?)\s*[:：]?\s*/i, ''));
     return { name: name, phone: phone, detail: detail, idCard: idCardMatch ? idCardMatch[1].toUpperCase() : '' };
+  }
+
+  function recipientPhoneValid(value) {
+    return /^1[3-9]\d{9}$/.test(String(value || '').trim());
+  }
+
+  function clipboardContentKey(value) {
+    var source = String(value || '').trim();
+    var hash = 2166136261;
+    for (var index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return 'recipient-' + (hash >>> 0).toString(36) + '-' + source.length;
+  }
+
+  function storedClipboardRecipientKeys() {
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(CLIPBOARD_RECIPIENT_SEEN_KEY) || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function rememberClipboardRecipientKey(key) {
+    if (!key) return;
+    var keys = storedClipboardRecipientKeys().filter(function (item) { return item !== key; });
+    keys.unshift(key);
+    try { window.localStorage.setItem(CLIPBOARD_RECIPIENT_SEEN_KEY, JSON.stringify(keys.slice(0, 30))); } catch (error) {}
+  }
+
+  function recipientRegionLabel(region) {
+    if (!region) return '';
+    return [region.province, region.city, region.district].filter(Boolean).join('');
+  }
+
+  function regionTokenMatch(source, token, suffix) {
+    if (!token) return false;
+    var shortToken = token.replace(new RegExp(suffix + '$'), '');
+    return source.indexOf(token) >= 0 || (shortToken.length >= 2 && source.indexOf(shortToken) >= 0);
+  }
+
+  function recognizeRecipientRegion(value) {
+    var source = String(value || '');
+    var result = { province: '', city: '', district: '' };
+    Object.keys(RECIPIENT_REGIONS).some(function (province) {
+      if (!regionTokenMatch(source, province, '省|市')) return false;
+      result.province = province;
+      var cities = RECIPIENT_REGIONS[province];
+      Object.keys(cities).some(function (city) {
+        if (!regionTokenMatch(source, city, '市')) return false;
+        result.city = city;
+        cities[city].some(function (district) {
+          if (!regionTokenMatch(source, district, '区|县|市')) return false;
+          result.district = district;
+          return true;
+        });
+        return true;
+      });
+      return true;
+    });
+    return result;
+  }
+
+  function recipientStreetDetail(detail, region) {
+    var value = String(detail || '');
+    [region && region.province, region && region.city, region && region.district].filter(Boolean).forEach(function (token) {
+      value = value.replace(token, '');
+      var shortToken = token.replace(/(?:省|市|区|县)$/, '');
+      if (shortToken.length >= 2) value = value.replace(shortToken, '');
+    });
+    return cleanRecipientPart(value);
+  }
+
+  function recognizeClipboardRecipient(value) {
+    var source = String(value || '').trim();
+    var parsed = parseRecipientText(source);
+    var region = recognizeRecipientRegion(parsed.detail || source);
+    var detail = recipientStreetDetail(parsed.detail, region);
+    return {
+      name: String(parsed.name || '').slice(0, 20),
+      phone: parsed.phone,
+      province: region.province,
+      city: region.city,
+      district: region.district,
+      detail: detail || parsed.detail,
+      idCard: parsed.idCard || ''
+    };
+  }
+
+  function currentDeliveryNeedsRecipient() {
+    return state.delivery === 'express' || state.delivery === 'freight';
+  }
+
+  function clipboardRecipientCanOpen(draft) {
+    return Boolean(draft && draft.name && recipientPhoneValid(draft.phone) && (recipientRegionLabel(draft) || draft.detail));
+  }
+
+  function readRecipientClipboard() {
+    if (window.WegoClipboard && typeof window.WegoClipboard.readText === 'function') {
+      return Promise.resolve(window.WegoClipboard.readText());
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') return navigator.clipboard.readText();
+    return Promise.reject(new Error('clipboard-unavailable'));
+  }
+
+  function openClipboardRecipientModal(text) {
+    var source = String(text || '').trim();
+    var key = clipboardContentKey(source);
+    if (!source || storedClipboardRecipientKeys().indexOf(key) >= 0 || state.panel) return false;
+    var draft = recognizeClipboardRecipient(source);
+    if (!clipboardRecipientCanOpen(draft)) return false;
+    state.clipboardAddressDraft = draft;
+    state.clipboardAddressSourceText = source;
+    state.clipboardAddressKey = key;
+    state.clipboardAddressEdited = false;
+    state.clipboardAddressPhoneWarning = false;
+    state.clipboardAddressValidation = '';
+    state.clipboardRegionPickerOpen = false;
+    state.clipboardRegionSelection = null;
+    state.panel = 'clipboard-address';
+    rememberClipboardRecipientKey(key);
+    renderActive();
+    window.requestAnimationFrame(function () {
+      var firstField = activeContext && activeContext.root.querySelector('[data-clipboard-address-field="name"]');
+      if (firstField) firstField.focus({ preventScroll: true });
+    });
+    return true;
+  }
+
+  function scheduleClipboardRecipientCheck() {
+    if (state.clipboardReadPending || state.panel || !currentDeliveryNeedsRecipient()) return;
+    state.clipboardReadPending = true;
+    window.setTimeout(function () {
+      readRecipientClipboard().then(function (text) {
+        state.clipboardReadPending = false;
+        if (!currentDeliveryNeedsRecipient() || state.panel) return;
+        openClipboardRecipientModal(text);
+      }).catch(function () {
+        state.clipboardReadPending = false;
+      });
+    }, 120);
+  }
+
+  function closeClipboardRecipientModal() {
+    state.panel = null;
+    state.clipboardAddressDraft = null;
+    state.clipboardAddressSourceText = '';
+    state.clipboardAddressKey = '';
+    state.clipboardAddressEdited = false;
+    state.clipboardAddressPhoneWarning = false;
+    state.clipboardAddressValidation = '';
+    state.clipboardRegionPickerOpen = false;
+    state.clipboardRegionSelection = null;
+    renderActive();
+  }
+
+  function recipientRegionOptions(level, selection) {
+    if (level === 0) return Object.keys(RECIPIENT_REGIONS);
+    if (level === 1) return selection.province && RECIPIENT_REGIONS[selection.province] ? Object.keys(RECIPIENT_REGIONS[selection.province]) : [];
+    return selection.province && selection.city && RECIPIENT_REGIONS[selection.province] && RECIPIENT_REGIONS[selection.province][selection.city]
+      ? RECIPIENT_REGIONS[selection.province][selection.city]
+      : [];
+  }
+
+  function clipboardRegionPicker() {
+    if (!state.clipboardRegionPickerOpen) return '';
+    var selection = state.clipboardRegionSelection || { province: '', city: '', district: '' };
+    var level = Math.max(0, Math.min(2, Number(state.clipboardRegionLevel || 0)));
+    var prompts = ['请选择省份', '请选择城市', '请选择区/县'];
+    var selectedValues = [selection.province, selection.city, selection.district];
+    var options = recipientRegionOptions(level, selection);
+    var canConfirm = Boolean(selection.province && selection.city && selection.district);
+    var crumbs = [];
+    for (var index = 0; index <= level; index += 1) {
+      crumbs.push('<button type="button" class="breadcrumb__item' + (index === level ? ' is-active' : '') + '" data-clipboard-region-level="' + index + '"' + (index === level ? ' aria-current="page"' : '') + '><span class="breadcrumb__label">' + escapeHtml(selectedValues[index] || prompts[index]) + '</span></button>');
+      if (index < level) crumbs.push('<i class="wego-iconfont-s icon-youjiantou16 breadcrumb__separator" aria-hidden="true"></i>');
+    }
+    return ''
+      + '<div class="order-clipboard-region-layer" role="presentation">'
+      +   '<div class="cascader cascader--no-search order-clipboard-region-cascader" role="dialog" aria-modal="true" aria-label="选择所在地区" data-component="cascader" data-variant-name="Cascader_Default">'
+      +     '<div class="cascader__fixed">'
+      +       '<div class="cascader__titlebar order-clipboard-region-titlebar"><button type="button" class="btn btn--weak btn--sm btn--icon-only order-clipboard-region-back" data-component="button" data-back-clipboard-region aria-label="返回"><i class="btn__icon wego-iconfont-s icon-zuojiantou16" aria-hidden="true"></i></button><strong class="order-clipboard-region-title">选择所在地区</strong></div>'
+      +       '<nav class="breadcrumb cascader__breadcrumb" aria-label="地区选择路径" data-component="breadcrumb"><div class="breadcrumb__list">' + crumbs.join('') + '</div></nav>'
+      +     '</div>'
+      +     '<div class="cascader__list cascader__list--animated" role="listbox" aria-label="' + prompts[level] + '"><div class="cascader__list-stage"><div class="cascader__list-transition">'
+      +       options.map(function (option) {
+                var selected = selectedValues[level] === option;
+                return '<button type="button" class="cascader-option' + (selected ? ' is-selected' : '') + '" role="option" aria-selected="' + selected + '" data-clipboard-region-option="' + escapeHtml(option) + '"><span class="cascader-option__line"><span class="cascader-option__text">' + escapeHtml(option) + '</span><span class="cascader-option__slot" aria-hidden="true">' + (level < 2 ? '<img class="cascader-option__arrow" src="../assets/design-system/wego-design/assets/cascader/chevron-16.svg" alt="">' : '<i class="wego-iconfont-s icon-gou-jiacu cascader-option__check"></i>') + '</span></span></button>';
+              }).join('')
+      +       '<div class="cascader__bottom-space"></div>'
+      +     '</div></div><div class="cascader__fade" aria-hidden="true"><img src="../assets/design-system/wego-design/assets/cascader/list-fade.png" alt=""></div></div>'
+      +     '<div class="order-clipboard-region-actions">' + button('取消', 'weak', 'md', 'data-cancel-clipboard-region') + '<button type="button" class="btn btn--strong btn--md' + (canConfirm ? '' : ' btn--disabled') + '" data-component="button" data-confirm-clipboard-region ' + (canConfirm ? '' : 'disabled') + '>确定</button></div>'
+      +   '</div>'
+      + '</div>';
+  }
+
+  function clipboardRecipientModal() {
+    if (state.panel !== 'clipboard-address' || !state.clipboardAddressDraft) return '';
+    var draft = state.clipboardAddressDraft;
+    var region = recipientRegionLabel(draft);
+    var validation = state.clipboardAddressValidation;
+    return ''
+      + '<div class="order-desktop-modal order-desktop-modal--delivery order-clipboard-address-modal" role="dialog" aria-modal="true" aria-labelledby="order-clipboard-address-title" data-state="open" data-component="modal">'
+      +   '<div class="order-desktop-modal__panel">'
+      +     '<div class="order-clipboard-address-head"><div class="order-clipboard-address-title"><i class="wego-iconfont-s icon-yuangou-mian" aria-hidden="true"></i><div><strong id="order-clipboard-address-title">识别到收货信息</strong><p>如识别有误，请点击修改</p></div></div></div>'
+      +     '<div class="order-clipboard-address-body">'
+      +       '<div class="order-clipboard-address-form">'
+      +         '<div class="form-body' + (validation === 'missing' && !draft.name ? ' form-body--error' : '') + '" data-component="form"><label class="form-body__label" for="clipboard-recipient-name"><span class="form-body__label-text">姓名</span></label><div class="form-body__action"><input id="clipboard-recipient-name" maxlength="20" value="' + escapeHtml(draft.name) + '" placeholder="请输入姓名" data-clipboard-address-field="name"></div></div>'
+      +         '<div class="form-body' + ((validation === 'missing' && !draft.phone) || state.clipboardAddressPhoneWarning ? ' form-body--error' : '') + '" data-component="form"><label class="form-body__label" for="clipboard-recipient-phone"><span class="form-body__label-text">手机号码</span></label><div class="form-body__action"><input id="clipboard-recipient-phone" inputmode="tel" value="' + escapeHtml(draft.phone) + '" placeholder="请输入手机号" data-clipboard-address-field="phone">' + (state.clipboardAddressPhoneWarning ? '<span class="form-body__error">手机号可能有误，请检查</span>' : '') + '</div></div>'
+      +         '<button type="button" class="form-body form-body--clickable' + ((validation === 'missing' && !region) || validation === 'region' ? ' form-body--error' : '') + '" data-component="form" data-open-clipboard-region><span class="form-body__label"><span class="form-body__label-text">所在地区</span></span><span class="form-body__action"><span class="form-body__select"><span class="form-body__select-text' + (region ? '' : ' is-placeholder') + '">' + escapeHtml(region || '请选择省/市/区') + '</span><i class="form-body__select-arrow wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></span></span></button>'
+      +         '<div class="form-body form-body--align-top' + (validation === 'missing' && !draft.detail ? ' form-body--error' : '') + '" data-component="form"><label class="form-body__label" for="clipboard-recipient-detail"><span class="form-body__label-text">详细地址</span></label><div class="form-body__action"><textarea id="clipboard-recipient-detail" rows="2" placeholder="请输入街道、楼栋、门牌号" data-clipboard-address-field="detail">' + escapeHtml(draft.detail) + '</textarea></div></div>'
+      +       '</div>'
+      +     '</div>'
+      +     '<div class="order-clipboard-address-actions">' + button('取消', 'weak', 'md', 'data-cancel-clipboard-address') + button('使用', 'strong', 'md', 'data-use-clipboard-address') + '</div>'
+      +     clipboardRegionPicker()
+      +   '</div>'
+      + '</div>';
   }
 
   function fillRecognizedAddress(scope, text, ctx) {
@@ -2714,7 +3134,7 @@
     var catalogResizeHandle = desktopShowsCatalog() && !orderFullscreen && !tabletPortraitLayout && !effectiveCatalogCollapsed()
       ? '<div class="order-desktop__catalog-resizer" role="separator" aria-orientation="vertical" aria-label="拖动调整商品库宽度" data-catalog-resizer></div>'
       : '';
-    var modalBackgroundAttrs = state.panel === 'product-edit' || state.panel === 'product-create' || state.panel === 'product-temp-create' || state.panel === 'fan-profile' ? ' inert aria-hidden="true"' : '';
+    var modalBackgroundAttrs = state.panel === 'product-edit' || state.panel === 'product-create' || state.panel === 'product-temp-create' || state.panel === 'fan-profile' || state.panel === 'clipboard-address' ? ' inert aria-hidden="true"' : '';
     var orderFullscreenClass = orderFullscreen ? ' order-desktop__workspace--order-fullscreen' : '';
     return ''
       + '<section class="order-v2-desktop" aria-label="桌面端开单"' + modalBackgroundAttrs + '>'
@@ -2748,6 +3168,7 @@
 
   function mobileModal() {
     if (!state.panel) return '';
+    if (state.panel === 'clipboard-address') return '';
     // Exception: 现有开单面板依赖场景内统一状态重绘，宿主 overlay 暂不支持该状态回灌；本轮沿用原承载层并补齐全屏与关闭行为。
     if (state.panel === 'customer') {
       return ''
@@ -2794,7 +3215,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + orderNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
@@ -3294,19 +3715,29 @@
     var payable = totals().payable;
     var preference = storedPaymentPreference();
     if (preference && preference.kind === 'debt' && !state.customer) preference = null;
-    if (preference && preference.method === 'balance' && !state.customer) preference.method = '';
+    if (preference && preference.method) {
+      var preferredMethod = paymentMethodById(preference.method);
+      if (!preferredMethod || preferredMethod.category !== preference.kind) preference.method = '';
+    }
     state.paymentDraft = {
       kind: preference ? preference.kind : null,
       mode: preference ? preference.mode : 'single',
       method: preference ? preference.method : '',
       singleAmount: '',
+      selectedMethods: preference && preference.method ? [preference.method] : [],
+      useBalance: false,
+      shortageHandling: null,
       overpaymentHandling: state.customer ? 'balance' : 'change',
       autoPrintReceipt: true,
       autoDispatch: false,
-      note: ''
+      note: '',
+      flowMethodId: '',
+      flowMethodIds: [],
+      flowCompletedIds: [],
+      modeSwitchWarning: false
     };
     PAYMENT_METHODS.forEach(function (method) { state.paymentDraft[method.id] = ''; });
-    if (state.paymentDraft.kind === 'private' && state.paymentDraft.mode === 'single' && state.paymentDraft.method) {
+    if ((state.paymentDraft.kind === 'online' || state.paymentDraft.kind === 'private') && state.paymentDraft.mode === 'single' && state.paymentDraft.method) {
       state.paymentDraft.singleAmount = payable.toFixed(2);
     }
     state.paymentStatus = 'idle';
@@ -3315,17 +3746,13 @@
   }
 
   function paymentReceivedAmount(draft) {
-    if (!draft || draft.kind !== 'private') return 0;
-    if (draft.mode === 'single') return Math.max(0, Number(draft.singleAmount || 0));
-    return PAYMENT_METHODS.reduce(function (sum, method) {
-      return sum + Math.max(0, Number(draft[method.id] || 0));
-    }, 0);
+    if (!draft || (draft.kind !== 'online' && draft.kind !== 'private')) return 0;
+    return paymentAllocatedCents(draft) / 100;
   }
 
   function comboFilledMethods(excludeKey) {
-    return PAYMENT_METHODS.filter(function (method) {
-      if (excludeKey && method.id === excludeKey) return false;
-      return Number(state.paymentDraft[method.id] || 0) > 0;
+    return selectedPaymentMethods(state.paymentDraft).filter(function (method) {
+      return (!excludeKey || method.id !== excludeKey) && Number(state.paymentDraft[method.id] || 0) > 0;
     });
   }
 
@@ -3351,8 +3778,8 @@
       return;
     }
     var filled = comboFilledMethods(key);
-    if (filled.length >= 2) {
-      setTimeout(function () { ctx.toast('仅支持两种方式组合收款'); }, 0);
+    if (filled.length >= 3) {
+      setTimeout(function () { ctx.toast('最多支持三种方式组合收款'); }, 0);
       return;
     }
     if (filled.length === 1) {
@@ -3375,61 +3802,123 @@
       ctx.toast('请先选择客户');
       return;
     }
-    if (draft.kind !== 'private') {
+    if (draft.kind === 'unpaid' || draft.kind === 'debt') {
       state.paymentStatus = 'processing';
       renderActive();
       setTimeout(function () { finishOrder(ctx); }, 350);
       return;
     }
-    if (draft.mode === 'single' && !draft.method) {
+    var selected = selectedPaymentMethods(draft);
+    var balanceCents = paymentBalanceCents(draft, payable);
+    var targetCents = Math.max(0, toCents(payable) - balanceCents);
+    var allocatedCents = paymentAllocatedCents(draft);
+    if (targetCents > 0 && !selected.length) {
       ctx.toast('请选择收款方式');
       return;
     }
-    var received = paymentReceivedAmount(draft);
-    if (received <= 0) {
+    if (targetCents > 0 && allocatedCents <= 0) {
       ctx.toast('请输入收款金额');
       return;
     }
-    var shortage = Math.max(0, Math.round((payable - received) * 100) / 100);
-    var excess = Math.max(0, Math.round((received - payable) * 100) / 100);
-    if (shortage > 0 && !state.customer) {
+    var shortageCents = Math.max(0, targetCents - allocatedCents);
+    var excessCents = Math.max(0, allocatedCents - targetCents);
+    if (shortageCents > 0 && !state.customer) {
       ctx.toast('收款金额不足，请补足后再确认');
       return;
     }
-    if (excess > 0 && draft.overpaymentHandling === 'balance' && !state.customer) {
+    if (shortageCents > 0 && draft.shortageHandling !== 'debt') {
+      ctx.toast('请确认剩余金额记为客户欠款');
+      return;
+    }
+    if (excessCents > 0 && draft.overpaymentHandling === 'balance' && !state.customer) {
       ctx.toast('请先选择客户');
       return;
     }
-    draft.receivedAmount = received;
-    draft.shortage = shortage;
-    draft.excess = excess;
-    if (!draft.balanceApplied && state.customer) {
-      if (shortage > 0) state.customer.balance = Math.round((Number(state.customer.balance || 0) - shortage) * 100) / 100;
-      if (excess > 0 && draft.overpaymentHandling === 'balance') state.customer.balance = Math.round((Number(state.customer.balance || 0) + excess) * 100) / 100;
-      draft.balanceApplied = true;
+    draft.receivedAmount = allocatedCents / 100;
+    draft.balanceAmount = balanceCents / 100;
+    draft.shortage = shortageCents / 100;
+    draft.excess = excessCents / 100;
+    if (draft.kind === 'online' && targetCents > 0) {
+      startOnlinePayment();
+      renderActive();
+      return;
     }
     state.paymentStatus = 'processing';
     renderActive();
     setTimeout(function () { finishOrder(ctx); }, 650);
   }
 
+  function startOnlinePayment() {
+    var draft = state.paymentDraft;
+    if (!draft) return;
+    draft.flowMethodIds = selectedPaymentMethods(draft).filter(function (method) {
+      return paymentAmountCents(draft, method.id) > 0;
+    }).map(function (method) { return method.id; });
+    draft.flowCompletedIds = [];
+    draft.flowMethodId = draft.flowMethodIds[0] || '';
+    var method = paymentMethodById(draft.flowMethodId);
+    state.paymentStatus = method && method.id === 'scanpay' ? 'scanning' : 'awaiting-qr';
+  }
+
+  function retryOnlinePayment() {
+    var method = paymentMethodById(state.paymentDraft && state.paymentDraft.flowMethodId);
+    state.paymentStatus = method && method.id === 'scanpay' ? 'scanning' : 'awaiting-qr';
+    renderActive();
+  }
+
+  function advanceOnlinePayment(ctx) {
+    var draft = state.paymentDraft;
+    if (!draft) return;
+    if (draft.flowMethodId && draft.flowCompletedIds.indexOf(draft.flowMethodId) < 0) draft.flowCompletedIds.push(draft.flowMethodId);
+    var nextId = draft.flowMethodIds.find(function (id) { return draft.flowCompletedIds.indexOf(id) < 0; });
+    if (nextId) {
+      draft.flowMethodId = nextId;
+      var method = paymentMethodById(nextId);
+      state.paymentStatus = method && method.id === 'scanpay' ? 'scanning' : 'awaiting-qr';
+      renderActive();
+      ctx.toast('第一笔已收款，请继续下一笔');
+      return;
+    }
+    state.paymentStatus = 'success';
+    finishOrder(ctx);
+  }
+
+  function applyPaymentLedger(draft) {
+    if (!draft || draft.ledgerApplied || !state.customer) return;
+    var balanceAmount = Math.max(0, Number(draft.balanceAmount || 0));
+    var excess = Math.max(0, Number(draft.excess || 0));
+    var nextBalance = Math.max(0, Number(state.customer.balance || 0) - balanceAmount);
+    if (excess > 0 && draft.overpaymentHandling === 'balance') nextBalance += excess;
+    state.customer.balance = Math.round(nextBalance * 100) / 100;
+    draft.ledgerApplied = true;
+  }
+
   function finishOrder(ctx) {
     state.paymentStatus = 'success';
     state.orderNo = 'SO' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 9000) + 1000);
     var paymentKind = state.paymentDraft ? state.paymentDraft.kind : 'private';
+    applyPaymentLedger(state.paymentDraft);
     rememberPaymentPreference(state.paymentDraft);
     state.paymentSummary = paymentKind === 'unpaid'
       ? '未收款'
       : (paymentKind === 'debt'
         ? '记欠款'
         : (state.paymentDraft && state.paymentDraft.shortage > 0
-          ? '部分收款 · 欠款' + money(state.paymentDraft.shortage)
-          : (state.paymentDraft && state.paymentDraft.mode === 'combo' ? '组合收款' : ((PAYMENT_METHODS.find(function (item) { return item.id === state.paymentDraft.method; }) || {}).label || '已收款'))));
+          ? '部分收款 · 记欠款 ' + money(state.paymentDraft.shortage)
+          : (state.paymentDraft && state.paymentDraft.balanceAmount >= totals().payable
+            ? '余额全额收款'
+            : (state.paymentDraft && state.paymentDraft.mode === 'combo' ? '组合收款' : ((paymentMethodById(state.paymentDraft.method) || {}).label || '已收款')))));
     if (!state.dailyTotalRecorded) {
-      var receivedAmount = paymentKind === 'private' ? Math.min(Number(state.paymentDraft && state.paymentDraft.receivedAmount || 0), totals().payable) : 0;
+      var receivedAmount = (paymentKind === 'private' || paymentKind === 'online')
+        ? Math.min(Number(state.paymentDraft && state.paymentDraft.receivedAmount || 0) + Number(state.paymentDraft && state.paymentDraft.balanceAmount || 0), totals().payable)
+        : 0;
       recordClerkDailyTotal(receivedAmount);
       state.dailyTotalRecorded = true;
     }
+    state.paymentPostActions = {
+      print: Boolean(state.paymentDraft && state.paymentDraft.autoPrintReceipt),
+      dispatch: Boolean(state.paymentDraft && state.paymentDraft.autoDispatch)
+    };
     state.panel = null;
     renderActive();
     ctx.navigate('workspace-order-success');
@@ -3703,6 +4192,112 @@
       }
       return;
     }
+    if (target.matches('[data-cancel-clipboard-address]')) {
+      closeClipboardRecipientModal();
+      return;
+    }
+    if (target.matches('[data-open-clipboard-region]')) {
+      var currentRegion = state.clipboardAddressDraft || {};
+      state.clipboardRegionSelection = {
+        province: currentRegion.province || '',
+        city: currentRegion.city || '',
+        district: currentRegion.district || ''
+      };
+      state.clipboardRegionLevel = currentRegion.province ? (currentRegion.city ? 2 : 1) : 0;
+      state.clipboardRegionPickerOpen = true;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-cancel-clipboard-region]')) {
+      state.clipboardRegionPickerOpen = false;
+      state.clipboardRegionSelection = null;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-back-clipboard-region]')) {
+      state.clipboardRegionPickerOpen = false;
+      state.clipboardRegionSelection = null;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-clipboard-region-level]')) {
+      state.clipboardRegionLevel = Number(target.dataset.clipboardRegionLevel || 0);
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-clipboard-region-option]')) {
+      var regionSelection = state.clipboardRegionSelection || { province: '', city: '', district: '' };
+      var regionValue = target.dataset.clipboardRegionOption;
+      if (state.clipboardRegionLevel === 0) {
+        regionSelection.province = regionValue;
+        regionSelection.city = '';
+        regionSelection.district = '';
+        state.clipboardRegionLevel = 1;
+      } else if (state.clipboardRegionLevel === 1) {
+        regionSelection.city = regionValue;
+        regionSelection.district = '';
+        state.clipboardRegionLevel = 2;
+      } else {
+        regionSelection.district = regionValue;
+      }
+      state.clipboardRegionSelection = regionSelection;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-confirm-clipboard-region]')) {
+      var confirmedRegion = state.clipboardRegionSelection;
+      if (!confirmedRegion || !confirmedRegion.province || !confirmedRegion.city || !confirmedRegion.district) return;
+      state.clipboardAddressDraft.province = confirmedRegion.province;
+      state.clipboardAddressDraft.city = confirmedRegion.city;
+      state.clipboardAddressDraft.district = confirmedRegion.district;
+      state.clipboardAddressEdited = true;
+      state.clipboardAddressValidation = '';
+      state.clipboardRegionPickerOpen = false;
+      state.clipboardRegionSelection = null;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-use-clipboard-address]')) {
+      var clipboardDraft = state.clipboardAddressDraft;
+      if (!clipboardDraft) return;
+      var missingRecipientField = !String(clipboardDraft.name || '').trim()
+        || !String(clipboardDraft.phone || '').trim()
+        || !recipientRegionLabel(clipboardDraft)
+        || !String(clipboardDraft.detail || '').trim();
+      if (missingRecipientField) {
+        state.clipboardAddressValidation = 'missing';
+        renderActive();
+        ctx.toast('部分信息未填写');
+        return;
+      }
+      var validRegion = Boolean(RECIPIENT_REGIONS[clipboardDraft.province]
+        && RECIPIENT_REGIONS[clipboardDraft.province][clipboardDraft.city]
+        && RECIPIENT_REGIONS[clipboardDraft.province][clipboardDraft.city].indexOf(clipboardDraft.district) >= 0);
+      if (!validRegion) {
+        state.clipboardAddressValidation = 'region';
+        renderActive();
+        ctx.toast('所在地区填写有误');
+        return;
+      }
+      var matchedCustomer = CUSTOMERS.find(function (customer) { return customer.mobile === String(clipboardDraft.phone).trim(); });
+      if (matchedCustomer) applyCustomer(matchedCustomer);
+      var addressSource = '自动识别（' + (state.clipboardAddressEdited ? '有编辑' : '无编辑') + '）';
+      state.address = {
+        name: String(clipboardDraft.name).trim().slice(0, 20),
+        phone: String(clipboardDraft.phone).trim(),
+        province: clipboardDraft.province,
+        city: clipboardDraft.city,
+        district: clipboardDraft.district,
+        detail: recipientRegionLabel(clipboardDraft) + String(clipboardDraft.detail).trim(),
+        source: addressSource
+      };
+      if (orderRequiresRealName() && clipboardDraft.idCard) state.realNameInfo = { name: state.address.name, idCard: clipboardDraft.idCard, mode: 'direct' };
+      rememberCurrentDeliveryPreference();
+      closeClipboardRecipientModal();
+      markDirty(ctx);
+      ctx.toast(matchedCustomer ? '已使用收货信息并关联客户' : '已使用识别的收货信息');
+      return;
+    }
     if (target.matches('[data-points-mode]')) {
       var pointsMode = target.dataset.pointsMode;
       var pointsInput = root.querySelector('[data-points-custom-input]');
@@ -3839,6 +4434,14 @@
       return;
     }
     if (target.matches('[data-close-panel]')) {
+      if ((state.panel === 'checkout' || state.panel === 'payment') && state.paymentStatus === 'processing') {
+        ctx.toast('正在确认收款结果，请稍候');
+        return;
+      }
+      if ((state.panel === 'checkout' || state.panel === 'payment') && state.paymentDraft && state.paymentDraft.flowMethodId && state.paymentStatus !== 'idle') {
+        ctx.toast('请先取消当前在线收款');
+        return;
+      }
       var closingAddPanel = state.panel === 'add';
       var closingProductEdit = state.panel === 'product-edit';
       var closingProductCreate = state.panel === 'product-create' || state.panel === 'product-temp-create';
@@ -4119,6 +4722,7 @@
       state.customerKeyword = '';
       markDirty(ctx);
       ctx.toast(state.customer ? '已切换客户并带入发货信息' : '已设为散客，使用零售价');
+      scheduleClipboardRecipientCheck();
       return;
     }
     if (target.matches('[data-clear-customer]')) {
@@ -4286,6 +4890,7 @@
       state.panel = null;
       markDirty(ctx);
       ctx.toast('发货信息已保存');
+      scheduleClipboardRecipientCheck();
       return;
     }
     if (target.matches('[data-add-mode]')) {
@@ -4665,28 +5270,111 @@
       }
       state.paymentDraft.kind = target.dataset.paymentKind;
       if (state.paymentDraft.kind === 'unpaid') state.paymentDraft.autoDispatch = false;
+      state.paymentDraft.flowMethodId = '';
+      state.paymentDraft.modeSwitchWarning = false;
+      state.paymentDraft.shortageHandling = null;
       state.paymentStatus = 'idle';
       renderActive();
       return;
     }
     if (target.matches('[data-payment-mode]')) {
-      state.paymentDraft.mode = target.dataset.paymentMode;
-      if (state.paymentDraft.mode === 'combo') {
-        PAYMENT_METHODS.forEach(function (method) { state.paymentDraft[method.id] = ''; });
-      } else if (state.paymentDraft.method) {
-        state.paymentDraft.singleAmount = totals().payable.toFixed(2);
+      var nextPaymentMode = target.dataset.paymentMode;
+      if (nextPaymentMode === state.paymentDraft.mode) return;
+      if (nextPaymentMode === 'single' && selectedPaymentMethods(state.paymentDraft).length > 1) {
+        state.paymentDraft.modeSwitchWarning = true;
+        renderPaymentPreservingScroll(root);
+        return;
       }
+      if (nextPaymentMode === 'combo') {
+        if (state.paymentDraft.method) {
+          if (state.paymentDraft.selectedMethods.indexOf(state.paymentDraft.method) < 0) state.paymentDraft.selectedMethods.push(state.paymentDraft.method);
+          state.paymentDraft[state.paymentDraft.method] = state.paymentDraft.singleAmount;
+        }
+      } else {
+        var activeSingleMethods = selectedPaymentMethods(state.paymentDraft);
+        var firstSingleMethod = activeSingleMethods[0];
+        state.paymentDraft.method = firstSingleMethod ? firstSingleMethod.id : '';
+        state.paymentDraft.singleAmount = firstSingleMethod ? String(state.paymentDraft[firstSingleMethod.id] || '') : '';
+      }
+      state.paymentDraft.mode = nextPaymentMode;
+      state.paymentDraft.modeSwitchWarning = false;
       renderActive();
       return;
     }
-    if (target.matches('[data-payment-method]')) {
-      if (target.dataset.paymentMethod === 'balance' && !state.customer) {
-        ctx.toast('请先选择客户');
-        return;
+    if (target.matches('[data-confirm-single-mode]')) {
+      var modeMethods = selectedPaymentMethods(state.paymentDraft);
+      var keptMethod = modeMethods[0];
+      state.paymentDraft.mode = 'single';
+      state.paymentDraft.method = keptMethod ? keptMethod.id : '';
+      state.paymentDraft.singleAmount = keptMethod ? String(state.paymentDraft[keptMethod.id] || '') : '';
+      state.paymentDraft.modeSwitchWarning = false;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-cancel-single-mode]')) {
+      state.paymentDraft.modeSwitchWarning = false;
+      renderPaymentPreservingScroll(root);
+      return;
+    }
+    if (target.matches('[data-toggle-payment-balance]')) {
+      if (!state.customer) return;
+      state.paymentDraft.useBalance = !state.paymentDraft.useBalance;
+      state.paymentDraft.shortageHandling = null;
+      renderPaymentPreservingScroll(root);
+      return;
+    }
+    if (target.matches('[data-select-payment-method]')) {
+      var selectedMethodId = target.dataset.selectPaymentMethod;
+      var selectedMethod = paymentMethodById(selectedMethodId);
+      if (!selectedMethod || selectedMethod.category !== state.paymentDraft.kind) return;
+      var payableTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
+      if (state.paymentDraft.mode === 'single') {
+        state.paymentDraft.method = selectedMethodId;
+        state.paymentDraft.singleAmount = (payableTargetCents / 100).toFixed(2);
+        if (state.paymentDraft.selectedMethods.indexOf(selectedMethodId) < 0) state.paymentDraft.selectedMethods.push(selectedMethodId);
+      } else {
+        var currentSelected = selectedPaymentMethods(state.paymentDraft);
+        if (currentSelected.length >= 3) {
+          ctx.toast('最多选择 3 种支付方式');
+          return;
+        }
+        if (state.paymentDraft.selectedMethods.indexOf(selectedMethodId) < 0) state.paymentDraft.selectedMethods.push(selectedMethodId);
+        var remainingCents = Math.max(0, payableTargetCents - paymentAllocatedCents(state.paymentDraft, selectedMethodId));
+        state.paymentDraft[selectedMethodId] = (remainingCents / 100).toFixed(2);
       }
-      state.paymentDraft.method = target.dataset.paymentMethod;
-      state.paymentDraft.singleAmount = totals().payable.toFixed(2);
-      state.paymentDraft.balanceApplied = false;
+      state.paymentDraft.shortageHandling = null;
+      renderPaymentPreservingScroll(root);
+      window.requestAnimationFrame(function () {
+        var amountInput = root.querySelector('[data-payment-amount="' + selectedMethodId + '"]');
+        if (amountInput) { amountInput.focus({ preventScroll: true }); amountInput.select(); }
+      });
+      return;
+    }
+    if (target.matches('[data-remove-payment-method]')) {
+      var removedMethodId = target.dataset.removePaymentMethod;
+      state.paymentDraft.selectedMethods = state.paymentDraft.selectedMethods.filter(function (id) { return id !== removedMethodId; });
+      state.paymentDraft[removedMethodId] = '';
+      if (state.paymentDraft.method === removedMethodId) {
+        state.paymentDraft.method = '';
+        state.paymentDraft.singleAmount = '';
+      }
+      state.paymentDraft.shortageHandling = null;
+      renderPaymentPreservingScroll(root);
+      return;
+    }
+    if (target.matches('[data-fill-payment-remaining]')) {
+      var fillMethodId = target.dataset.fillPaymentRemaining;
+      var fillTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
+      var fillAmountCents = Math.max(0, fillTargetCents - paymentAllocatedCents(state.paymentDraft, fillMethodId));
+      if (state.paymentDraft.mode === 'single') state.paymentDraft.singleAmount = (fillAmountCents / 100).toFixed(2);
+      else state.paymentDraft[fillMethodId] = (fillAmountCents / 100).toFixed(2);
+      state.paymentDraft.shortageHandling = null;
+      renderPaymentPreservingScroll(root);
+      return;
+    }
+    if (target.matches('[data-shortage-handling]')) {
+      if (!state.customer) return;
+      state.paymentDraft.shortageHandling = 'debt';
       renderPaymentPreservingScroll(root);
       return;
     }
@@ -4696,8 +5384,11 @@
         return;
       }
       state.paymentDraft.overpaymentHandling = target.dataset.overpaymentHandling;
-      state.paymentDraft.balanceApplied = false;
       renderActive();
+      return;
+    }
+    if (target.matches('[data-add-payment-proof]')) {
+      ctx.toast('收款凭证上传将在生产环境接入');
       return;
     }
     if (target.matches('[data-auto-print-receipt]')) {
@@ -4710,6 +5401,40 @@
     }
     if (target.matches('[data-confirm-payment]')) {
       confirmPayment(ctx);
+      return;
+    }
+    if (target.matches('[data-online-pay-success], [data-query-online-payment]')) {
+      state.paymentStatus = 'processing';
+      renderActive();
+      setTimeout(function () { advanceOnlinePayment(ctx); }, 900);
+      return;
+    }
+    if (target.matches('[data-online-pay-fail]')) {
+      state.paymentStatus = 'failed';
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-online-pay-timeout]')) {
+      state.paymentStatus = 'timeout';
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-online-pay-unknown]')) {
+      state.paymentStatus = 'unknown';
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-retry-online-payment]')) {
+      retryOnlinePayment();
+      return;
+    }
+    if (target.matches('[data-cancel-online-payment]')) {
+      state.paymentDraft.flowMethodId = '';
+      state.paymentDraft.flowMethodIds = [];
+      state.paymentDraft.flowCompletedIds = [];
+      state.paymentStatus = 'idle';
+      renderActive();
+      ctx.toast('已取消本次在线收款');
       return;
     }
     if (target.matches('[data-recover-payment]')) {
@@ -4744,6 +5469,23 @@
 
   function handleInput(event, root, ctx) {
     var target = event.target;
+    if (state.panel === 'clipboard-address' && target.matches('[data-clipboard-address-field]')) {
+      var clipboardField = target.dataset.clipboardAddressField;
+      var clipboardValue = target.value;
+      if (clipboardField === 'name') {
+        clipboardValue = clipboardValue.slice(0, 20);
+        target.value = clipboardValue;
+      }
+      state.clipboardAddressDraft[clipboardField] = clipboardValue;
+      state.clipboardAddressEdited = true;
+      state.clipboardAddressValidation = '';
+      if (clipboardField === 'phone') {
+        state.clipboardAddressPhoneWarning = false;
+        var clipboardPhoneBody = target.closest('.form-body');
+        if (clipboardPhoneBody) clipboardPhoneBody.classList.remove('form-body--error');
+      }
+      return;
+    }
     if (state.panel === 'delivery' && target.matches('[data-real-name], [data-id-card]')) {
       var inputRealNameDraft = activeDeliveryDraft();
       inputRealNameDraft.realNameInfo = Object.assign({}, inputRealNameDraft.realNameInfo || { mode: 'direct' });
@@ -5015,15 +5757,27 @@
     }
     if (target.matches('[data-split]') && state.paymentDraft) {
       state.paymentDraft[target.dataset.split] = target.value.replace(/[^\d.]/g, '');
-      state.paymentDraft.balanceApplied = false;
       if (event.type === 'change') renderPaymentPreservingScroll(root);
       return;
     }
     if (target.matches('[data-single-payment-amount]') && state.paymentDraft) {
       state.paymentDraft.singleAmount = target.value.replace(/[^\d.]/g, '');
       target.value = state.paymentDraft.singleAmount;
-      state.paymentDraft.balanceApplied = false;
       if (event.type === 'change') renderPaymentPreservingScroll(root);
+      return;
+    }
+    if (target.matches('[data-payment-amount]') && state.paymentDraft) {
+      var amountRaw = String(target.value || '').replace(/[^\d.]/g, '');
+      var amountParts = amountRaw.split('.');
+      var amountInteger = amountParts.shift().slice(0, 7);
+      var amountDecimal = amountParts.join('').slice(0, 2);
+      var normalizedAmount = amountInteger + (amountRaw.indexOf('.') >= 0 ? '.' + amountDecimal : '');
+      if (normalizedAmount.charAt(0) === '.') normalizedAmount = '0' + normalizedAmount;
+      target.value = normalizedAmount;
+      if (state.paymentDraft.mode === 'single') state.paymentDraft.singleAmount = normalizedAmount;
+      else state.paymentDraft[target.dataset.paymentAmount] = normalizedAmount;
+      state.paymentDraft.shortageHandling = null;
+      refreshPaymentAmountsInPlace(root);
       return;
     }
     if (target.matches('[data-payment-note]') && state.paymentDraft) {
@@ -5075,6 +5829,7 @@
     layoutWatchSnapshot();
     bindLayoutWatch();
     renderWorkbench(root, ctx);
+    scheduleClipboardRecipientCheck();
     root.addEventListener('pointerdown', function (event) {
       if (event.button !== 0) return;
       if (beginCatalogResize(event, root)) return;
@@ -5230,6 +5985,11 @@
       }
     });
     root.addEventListener('blur', function (event) {
+      if (event.target.matches('[data-clipboard-address-field="phone"]') && state.panel === 'clipboard-address') {
+        state.clipboardAddressPhoneWarning = Boolean(event.target.value.trim()) && !recipientPhoneValid(event.target.value);
+        if (state.clipboardAddressPhoneWarning) renderActive();
+        return;
+      }
       if (event.target.matches('[data-add-note]') && state.addDraft) {
         state.addDraft.note = event.target.value.trim();
         state.addDraft.noteOpen = false;
@@ -5243,6 +6003,33 @@
       markDirty(ctx);
     }, true);
     root.addEventListener('keydown', function (event) {
+      if (event.key === 'Tab' && state.panel === 'clipboard-address') {
+        var clipboardDialog = root.querySelector('.order-clipboard-address-modal .order-desktop-modal__panel');
+        var clipboardFocusable = clipboardDialog ? Array.from(clipboardDialog.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function (element) {
+          return !element.hidden && element.offsetParent !== null;
+        }) : [];
+        if (clipboardFocusable.length) {
+          var clipboardFirst = clipboardFocusable[0];
+          var clipboardLast = clipboardFocusable[clipboardFocusable.length - 1];
+          if (event.shiftKey && document.activeElement === clipboardFirst) {
+            event.preventDefault();
+            clipboardLast.focus();
+          } else if (!event.shiftKey && document.activeElement === clipboardLast) {
+            event.preventDefault();
+            clipboardFirst.focus();
+          }
+        }
+      }
+      if (event.key === 'Escape' && state.panel === 'clipboard-address') {
+        if (state.clipboardRegionPickerOpen) {
+          state.clipboardRegionPickerOpen = false;
+          state.clipboardRegionSelection = null;
+          renderActive();
+        } else {
+          closeClipboardRecipientModal();
+        }
+        return;
+      }
       var quickModeOption = event.target.closest && event.target.closest('[data-quick-mode]');
       if (quickModeOption && (event.key === ' ' || event.key === 'Enter')) {
         event.preventDefault();
@@ -5359,6 +6146,7 @@
       +     '<h1 id="order-success-title">' + resultTitle + '</h1>'
       +     '<p>' + escapeHtml(state.paymentSummary || '已收款') + ' · ' + money(t.payable) + '</p>'
       +     '<dl><div><dt>订单号</dt><dd>' + escapeHtml(state.orderNo) + '</dd></div><div><dt>客户</dt><dd>' + escapeHtml(state.customer ? state.customer.name : '散客') + '</dd></div><div><dt>仓库</dt><dd>' + escapeHtml(state.warehouse.name) + '</dd></div><div><dt>商品</dt><dd>' + t.styles + '款 ' + t.pieces + '件</dd></div><div><dt>收款状态</dt><dd>' + paymentState + '</dd></div></dl>'
+      +     (state.paymentPostActions && (state.paymentPostActions.print || state.paymentPostActions.dispatch) ? '<div class="order-success-v2__post-actions">' + (state.paymentPostActions.print ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>小票打印任务已创建</span>' : '') + (state.paymentPostActions.dispatch ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>快递单任务已创建</span>' : '') + '<small>打印或打单失败时可在订单详情中单独重试，不影响开单结果。</small></div>' : '')
       +     '<div class="order-success-v2__actions">' + button('继续开单', 'strong', 'lg', 'data-new-order') + button('查看订单', 'weak', 'lg', 'data-view-order') + '</div>'
       +     '<small>配货、发货等后续流程不在本期原型范围内</small>'
       +   '</main>'
@@ -5391,6 +6179,7 @@
     state.orderNo = '';
     state.paymentStatus = 'idle';
     state.paymentDraft = null;
+    state.paymentPostActions = null;
     state.dailyTotalRecorded = false;
     state.saveStatus = '新订单';
   }
