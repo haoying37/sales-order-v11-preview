@@ -5062,26 +5062,6 @@ button.order-payment-method-card {
     min-height: var(--size-40);
   }
 
-  .order-catalog-sidebar-filter-menu {
-    position: absolute;
-    z-index: 5;
-    top: calc(100% + var(--spacer-8));
-    right: 0;
-    width: calc(var(--size-64) * 3);
-    padding: var(--spacer-12);
-    background: var(--bg-surface);
-    border: var(--stroke-hairline) solid var(--border-neutral-l2);
-    border-radius: var(--radius-8);
-    box-shadow: var(--shadow-md);
-  }
-
-  .order-catalog-sidebar-filter-menu > div {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacer-8);
-    margin-top: var(--spacer-8);
-  }
-
   .order-desktop__catalog-list--grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(calc(var(--size-56) * 2.7), 1fr));
@@ -6154,40 +6134,6 @@ button.order-payment-method-card {
   .order-desktop-search-filter > .btn i {
     flex-shrink: 0;
     font-size: var(--size-16);
-  }
-
-  .order-desktop-search-filter__menu {
-    position: absolute;
-    top: calc(100% + var(--spacer-8));
-    left: 0;
-    z-index: var(--z-popover);
-    width: calc(var(--size-104) * 3);
-    padding: var(--spacer-16);
-    background: var(--bg-surface);
-    border: var(--stroke-hairline) solid var(--border-neutral-l2);
-    border-radius: var(--radius-12);
-    box-shadow: var(--shadow-lg);
-  }
-
-  .order-desktop-search-filter__menu section + section {
-    margin-top: var(--spacer-16);
-  }
-
-  .order-desktop-search-filter__menu section > small {
-    display: block;
-    margin-bottom: var(--spacer-8);
-    color: var(--text-secondary);
-  }
-
-  .order-desktop-search-filter__menu section > div {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacer-8);
-  }
-
-  .order-desktop-search-filter__menu .tag {
-    border: 0;
-    font-family: inherit;
   }
 
   .order-desktop-context-search {
@@ -8418,6 +8364,97 @@ button.order-payment-method-card {
     overflow: hidden;
     background: var(--bg-mask-strong);
     animation: order-barcode-scanner-enter var(--duration-normal) var(--ease-enter) both;
+  }
+
+  .order-desktop__catalog--filter {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-surface);
+    border-radius: var(--radius-16) 0 0 0;
+    animation: order-barcode-scanner-enter var(--duration-normal) var(--ease-enter) both;
+  }
+
+  .order-catalog-business-filter {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    background: var(--bg-surface);
+  }
+
+  .order-catalog-business-filter__header {
+    display: flex;
+    flex: 0 0 var(--size-56);
+    align-items: center;
+    justify-content: space-between;
+    min-height: var(--size-56);
+    padding: 0 var(--spacer-16);
+    border-bottom: var(--stroke-hairline) solid var(--border-neutral-l2);
+  }
+
+  .order-catalog-business-filter__header h2,
+  .order-catalog-business-filter__section h3 {
+    margin: 0;
+    color: var(--text-default);
+  }
+
+  .order-catalog-business-filter__header h2 {
+    font-size: var(--heading-sm-font-size);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--heading-sm-line-height);
+  }
+
+  .order-catalog-business-filter__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: var(--spacer-4) var(--spacer-16) var(--spacer-16);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .order-catalog-business-filter__section {
+    padding: var(--spacer-16) 0;
+    border-bottom: var(--stroke-hairline) solid var(--border-neutral-l2);
+  }
+
+  .order-catalog-business-filter__section:last-child {
+    border-bottom: 0;
+  }
+
+  .order-catalog-business-filter__section h3 {
+    margin-bottom: var(--spacer-12);
+    font-size: var(--body-md-font-size);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--body-md-line-height);
+  }
+
+  .order-catalog-business-filter__options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--spacer-8);
+  }
+
+  .order-catalog-business-filter__options .tag {
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .order-catalog-business-filter__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    flex: 0 0 auto;
+    gap: var(--spacer-12);
+    padding: var(--spacer-12) var(--spacer-16);
+    background: var(--bg-surface);
+    border-top: var(--stroke-hairline) solid var(--border-neutral-l2);
+  }
+
+  .order-catalog-business-filter__actions .btn {
+    width: 100%;
   }
 
   .order-barcode-scanner,
