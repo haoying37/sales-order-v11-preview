@@ -2101,7 +2101,7 @@
     if (method && method.id === 'scanpay') {
       return '<div class="dialog dialog--text order-reference-payment__scan-dialog" role="dialog" aria-modal="true" aria-labelledby="order-payment-scan-title" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_1" data-variant-cn="按钮数量=1">'
         + '<section class="dialog__card order-reference-payment__scan">'
-        + '<div class="dialog__body"><div class="dialog__header"><h2 class="dialog__title" id="order-payment-scan-title">扫码客户付款码</h2></div>'
+        + '<div class="dialog__body"><div class="dialog__header"><h2 class="dialog__title" id="order-payment-scan-title">扫客户付款码</h2></div>'
         + '<div class="dialog__custom"><div class="order-reference-payment__scan-view" aria-label="付款码扫描区域"><video muted playsinline autoplay data-payment-scan-video></video><i aria-hidden="true"></i></div></div></div>'
         + '<div class="dialog__actions"><div class="dialog__buttons"><button type="button" class="dialog__btn dialog__btn--dismiss" data-close-payment-overlay>取消</button></div></div>'
         + '</section></div>';
