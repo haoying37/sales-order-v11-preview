@@ -9729,6 +9729,49 @@ button.order-payment-method-card {
   line-height: 1.2;
 }
 
+.order-reference-payment__private-combo-row {
+  min-height: var(--size-48);
+}
+
+.order-reference-payment__private-combo-row > .form-body__action {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.order-reference-payment__private-combo-action {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacer-8);
+  width: 100%;
+}
+
+.order-reference-payment__private-combo-action .number-input {
+  width: 136px;
+}
+
+.order-reference-payment__private-combo-remove {
+  display: inline-flex;
+  flex: 0 0 var(--size-32);
+  align-items: center;
+  justify-content: center;
+  width: var(--size-32);
+  height: var(--size-32);
+  padding: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-4);
+}
+
+.order-reference-payment__private-combo-remove > i {
+  font-size: var(--size-16);
+}
+
+.order-reference-payment__private-combo-select {
+  flex: 0 0 auto;
+}
+
 .order-reference-payment__confirm > small {
   color: var(--text-inverse);
   font-size: var(--body-xs-font-size);
@@ -9743,8 +9786,8 @@ button.order-payment-method-card {
 @media (min-width: 768px) {
   .order-desktop-modal--checkout .order-desktop-modal__panel {
     position: relative;
-    width: min(calc(var(--size-96) * 5), calc(100% - var(--spacer-48)));
-    height: min(calc(var(--size-104) * 7), calc(100% - var(--spacer-48)));
+    width: min(calc(var(--size-96) * 5 + var(--size-64) + var(--spacer-16)), calc(100% - var(--spacer-48)));
+    height: min(calc(var(--size-104) * 6 + var(--size-64) + var(--spacer-24)), calc(100% - var(--spacer-48)));
     max-height: calc(100% - var(--spacer-48));
     overflow: hidden;
     background: var(--bg-page);
@@ -9880,7 +9923,7 @@ button.order-payment-method-card {
   flex: 0 0 auto;
 }
 
-@media (min-width: 768px) and (min-height: 776px) {
+@media (min-width: 768px) and (min-height: 760px) {
   .order-desktop-modal--checkout .order-reference-payment__sheet {
     overflow-y: hidden;
   }

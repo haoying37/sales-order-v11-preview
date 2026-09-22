@@ -2005,9 +2005,9 @@
         return paymentOnlineComboInput(method, draft, index);
       }).join('') + '</div></div>';
     } else if (draft.mode === 'combo') {
-      content = '<div class="order-payment-method-list order-reference-payment__combo-methods">' + methods.map(function (method) {
-        return paymentMethodCard(method, draft, selectedMethods, targetCents);
-      }).join('') + '</div>';
+      content = '<div class="form form-group order-reference-payment__online-combo order-reference-payment__private-combo" data-component="form" data-component-slug="form" data-variant-name="Form_Input" data-variant-cn="纯输入表单" role="group" aria-label="私下组合支付金额"><div class="form-group__content">' + methods.map(function (method) {
+        return paymentPrivateComboInput(method, draft, selectedMethods);
+      }).join('') + '</div></div>';
     } else if (draft.kind === 'online') {
       content = '<div class="order-reference-payment__online-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
@@ -2027,6 +2027,17 @@
     return '<div class="form-body form-body--preserve-content-align form-body--label-w120 order-reference-payment__combo-row">'
       + '<div class="form-body__label order-reference-payment__combo-label"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
       + '<div class="form-body__action"><div class="number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(value) + '" placeholder="请输入" data-payment-amount="' + method.id + '" data-online-combo-index="' + index + '" aria-label="' + method.label + '收款金额"></div></div>'
+      + '</div>';
+  }
+
+  function paymentPrivateComboInput(method, draft, selectedMethods) {
+    var selected = selectedMethods.some(function (item) { return item.id === method.id; });
+    var action = selected
+      ? '<div class="order-reference-payment__private-combo-action"><div class="number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft[method.id] || '')) + '" placeholder="请输入" data-payment-amount="' + method.id + '" aria-label="' + method.label + '收款金额"></div><button type="button" class="order-reference-payment__private-combo-remove" data-remove-payment-method="' + method.id + '" aria-label="移除' + method.label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
+      : '<button type="button" class="link link--14 order-reference-payment__private-combo-select" data-component-slug="link" data-select-payment-method="' + method.id + '">选择</button>';
+    return '<div class="form-body form-body--preserve-content-align form-body--label-w120 order-reference-payment__combo-row order-reference-payment__private-combo-row' + (selected ? ' is-selected' : '') + '">'
+      + '<div class="form-body__label order-reference-payment__combo-label"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
+      + '<div class="form-body__action">' + action + '</div>'
       + '</div>';
   }
 
@@ -5738,8 +5749,8 @@
         state.paymentDraft.selectedMethods = [selectedMethodId];
       } else {
         var currentSelected = selectedPaymentMethods(state.paymentDraft);
-        if (currentSelected.length >= 3) {
-          ctx.toast('最多选择 3 种支付方式');
+        if (currentSelected.length >= 2) {
+          ctx.toast('最多选择 2 种支付方式');
           return;
         }
         if (state.paymentDraft.selectedMethods.indexOf(selectedMethodId) < 0) state.paymentDraft.selectedMethods.push(selectedMethodId);
