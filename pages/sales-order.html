@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="../assets/design-system/wego-design/iconfont.css">
   <link rel="stylesheet" href="../assets/design-system/iconfont/iconfont-aliases.css">
   <link rel="stylesheet" href="../assets/design-system/wego-design/components.css">
-  <link rel="stylesheet" href="../source/scene.css?v=order-total-unbounded">
+  <link rel="stylesheet" href="../source/scene.css?v=figma-checkout-review20">
   <style>
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg-page); }
     body { color: var(--text-default); font-family: var(--body-md-font-family); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
@@ -16,14 +16,11 @@
     button, input, textarea { font: inherit; }
     button { margin: 0; border: 0; cursor: pointer; }
     .preview-shell, .phone-screen, #scene-root { position: relative; width: 100%; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
-    .app-toast-host { position: fixed; left: 50%; bottom: 28px; z-index: var(--z-critical); max-width: min(80vw, 360px); padding: 10px 16px; color: var(--text-inverse); font-size: var(--body-sm-font-size); text-align: center; background: var(--bg-mask-heavy); border-radius: var(--radius-8); opacity: 0; pointer-events: none; transform: translate(-50%, 8px); transition: opacity .18s, transform .18s; }
-    .app-toast-host.is-visible { opacity: 1; transform: translate(-50%, 0); }
-    @media (max-width: 767px) { .app-toast-host { bottom: 88px; } }
   </style>
 </head>
 <body data-bg="page">
   <div class="preview-shell"><div class="phone-screen"><main id="scene-root" aria-label="销售开单"></main></div></div>
-  <div class="app-toast-host" data-toast-host role="status" aria-live="polite"></div>
+  <div class="toast toast--default is-floating app-toast-host" data-component="toast" data-variant-name="Toast" data-variant-cn="默认提示" data-toast-host role="status" aria-live="polite" aria-atomic="true"><span class="toast__text" data-toast-text></span></div>
   <script>
     (function () {
       var scenes = {};
@@ -32,12 +29,13 @@
       var toastTimer = 0;
       var root = document.getElementById('scene-root');
       var toastHost = document.querySelector('[data-toast-host]');
+      var toastText = toastHost.querySelector('[data-toast-text]');
 
       function toast(message) {
         window.clearTimeout(toastTimer);
-        toastHost.textContent = message;
+        toastText.textContent = message;
         toastHost.classList.add('is-visible');
-        toastTimer = window.setTimeout(function () { toastHost.classList.remove('is-visible'); }, 1800);
+        toastTimer = window.setTimeout(function () { toastHost.classList.remove('is-visible'); }, 4000);
       }
       function destroyScene() { destroyCallbacks.splice(0).forEach(function (callback) { try { callback(); } catch (error) {} }); }
       function mountScene(routeId, pushHistory) {
@@ -66,7 +64,7 @@
       window.__mountSalesOrder = function () { mountScene('workspace-order-create', false); };
     })();
   </script>
-  <script src="../source/scene.js?v=order-total-unbounded"></script>
+  <script src="../source/scene.js?v=figma-checkout-review20"></script>
   <script>window.__mountSalesOrder();</script>
 </body>
 </html>

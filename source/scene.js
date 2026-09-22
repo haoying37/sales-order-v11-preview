@@ -106,8 +106,8 @@
   var CLIPBOARD_RECIPIENT_SEEN_KEY = 'wego-order-clipboard-recipient-seen';
 
   var PAYMENT_METHODS = [
-    { id: 'qrpay', label: '出示收款码', icon: 'icon-shoukuanma', category: 'online' },
-    { id: 'scanpay', label: '扫客户付款码', icon: 'icon-shoukuan-mian', category: 'online' },
+    { id: 'qrpay', label: '出示收款码', icon: 'icon-erweima', category: 'online' },
+    { id: 'scanpay', label: '扫客户付款码', icon: 'icon-saoyisao', category: 'online' },
     { id: 'wechat', label: '微信', icon: 'icon-weixin-mian', category: 'private' },
     { id: 'alipay', label: '支付宝', icon: 'icon-zhifubao', category: 'private' },
     { id: 'bankcard', label: '银行卡', icon: 'icon-yinhangka-mian', category: 'private' },
@@ -360,6 +360,10 @@
 
   function money(value) {
     return '¥' + Number(value || 0).toFixed(2);
+  }
+
+  function compactAmount(value) {
+    return Number(value || 0).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
   }
 
   function addProductPrice(value) {
@@ -745,7 +749,8 @@
     var confirm = root.querySelector('[data-confirm-payment]');
     if (confirm) {
       var confirmState = paymentConfirmState(draft, payable);
-      confirm.textContent = confirmState.label;
+      var confirmDetail = paymentConfirmDetail(draft, payable);
+      confirm.innerHTML = '<span>' + confirmState.label + '</span>' + (confirmDetail ? '<small>(' + confirmDetail + ')</small>' : '');
       confirm.disabled = !confirmState.enabled;
       confirm.classList.toggle('btn--disabled', !confirmState.enabled);
     }
@@ -1919,58 +1924,90 @@
     var balanceCents = paymentBalanceCents(draft, t.payable);
     var targetCents = Math.max(0, toCents(t.payable) - balanceCents);
     var confirmState = paymentConfirmState(draft, t.payable);
-    var selectedMethod = paymentMethodById(draft.method);
+    var collectionContent = '';
+    if (targetCents > 0) {
+      collectionContent = '<div class="order-reference-payment__status-row' + (isCollecting ? ' is-guided' : '') + '">'
+        + '<div class="order-payment-kind" role="radiogroup" aria-label="收款状态">'
+        + paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid')
+        + paymentKindOption('online', '在线收款', draft.kind === 'online')
+        + paymentKindOption('private', '已私下收款', draft.kind === 'private')
+        + paymentKindOption('debt', '记欠款', draft.kind === 'debt', !state.customer)
+        + '</div></div>'
+        + (isCollecting ? paymentReferenceMethods(draft, targetCents) : '')
+        + (draft.kind === 'debt' ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span><strong>累计欠款 ' + money(17880) + '（含本次）</strong></div>' : '');
+    }
     var overlay = '';
     if (draft.showShortageDialog) overlay = paymentShortageDialog(draft, t.payable);
     else if (draft.flowMethodId && state.paymentStatus !== 'idle') overlay = paymentReferenceFlow(draft, t.payable);
+    var confirmDetail = paymentConfirmDetail(draft, t.payable);
     return ''
       + '<div class="order-reference-payment">'
-      +   (isCollecting && balanceCents > 0 ? '<span class="order-reference-payment__combo">组合支付</span>' : '')
-      +   '<div class="order-reference-payment__total"><span>本单应收</span><strong>' + money(t.payable) + '</strong></div>'
+      +   '<section class="order-reference-payment__hero" aria-label="订单金额">'
+      +     '<span>订单金额</span>'
+      +     paymentAmountMetric(t.payable, 32, 'black')
+      +   '</section>'
       +   (state.customer && Number(state.customer.balance || 0) > 0 ? paymentReferenceBalance(draft, t.payable) : '')
-      +   '<div class="order-reference-payment__remaining"><span>还需收款</span><strong>' + money(targetCents / 100) + '</strong></div>'
-      +   '<div class="order-reference-payment__status-row">'
-      +     '<strong>收款状态</strong>'
-      +     '<div class="order-payment-kind" role="radiogroup" aria-label="收款状态">'
-      +       paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid')
-      +       paymentKindOption('online', '在线收款', draft.kind === 'online')
-      +       paymentKindOption('private', '已私下收款', draft.kind === 'private')
-      +       paymentKindOption('debt', '记欠款', draft.kind === 'debt', !state.customer)
+      +   '<section class="order-reference-payment__sheet">'
+      +     '<div class="order-reference-payment__remaining"><span>还需收款</span>' + paymentAmountMetric(targetCents / 100, 24, 'black') + '</div>'
+      +     collectionContent
+      +     paymentNoteEntry(draft)
+      +   '</section>'
+      +   '<footer class="order-reference-payment__footer">'
+      +     '<div class="order-payment-options">'
+      +       paymentCheckoutOption(draft.autoPrintReceipt, 'auto-print-receipt', '打印小票', 'MJJS-2BIUI')
+      +       paymentCheckoutOption(draft.autoDispatch, 'auto-dispatch', '快递打单发货', '申通快递')
       +     '</div>'
-      +     '</div>'
-      +   (isCollecting && targetCents > 0 ? paymentReferenceMethods(draft, selectedMethod) : '')
-      +   (draft.kind === 'debt' ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span><strong>累计欠款 ' + money(17880) + '（含本次）</strong></div>' : '')
-      +   ((isCollecting && selectedMethod) ? '<button type="button" class="order-reference-payment__change" data-reference-change>计算找零</button>' : '')
-      +   '<div class="order-payment-note"><label><input type="text" class="order-payment-note__input" value="' + escapeHtml(draft.note || '') + '" placeholder="点击输入收款备注" data-payment-note aria-label="收款备注"><button type="button" class="order-payment-note__camera" data-add-payment-proof aria-label="添加收款凭证"><i class="wego-iconfont-s icon-xiangji" aria-hidden="true"></i></button></label></div>'
-      +   '<div class="order-payment-options">'
-      +     paymentCheckbox(draft.autoPrintReceipt, 'auto-print-receipt', '打印小票 &lt;KMLP390BC&gt;')
-      +     paymentCheckbox(draft.autoDispatch, 'auto-dispatch', '快递打单发货&nbsp; 顺丰&gt;')
-      +   '</div>'
-      +   '<button type="button" class="btn btn--strong btn--md order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '>' + confirmState.label + '</button>'
+      +     '<button type="button" class="btn btn--strong btn--lg order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '><span>' + confirmState.label + '</span>' + (confirmDetail ? '<small>(' + confirmDetail + ')</small>' : '') + '</button>'
+      +   '</footer>'
       +   overlay
       + '</div>';
   }
 
+  function paymentAmountMetric(value, size, theme, negative) {
+    var parts = Math.max(0, Number(value || 0)).toFixed(2).split('.');
+    return '<span class="metric metric--' + size + ' metric--' + (theme || 'black') + ' order-reference-payment__metric" data-component-slug="metric">'
+      + '<span class="metric__main"><span class="metric__symbol">' + (negative ? '-' : '') + '¥</span><span class="metric__value"><span class="metric__integer">' + parts[0] + '</span><span class="metric__decimal">.' + parts[1] + '</span></span></span>'
+      + '</span>';
+  }
+
   function paymentKindOption(kind, label, selected, disabled) {
-    return '<button type="button" class="order-payment-kind__option' + (selected ? ' is-active' : '') + (disabled ? ' is-disabled' : '') + '" role="radio" aria-checked="' + selected + '" aria-disabled="' + Boolean(disabled) + '" data-component-slug="stack" data-payment-kind="' + kind + '"><span>' + label + '</span></button>';
+    return '<button type="button" class="order-payment-kind__option' + (selected ? ' is-active' : '') + (disabled ? ' is-disabled' : '') + '" role="radio" aria-checked="' + selected + '" aria-disabled="' + Boolean(disabled) + '" data-component-slug="stack" data-variant-name="selection" data-payment-kind="' + kind + '"><span>' + label + '</span>' + (selected ? paymentSelectionCheck() : '') + '</button>';
+  }
+
+  function paymentSelectionCheck() {
+    return '<span class="order-delivery-option__check order-reference-payment__selection-check" aria-hidden="true"><img src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>';
+  }
+
+  function paymentSmallCheckbox(checked) {
+    return '<span class="checkbox checkbox--sm ' + (checked ? 'checkbox--checked' : '') + '" data-component-slug="checkbox" data-variant-name="Checkbox_Small"><span class="checkbox__inner"></span>' + (checked ? '<span class="checkbox__icon"><img class="checkbox__asset" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>' : '') + '</span>';
   }
 
   function paymentReferenceBalance(draft, payable) {
     var available = Math.max(0, Number(state.customer && state.customer.balance || 0));
     var deduction = paymentBalanceCents(draft, payable) / 100;
     return '<div class="order-reference-payment__balance">'
-      + '<div><strong>余额支付</strong><small>可用: ' + money(available) + ' <button type="button" class="link link--12" data-component-slug="link" data-reference-recharge>充值</button></small></div>'
-      + '<button type="button" class="order-reference-payment__balance-toggle' + (draft.useBalance ? ' is-active' : '') + '" role="switch" aria-checked="' + draft.useBalance + '" data-component-slug="switch" data-toggle-payment-balance><span>-' + money(deduction) + '</span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></button>'
+      + '<div><strong>余额抵扣</strong><small>（当前可用余额：' + money(available) + '）</small><button type="button" class="link link--12" data-component-slug="link" data-reference-recharge>充值</button></div>'
+      + '<button type="button" class="checkbox-field order-reference-payment__balance-toggle' + (draft.useBalance ? ' is-active' : '') + '" role="checkbox" aria-checked="' + draft.useBalance + '" data-toggle-payment-balance>' + (draft.useBalance ? paymentAmountMetric(deduction, 16, 'black', true) : '') + paymentSmallCheckbox(draft.useBalance) + '</button>'
       + '</div>';
   }
 
-  function paymentReferenceMethods(draft, selectedMethod) {
+  function paymentReferenceMethods(draft, targetCents) {
     var methods = paymentMethodsForKind(draft.kind);
+    var selectedMethods = selectedPaymentMethods(draft);
+    var selectedMethod = paymentMethodById(draft.method);
     var content = '';
-    if (draft.kind === 'online') {
+    if (draft.mode === 'combo' && draft.kind === 'online') {
+      content = '<div class="form form-group order-reference-payment__online-combo" data-component="form" data-component-slug="form" data-variant-name="Form_Input" data-variant-cn="纯输入表单" role="group" aria-label="在线组合支付金额"><div class="form-group__content">' + methods.map(function (method, index) {
+        return paymentOnlineComboInput(method, draft, index);
+      }).join('') + '</div></div>';
+    } else if (draft.mode === 'combo') {
+      content = '<div class="order-payment-method-list order-reference-payment__combo-methods">' + methods.map(function (method) {
+        return paymentMethodCard(method, draft, selectedMethods, targetCents);
+      }).join('') + '</div>';
+    } else if (draft.kind === 'online') {
       content = '<div class="order-reference-payment__online-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-select-payment-method="' + method.id + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span>' + method.label + '</span>' + (active ? '<b><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></b>' : '') + '</button>';
+        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
       }).join('') + '</div>';
     } else {
       content = '<div class="order-reference-payment__private-methods">' + methods.map(function (method) {
@@ -1979,12 +2016,77 @@
       }).join('') + '</div>'
         + (selectedMethod ? '<div class="order-reference-payment__private-selected"><span><i class="wego-iconfont-s ' + selectedMethod.icon + '" aria-hidden="true"></i>' + selectedMethod.label + '</span><label><b>¥</b><input type="text" inputmode="decimal" value="' + escapeHtml(draft.singleAmount || '') + '" data-payment-amount="' + selectedMethod.id + '" aria-label="' + selectedMethod.label + '收款金额"></label><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></div>' : '');
     }
-    return '<section class="order-reference-payment__methods"><strong>支付方式</strong>' + content + '</section>';
+    return '<section class="order-reference-payment__methods"><header><strong>支付方式</strong><button type="button" class="order-reference-payment__mode-switch" role="switch" aria-checked="' + (draft.mode === 'combo') + '" data-payment-mode="' + (draft.mode === 'combo' ? 'single' : 'combo') + '"><span>组合支付</span><i class="switch ' + (draft.mode === 'combo' ? 'switch--on' : 'switch--off') + '" data-component-slug="switch"><span class="switch__thumb"></span></i></button></header>' + content + '</section>';
+  }
+
+  function paymentOnlineComboInput(method, draft, index) {
+    var value = String(draft[method.id] || '');
+    return '<div class="form-body form-body--preserve-content-align form-body--label-w120 order-reference-payment__combo-row">'
+      + '<div class="form-body__label order-reference-payment__combo-label"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
+      + '<div class="form-body__action"><div class="number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(value) + '" placeholder="请输入" data-payment-amount="' + method.id + '" data-online-combo-index="' + index + '" aria-label="' + method.label + '收款金额"></div></div>'
+      + '</div>';
+  }
+
+  function paymentCheckoutOption(checked, attr, label, detail) {
+    return '<label class="checkbox-field order-reference-payment__post-option" role="checkbox" tabindex="0" aria-checked="' + (checked ? 'true' : 'false') + '" data-clickable data-' + attr + '>'
+      + paymentSmallCheckbox(checked)
+      + '<strong class="order-reference-payment__post-title">' + label + '</strong><small class="order-reference-payment__post-detail">' + detail + '</small><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></label>';
+  }
+
+  function paymentNoteEntry(draft) {
+    var hasNote = Boolean(draft && draft.note);
+    return '<section class="order-note-bar order-reference-payment__note-entry" aria-label="收款备注">'
+      + '<div class="order-note-bar__row' + (hasNote ? ' order-note-bar__row--filled' : '') + '"' + (hasNote ? ' data-clickable data-open-payment-note role="button" tabindex="0" aria-label="编辑收款备注"' : '') + '>'
+      + (hasNote
+        ? '<div class="order-note-bar__note"><p class="order-note-bar__preview"><span class="order-note-bar__line"><span class="order-note-bar__label">收款备注</span>' + escapeHtml(draft.note) + '</span></p><span class="order-note-bar__edit"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i>编辑</span></div>'
+        : '<button type="button" class="link link--14" data-component-slug="link" data-variant-name="Link_14" data-open-payment-note>收款备注</button>')
+      + '</div></section>';
+  }
+
+  function paymentNoteModal() {
+    var draft = state.paymentDraft;
+    if (!draft || !draft.noteEditorOpen) return '';
+    return ''
+      + '<div class="order-note-modal order-payment-note-modal" role="dialog" aria-modal="true" aria-labelledby="order-payment-note-title" data-state="open">'
+      +   '<div class="order-note-modal__panel">'
+      +     '<div class="order-note-modal__head"><strong id="order-payment-note-title">' + (draft.note ? '编辑收款备注' : '添加收款备注') + '</strong></div>'
+      +     '<div class="order-note-modal__body">'
+      +       '<div class="input-group input-group--surface-white" data-component-slug="input"><textarea id="order-payment-note-value" aria-label="收款备注" placeholder="请输入收款备注" data-payment-note-editor>' + escapeHtml(draft.note || '') + '</textarea></div>'
+      +     '</div>'
+      +     '<div class="order-note-modal__actions">'
+      +       button('取消', 'weak', 'md', 'data-payment-note-cancel')
+      +       button('确定', 'strong', 'md', 'data-payment-note-confirm')
+      +     '</div>'
+      +   '</div>'
+      + '</div>';
+  }
+
+  function isSingleQrCodePayment(draft) {
+    return Boolean(
+      draft
+      && draft.kind === 'online'
+      && draft.mode === 'single'
+      && draft.method === 'qrpay'
+      && paymentAmountCents(draft, 'qrpay') > 0
+    );
+  }
+
+  function paymentConfirmDetail(draft, payable) {
+    if (!draft || (draft.kind !== 'online' && draft.kind !== 'private')) return '';
+    if (isSingleQrCodePayment(draft) && draft.flowMethodId === 'qrpay' && state.paymentStatus !== 'idle') return '';
+    var parts = [];
+    var balance = paymentBalanceCents(draft, payable) / 100;
+    if (balance > 0) parts.push('余额抵扣' + money(balance));
+    var allocated = paymentAllocatedCents(draft) / 100;
+    if (allocated > 0) parts.push((draft.kind === 'online' ? '在线收款' : '私下收款') + money(allocated));
+    return parts.join(' + ');
   }
 
   function paymentReferenceFlow(draft, payable) {
     var method = paymentMethodById(draft.flowMethodId);
-    var amount = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable)) / 100;
+    var amount = method
+      ? paymentAmountCents(draft, method.id) / 100
+      : Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable)) / 100;
     if (method && method.id === 'scanpay') {
       return '<div class="order-reference-payment__overlay"><section class="order-reference-payment__scan" role="dialog" aria-modal="true" aria-label="扫码客户付款码">'
         + '<span>支付金额</span><strong>' + money(amount) + '</strong>'
@@ -1993,12 +2095,18 @@
         + '<button type="button" class="order-reference-payment__flow-back" data-close-payment-overlay>返回</button>'
         + '</section></div>';
     }
+    var qrAvatar = state.customer && state.customer.avatar
+      ? state.customer.avatar
+      : './scenes/bcg/开单/assets/customer-picker/recent-chen.png';
+    var qrProcessing = state.paymentStatus === 'processing';
     return '<div class="order-reference-payment__overlay"><section class="order-reference-payment__qr-dialog" role="dialog" aria-modal="true" aria-label="出示收款码">'
       + '<button type="button" class="order-reference-payment__overlay-close" data-close-payment-overlay aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
-      + '<span>扫码支付你的订单</span><strong>' + money(amount) + '</strong>'
-      + '<div class="order-payment-qr" aria-label="演示收款二维码"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>'
-      + '<em>' + escapeHtml(state.customer ? state.customer.name : '散客订单') + '</em><small>1组-小林</small>'
-      + '<div class="order-reference-payment__qr-providers"><span><i class="wego-iconfont-s icon-weixin-mian" aria-hidden="true"></i>微信支付</span><span><i class="wego-iconfont-s icon-yinhangka-mian" aria-hidden="true"></i>信用卡</span><span><i class="wego-iconfont-s icon-zhifubao" aria-hidden="true"></i>支付宝</span><span><i class="wego-iconfont-s icon-qian" aria-hidden="true"></i>花呗</span></div>'
+      + '<header class="order-reference-payment__qr-head"><span>扫码支付你的订单</span><strong>' + money(amount) + '</strong></header>'
+      + '<div class="order-reference-payment__qr-main"><button type="button" class="order-reference-payment__qr-card" data-simulate-qr-success aria-label="点击二维码模拟扫码支付成功"' + (qrProcessing ? ' disabled aria-busy="true"' : '') + '><span class="order-reference-payment__qr-code" aria-label="示意收款二维码">'
+      + '<i class="order-reference-payment__qr-finder order-reference-payment__qr-finder--tl"></i><i class="order-reference-payment__qr-finder order-reference-payment__qr-finder--tr"></i><i class="order-reference-payment__qr-finder order-reference-payment__qr-finder--bl"></i>'
+      + '<img src="' + escapeHtml(qrAvatar) + '" alt="店铺头像"></span></button><em>十三行大眼睛女装…</em></div>'
+      + '<small class="order-reference-payment__qr-clerk">1组-丽丽</small>'
+      + '<div class="order-reference-payment__qr-providers"><span><i class="wego-iconfont-s icon-weixin-mian" aria-hidden="true"></i>微信支付</span><span><i class="wego-iconfont-s icon-yinhangka-mian" aria-hidden="true"></i>信用卡</span><span><i class="wego-iconfont-s icon-zhifubao" aria-hidden="true"></i>支付宝</span><span><i class="wego-iconfont-s icon-huabei" aria-hidden="true"></i>花呗</span></div>'
       + '</section></div>';
   }
 
@@ -2103,19 +2211,21 @@
       + '</section>';
   }
 
-  function paymentModeWarning() {
-    return '<div class="order-payment-mode-warning" role="alert"><span>切换后本次仅使用第一种支付方式，其他已填金额会保留，切回组合支付可继续编辑。</span><div><button type="button" class="link link--12" data-cancel-single-mode>取消</button><button type="button" class="link link--12" data-confirm-single-mode>继续切换</button></div></div>';
-  }
-
   function paymentConfirmState(draft, payable) {
     if (!draft || !draft.kind) return { enabled: false, label: '请选择收款状态' };
+    if (isSingleQrCodePayment(draft) && draft.flowMethodId === 'qrpay' && state.paymentStatus !== 'idle') {
+      return { enabled: false, label: '扫码支付中' };
+    }
     if (state.paymentStatus === 'processing') return { enabled: false, label: '正在确认…' };
     if (draft.kind === 'unpaid') return { enabled: true, label: '确认开单' };
     if (draft.kind === 'debt') return { enabled: Boolean(state.customer), label: '确认开单' };
+    if (isSingleQrCodePayment(draft)) {
+      return { enabled: true, label: '确认并显示收款码' };
+    }
     var targetCents = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable));
     var selected = selectedPaymentMethods(draft);
     if (targetCents > 0 && !selected.length) return { enabled: true, label: '确认开单' };
-    return { enabled: true, label: '确认收款 ' + Number(payable || 0).toFixed(2).replace(/\.00$/, '') };
+    return { enabled: true, label: '确认收款 ' + money(payable) };
   }
 
   function paymentFlowPanel(draft, t) {
@@ -3310,10 +3420,14 @@
         +   '</div>'
         + '</div>';
     }
+    var isCheckoutModal = state.panel === 'checkout' || state.panel === 'payment';
+    var defaultModalHeader = isCheckoutModal
+      ? '<div class="modal__title order-v2-modal__checkout-head"><span class="order-v2-modal__checkout-title">支付结算</span><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></div>'
+      : '<div class="modal__title modal__title--default"><nav class="navbar" data-component-slug="navbar"><div class="navbar__body"><div class="navbar__left"><button type="button" class="navbar__left-btn navbar__left-btn--circle" data-close-panel aria-label="收起"><i class="wego-iconfont-s icon-xiajiantou16"></i></button></div><div class="navbar__center"><span class="navbar__title">' + panelTitle() + '</span></div><div class="navbar__right"></div></div></nav></div>';
     return ''
-      + '<div class="modal modal--frame-x modal--has-actions order-v2-modal' + (state.panel === 'add' ? ' order-v2-modal--add' : '') + '" role="dialog" aria-modal="true" data-state="open" data-component-slug="modal">'
+      + '<div class="modal modal--frame-x modal--has-actions order-v2-modal' + (state.panel === 'add' ? ' order-v2-modal--add' : '') + (isCheckoutModal ? ' order-v2-modal--checkout' : '') + '" role="dialog" aria-modal="true" aria-label="' + panelTitle() + '" data-state="open" data-component-slug="modal">'
       +   '<div class="modal__panel">'
-      +     '<div class="modal__title modal__title--default"><nav class="navbar" data-component-slug="navbar"><div class="navbar__body"><div class="navbar__left"><button type="button" class="navbar__left-btn navbar__left-btn--circle" data-close-panel aria-label="收起"><i class="wego-iconfont-s icon-xiajiantou16"></i></button></div><div class="navbar__center"><span class="navbar__title">' + panelTitle() + '</span></div><div class="navbar__right"></div></div></nav></div>'
+      +     defaultModalHeader
       +     '<div class="modal__body order-v2-modal__body">' + sidePanelContent() + '</div>'
       +   '</div>'
       + '</div>';
@@ -3340,7 +3454,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
@@ -3843,6 +3957,8 @@
       mode: 'single',
       method: '',
       singleAmount: '',
+      lastSingleMethod: '',
+      lastSingleAmount: '',
       selectedMethods: [],
       useBalance: Boolean(state.customer && Number(state.customer.balance || 0) > 0),
       shortageHandling: null,
@@ -3850,10 +3966,10 @@
       autoPrintReceipt: false,
       autoDispatch: false,
       note: '',
+      noteEditorOpen: false,
       flowMethodId: '',
       flowMethodIds: [],
       flowCompletedIds: [],
-      modeSwitchWarning: false,
       showShortageDialog: false
     };
     PAYMENT_METHODS.forEach(function (method) { state.paymentDraft[method.id] = ''; });
@@ -3992,6 +4108,31 @@
     }
     state.paymentStatus = 'success';
     finishOrder(ctx);
+  }
+
+  function clearOnlinePaymentFlow(draft) {
+    if (!draft) return;
+    draft.flowMethodId = '';
+    draft.flowMethodIds = [];
+    draft.flowCompletedIds = [];
+  }
+
+  function settleQrPayment(ctx, succeeded) {
+    var draft = state.paymentDraft;
+    if (!draft || draft.flowMethodId !== 'qrpay' || state.paymentStatus === 'processing') return;
+    state.paymentStatus = 'processing';
+    renderActive();
+    setTimeout(function () {
+      if (state.paymentDraft !== draft || draft.flowMethodId !== 'qrpay' || state.paymentStatus !== 'processing') return;
+      if (succeeded) {
+        advanceOnlinePayment(ctx);
+        return;
+      }
+      clearOnlinePaymentFlow(draft);
+      state.paymentStatus = 'idle';
+      renderActive();
+      ctx.toast('收款失败，请再次收款');
+    }, 600);
   }
 
   function applyPaymentLedger(draft) {
@@ -5388,6 +5529,30 @@
       beginPayment(ctx);
       return;
     }
+    if (target.matches('[data-open-payment-note]')) {
+      if (!state.paymentDraft) return;
+      state.paymentDraft.noteEditorOpen = true;
+      renderActive();
+      var paymentNoteField = activeContext.root.querySelector('[data-payment-note-editor]');
+      if (paymentNoteField) paymentNoteField.focus({ preventScroll: true });
+      return;
+    }
+    if (target.matches('[data-payment-note-cancel]')) {
+      if (!state.paymentDraft) return;
+      state.paymentDraft.noteEditorOpen = false;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-payment-note-confirm]')) {
+      if (!state.paymentDraft) return;
+      var paymentNoteScope = target.closest('.order-payment-note-modal');
+      var paymentNoteEditor = paymentNoteScope ? paymentNoteScope.querySelector('[data-payment-note-editor]') : null;
+      state.paymentDraft.note = paymentNoteEditor ? paymentNoteEditor.value.trim() : state.paymentDraft.note;
+      state.paymentDraft.noteEditorOpen = false;
+      renderActive();
+      ctx.toast('收款备注已保存');
+      return;
+    }
     if (target.matches('[data-payment-kind]')) {
       if (target.dataset.paymentKind === 'debt' && !state.customer) {
         ctx.toast('请先选择客户');
@@ -5397,10 +5562,11 @@
       state.paymentDraft.mode = 'single';
       state.paymentDraft.method = '';
       state.paymentDraft.singleAmount = '';
+      state.paymentDraft.lastSingleMethod = '';
+      state.paymentDraft.lastSingleAmount = '';
       state.paymentDraft.selectedMethods = [];
       state.paymentDraft.flowMethodId = '';
       state.paymentDraft.showShortageDialog = false;
-      state.paymentDraft.modeSwitchWarning = false;
       state.paymentDraft.shortageHandling = null;
       state.paymentStatus = 'idle';
       renderActive();
@@ -5409,40 +5575,19 @@
     if (target.matches('[data-payment-mode]')) {
       var nextPaymentMode = target.dataset.paymentMode;
       if (nextPaymentMode === state.paymentDraft.mode) return;
-      if (nextPaymentMode === 'single' && selectedPaymentMethods(state.paymentDraft).length > 1) {
-        state.paymentDraft.modeSwitchWarning = true;
-        renderPaymentPreservingScroll(root);
-        return;
-      }
       if (nextPaymentMode === 'combo') {
-        if (state.paymentDraft.method) {
-          if (state.paymentDraft.selectedMethods.indexOf(state.paymentDraft.method) < 0) state.paymentDraft.selectedMethods.push(state.paymentDraft.method);
-          state.paymentDraft[state.paymentDraft.method] = state.paymentDraft.singleAmount;
-        }
+        state.paymentDraft.lastSingleMethod = state.paymentDraft.method || '';
+        state.paymentDraft.lastSingleAmount = state.paymentDraft.singleAmount || '';
+        state.paymentDraft.selectedMethods = paymentMethodsForKind(state.paymentDraft.kind).filter(function (method) {
+          return toCents(state.paymentDraft[method.id]) > 0;
+        }).map(function (method) { return method.id; });
       } else {
-        var activeSingleMethods = selectedPaymentMethods(state.paymentDraft);
-        var firstSingleMethod = activeSingleMethods[0];
-        state.paymentDraft.method = firstSingleMethod ? firstSingleMethod.id : '';
-        state.paymentDraft.singleAmount = firstSingleMethod ? String(state.paymentDraft[firstSingleMethod.id] || '') : '';
+        state.paymentDraft.method = state.paymentDraft.lastSingleMethod || '';
+        state.paymentDraft.singleAmount = state.paymentDraft.method ? String(state.paymentDraft.lastSingleAmount || '') : '';
+        state.paymentDraft.selectedMethods = state.paymentDraft.method ? [state.paymentDraft.method] : [];
       }
       state.paymentDraft.mode = nextPaymentMode;
-      state.paymentDraft.modeSwitchWarning = false;
       renderActive();
-      return;
-    }
-    if (target.matches('[data-confirm-single-mode]')) {
-      var modeMethods = selectedPaymentMethods(state.paymentDraft);
-      var keptMethod = modeMethods[0];
-      state.paymentDraft.mode = 'single';
-      state.paymentDraft.method = keptMethod ? keptMethod.id : '';
-      state.paymentDraft.singleAmount = keptMethod ? String(state.paymentDraft[keptMethod.id] || '') : '';
-      state.paymentDraft.modeSwitchWarning = false;
-      renderActive();
-      return;
-    }
-    if (target.matches('[data-cancel-single-mode]')) {
-      state.paymentDraft.modeSwitchWarning = false;
-      renderPaymentPreservingScroll(root);
       return;
     }
     if (target.matches('[data-toggle-payment-balance]')) {
@@ -5451,6 +5596,7 @@
       if (state.paymentDraft.method) {
         var nextTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
         state.paymentDraft.singleAmount = (nextTargetCents / 100).toFixed(2);
+        state.paymentDraft.lastSingleAmount = state.paymentDraft.singleAmount;
       }
       state.paymentDraft.shortageHandling = null;
       renderPaymentPreservingScroll(root);
@@ -5464,6 +5610,8 @@
       if (state.paymentDraft.mode === 'single') {
         state.paymentDraft.method = selectedMethodId;
         state.paymentDraft.singleAmount = (payableTargetCents / 100).toFixed(2);
+        state.paymentDraft.lastSingleMethod = selectedMethodId;
+        state.paymentDraft.lastSingleAmount = state.paymentDraft.singleAmount;
         state.paymentDraft.selectedMethods = [selectedMethodId];
       } else {
         var currentSelected = selectedPaymentMethods(state.paymentDraft);
@@ -5535,9 +5683,7 @@
     if (target.matches('[data-close-payment-overlay]')) {
       if (!state.paymentDraft) return;
       state.paymentDraft.showShortageDialog = false;
-      state.paymentDraft.flowMethodId = '';
-      state.paymentDraft.flowMethodIds = [];
-      state.paymentDraft.flowCompletedIds = [];
+      clearOnlinePaymentFlow(state.paymentDraft);
       state.paymentStatus = 'idle';
       renderActive();
       return;
@@ -5558,6 +5704,10 @@
       state.paymentStatus = 'processing';
       renderActive();
       setTimeout(function () { finishOrder(ctx); }, 500);
+      return;
+    }
+    if (target.matches('[data-simulate-qr-success]')) {
+      settleQrPayment(ctx, !event.altKey);
       return;
     }
     if (target.matches('[data-confirm-payment]')) {
@@ -5590,9 +5740,7 @@
       return;
     }
     if (target.matches('[data-cancel-online-payment]')) {
-      state.paymentDraft.flowMethodId = '';
-      state.paymentDraft.flowMethodIds = [];
-      state.paymentDraft.flowCompletedIds = [];
+      clearOnlinePaymentFlow(state.paymentDraft);
       state.paymentStatus = 'idle';
       renderActive();
       ctx.toast('已取消本次在线收款');
@@ -5923,6 +6071,8 @@
     }
     if (target.matches('[data-single-payment-amount]') && state.paymentDraft) {
       state.paymentDraft.singleAmount = target.value.replace(/[^\d.]/g, '');
+      state.paymentDraft.lastSingleMethod = state.paymentDraft.method || '';
+      state.paymentDraft.lastSingleAmount = state.paymentDraft.singleAmount;
       target.value = state.paymentDraft.singleAmount;
       if (event.type === 'change') renderPaymentPreservingScroll(root);
       return;
@@ -5935,8 +6085,20 @@
       var normalizedAmount = amountInteger + (amountRaw.indexOf('.') >= 0 ? '.' + amountDecimal : '');
       if (normalizedAmount.charAt(0) === '.') normalizedAmount = '0' + normalizedAmount;
       target.value = normalizedAmount;
-      if (state.paymentDraft.mode === 'single') state.paymentDraft.singleAmount = normalizedAmount;
-      else state.paymentDraft[target.dataset.paymentAmount] = normalizedAmount;
+      if (state.paymentDraft.mode === 'single') {
+        state.paymentDraft.singleAmount = normalizedAmount;
+        state.paymentDraft.lastSingleMethod = state.paymentDraft.method || '';
+        state.paymentDraft.lastSingleAmount = normalizedAmount;
+      }
+      else {
+        var comboAmountMethodId = target.dataset.paymentAmount;
+        state.paymentDraft[comboAmountMethodId] = normalizedAmount;
+        if (toCents(normalizedAmount) > 0) {
+          if (state.paymentDraft.selectedMethods.indexOf(comboAmountMethodId) < 0) state.paymentDraft.selectedMethods.push(comboAmountMethodId);
+        } else {
+          state.paymentDraft.selectedMethods = state.paymentDraft.selectedMethods.filter(function (id) { return id !== comboAmountMethodId; });
+        }
+      }
       state.paymentDraft.shortageHandling = null;
       refreshPaymentAmountsInPlace(root);
       return;
@@ -6137,6 +6299,25 @@
     });
     root.addEventListener('focusin', function (event) {
       var target = event.target;
+      if (target.matches('[data-payment-amount][data-online-combo-index]')) {
+        if (!state.paymentDraft || state.paymentDraft.mode !== 'combo' || state.paymentDraft.kind !== 'online') return;
+        var comboMethodId = target.dataset.paymentAmount;
+        if (Number(state.paymentDraft[comboMethodId] || 0) > 0) return;
+        var onlineComboFilled = selectedPaymentMethods(state.paymentDraft).filter(function (method) {
+          return method.id !== comboMethodId && Number(state.paymentDraft[method.id] || 0) > 0;
+        });
+        if (!onlineComboFilled.length) return;
+        var onlineComboTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
+        var onlineComboRemainingCents = Math.max(0, onlineComboTargetCents - paymentAllocatedCents(state.paymentDraft, comboMethodId));
+        if (onlineComboRemainingCents <= 0) return;
+        var onlineComboValue = compactAmount(onlineComboRemainingCents / 100);
+        state.paymentDraft[comboMethodId] = onlineComboValue;
+        if (state.paymentDraft.selectedMethods.indexOf(comboMethodId) < 0) state.paymentDraft.selectedMethods.push(comboMethodId);
+        state.paymentDraft.shortageHandling = null;
+        target.value = onlineComboValue;
+        refreshPaymentAmountsInPlace(root);
+        return;
+      }
       if (!target.matches('[data-split]')) return;
       if (!state.paymentDraft || state.paymentDraft.mode !== 'combo') return;
       var key = target.dataset.split;
