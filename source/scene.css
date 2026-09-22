@@ -7694,6 +7694,15 @@ button.order-payment-method-card {
     white-space: nowrap;
   }
 
+  .order-desktop-daily-total,
+  .order-desktop-clerk-divider {
+    display: none;
+  }
+
+  .order-desktop-clerk-summary:not(:has(.order-desktop-clerk)) {
+    display: none;
+  }
+
   .order-desktop-clerk-divider {
     width: var(--stroke-hairline);
     height: var(--spacer-14);
