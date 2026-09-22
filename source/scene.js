@@ -346,6 +346,12 @@
   var scannerFrameId = null;
   var scannerDetecting = false;
   var scannerLastValue = '';
+  var paymentScannerStream = null;
+  var paymentScannerDetector = null;
+  var paymentScannerFrameId = null;
+  var paymentScannerDetecting = false;
+  var paymentScannerLastValue = '';
+  var paymentScannerLastDetectedAt = 0;
   var clipboardRegionCloseTimer = 0;
   var clipboardRegionListTimer = 0;
   var scannerLastDetectedAt = 0;
@@ -2093,11 +2099,11 @@
       ? paymentAmountCents(draft, method.id) / 100
       : Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable)) / 100;
     if (method && method.id === 'scanpay') {
-      return '<div class="order-reference-payment__overlay"><section class="order-reference-payment__scan" role="dialog" aria-modal="true" aria-label="扫码客户付款码">'
-        + '<span>支付金额</span><strong>' + money(amount) + '</strong>'
-        + '<button type="button" class="order-reference-payment__scan-view" data-simulate-scan-success><i></i><span>点击画面模拟扫码成功 · 支持相机 / 扫码枪 / 扫码盒</span></button>'
-        + '<div class="order-reference-payment__scan-devices"><span><i class="wego-iconfont-s icon-xiangji" aria-hidden="true"></i>相机</span><span><i class="wego-iconfont-s icon-shoukuan-mian" aria-hidden="true"></i>扫码枪</span><span><i class="wego-iconfont-s icon-shoukuanma" aria-hidden="true"></i>扫码盒</span></div>'
-        + '<button type="button" class="order-reference-payment__flow-back" data-close-payment-overlay>返回</button>'
+      return '<div class="dialog dialog--text order-reference-payment__scan-dialog" role="dialog" aria-modal="true" aria-labelledby="order-payment-scan-title" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_1" data-variant-cn="按钮数量=1">'
+        + '<section class="dialog__card order-reference-payment__scan">'
+        + '<div class="dialog__body"><div class="dialog__header"><h2 class="dialog__title" id="order-payment-scan-title">扫码客户付款码</h2></div>'
+        + '<div class="dialog__custom"><div class="order-reference-payment__scan-view" aria-label="付款码扫描区域"><video muted playsinline autoplay data-payment-scan-video></video><i aria-hidden="true"></i></div></div></div>'
+        + '<div class="dialog__actions"><div class="dialog__buttons"><button type="button" class="dialog__btn dialog__btn--dismiss" data-close-payment-overlay>取消</button></div></div>'
         + '</section></div>';
     }
     var qrAvatar = state.customer && state.customer.avatar
@@ -4076,6 +4082,7 @@
     if (draft.kind === 'online' && targetCents > 0) {
       startOnlinePayment();
       renderActive();
+      if (draft.flowMethodId === 'scanpay') openPaymentScanner(ctx);
       return;
     }
     state.paymentStatus = 'processing';
@@ -4095,10 +4102,11 @@
     state.paymentStatus = method && method.id === 'scanpay' ? 'scanning' : 'awaiting-qr';
   }
 
-  function retryOnlinePayment() {
+  function retryOnlinePayment(ctx) {
     var method = paymentMethodById(state.paymentDraft && state.paymentDraft.flowMethodId);
     state.paymentStatus = method && method.id === 'scanpay' ? 'scanning' : 'awaiting-qr';
     renderActive();
+    if (method && method.id === 'scanpay') openPaymentScanner(ctx);
   }
 
   function advanceOnlinePayment(ctx) {
@@ -4111,6 +4119,7 @@
       var method = paymentMethodById(nextId);
       state.paymentStatus = method && method.id === 'scanpay' ? 'scanning' : 'awaiting-qr';
       renderActive();
+      if (method && method.id === 'scanpay') openPaymentScanner(ctx);
       ctx.toast('第一笔已收款，请继续下一笔');
       return;
     }
@@ -4119,6 +4128,7 @@
   }
 
   function clearOnlinePaymentFlow(draft) {
+    stopPaymentScanner();
     if (!draft) return;
     draft.flowMethodId = '';
     draft.flowMethodIds = [];
@@ -4141,6 +4151,112 @@
       renderActive();
       ctx.toast('收款失败，请再次收款');
     }, 600);
+  }
+
+  function stopPaymentScanner() {
+    if (paymentScannerFrameId != null) window.cancelAnimationFrame(paymentScannerFrameId);
+    paymentScannerFrameId = null;
+    paymentScannerDetecting = false;
+    paymentScannerDetector = null;
+    if (paymentScannerStream) {
+      paymentScannerStream.getTracks().forEach(function (track) { track.stop(); });
+      paymentScannerStream = null;
+    }
+  }
+
+  function isPaymentCode(value) {
+    var normalized = String(value || '').trim();
+    if (/^\d{16,24}$/.test(normalized)) return true;
+    return /^(wxp:\/\/|weixin:\/\/|alipay(?:s)?:\/\/|https?:\/\/(?:qr\.alipay\.com|payapp\.weixin\.qq\.com|wx\.tenpay\.com)\/)/i.test(normalized);
+  }
+
+  function settleScanPayment(ctx) {
+    var draft = state.paymentDraft;
+    if (!draft || draft.flowMethodId !== 'scanpay' || state.paymentStatus !== 'scanning') return;
+    stopPaymentScanner();
+    state.paymentStatus = 'processing';
+    renderActive();
+    window.setTimeout(function () {
+      if (state.paymentDraft !== draft || draft.flowMethodId !== 'scanpay' || state.paymentStatus !== 'processing') return;
+      advanceOnlinePayment(ctx);
+    }, 600);
+  }
+
+  function handleDetectedPaymentCode(value, ctx) {
+    var rawValue = String(value || '').trim();
+    if (!rawValue) return;
+    if (isPaymentCode(rawValue)) {
+      settleScanPayment(ctx);
+      return;
+    }
+    var now = Date.now();
+    if (rawValue === paymentScannerLastValue && now - paymentScannerLastDetectedAt < 2500) return;
+    paymentScannerLastValue = rawValue;
+    paymentScannerLastDetectedAt = now;
+    ctx.toast('请扫码付款码');
+  }
+
+  function scanPaymentCodeFrame(ctx) {
+    var draft = state.paymentDraft;
+    if (!draft || draft.flowMethodId !== 'scanpay' || state.paymentStatus !== 'scanning' || !paymentScannerStream || !paymentScannerDetector || !activeContext || !activeContext.root || !activeContext.root.isConnected) {
+      if (!draft || draft.flowMethodId !== 'scanpay' || state.paymentStatus !== 'scanning' || !activeContext || !activeContext.root || !activeContext.root.isConnected) stopPaymentScanner();
+      return;
+    }
+    var video = activeContext.root.querySelector('[data-payment-scan-video]');
+    if (!video || video.readyState < 2 || paymentScannerDetecting) {
+      paymentScannerFrameId = window.requestAnimationFrame(function () { scanPaymentCodeFrame(ctx); });
+      return;
+    }
+    paymentScannerDetecting = true;
+    paymentScannerDetector.detect(video).then(function (barcodes) {
+      if (barcodes && barcodes.length) handleDetectedPaymentCode(barcodes[0].rawValue, ctx);
+    }).catch(function () {
+      /* A missed frame is expected while the camera keeps scanning. */
+    }).finally(function () {
+      paymentScannerDetecting = false;
+      if (state.paymentDraft === draft && draft.flowMethodId === 'scanpay' && state.paymentStatus === 'scanning') {
+        paymentScannerFrameId = window.requestAnimationFrame(function () { scanPaymentCodeFrame(ctx); });
+      }
+    });
+  }
+
+  async function openPaymentScanner(ctx) {
+    if (paymentScannerStream || !state.paymentDraft || state.paymentDraft.flowMethodId !== 'scanpay' || state.paymentStatus !== 'scanning') return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.BarcodeDetector) {
+      ctx.toast('无法使用摄像头，请检查设备支持');
+      return;
+    }
+    try {
+      var formats = typeof window.BarcodeDetector.getSupportedFormats === 'function'
+        ? await window.BarcodeDetector.getSupportedFormats()
+        : [];
+      var wantedFormats = ['code_128', 'qr_code', 'aztec', 'data_matrix', 'pdf417'];
+      var supportedFormats = wantedFormats.filter(function (format) { return formats.indexOf(format) >= 0; });
+      paymentScannerDetector = supportedFormats.length
+        ? new window.BarcodeDetector({ formats: supportedFormats })
+        : new window.BarcodeDetector();
+      paymentScannerStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: 'environment' } }
+      });
+      if (!state.paymentDraft || state.paymentDraft.flowMethodId !== 'scanpay' || state.paymentStatus !== 'scanning') {
+        stopPaymentScanner();
+        return;
+      }
+      var video = activeContext && activeContext.root && activeContext.root.querySelector('[data-payment-scan-video]');
+      if (!video) {
+        stopPaymentScanner();
+        return;
+      }
+      video.srcObject = paymentScannerStream;
+      await video.play();
+      paymentScannerLastValue = '';
+      paymentScannerLastDetectedAt = 0;
+      scanPaymentCodeFrame(ctx);
+    } catch (error) {
+      stopPaymentScanner();
+      ctx.toast('无法使用摄像头，请检查权限');
+    }
   }
 
   function applyPaymentLedger(draft) {
@@ -5708,12 +5824,6 @@
       setTimeout(function () { finishOrder(ctx); }, 350);
       return;
     }
-    if (target.matches('[data-simulate-scan-success]')) {
-      state.paymentStatus = 'processing';
-      renderActive();
-      setTimeout(function () { finishOrder(ctx); }, 500);
-      return;
-    }
     if (target.matches('[data-simulate-qr-success]')) {
       settleQrPayment(ctx, !event.altKey);
       return;
@@ -5744,7 +5854,7 @@
       return;
     }
     if (target.matches('[data-retry-online-payment]')) {
-      retryOnlinePayment();
+      retryOnlinePayment(ctx);
       return;
     }
     if (target.matches('[data-cancel-online-payment]')) {
