@@ -749,8 +749,7 @@
     var confirm = root.querySelector('[data-confirm-payment]');
     if (confirm) {
       var confirmState = paymentConfirmState(draft, payable);
-      var confirmDetail = paymentConfirmDetail(draft, payable);
-      confirm.innerHTML = '<span>' + confirmState.label + '</span>' + (confirmDetail ? '<small>(' + confirmDetail + ')</small>' : '');
+      confirm.innerHTML = paymentConfirmContent(draft, payable, confirmState);
       confirm.disabled = !confirmState.enabled;
       confirm.classList.toggle('btn--disabled', !confirmState.enabled);
     }
@@ -1939,7 +1938,6 @@
     var overlay = '';
     if (draft.showShortageDialog) overlay = paymentShortageDialog(draft, t.payable);
     else if (draft.flowMethodId && state.paymentStatus !== 'idle') overlay = paymentReferenceFlow(draft, t.payable);
-    var confirmDetail = paymentConfirmDetail(draft, t.payable);
     return ''
       + '<div class="order-reference-payment">'
       +   '<section class="order-reference-payment__hero" aria-label="订单金额">'
@@ -1957,7 +1955,7 @@
       +       paymentCheckoutOption(draft.autoPrintReceipt, 'auto-print-receipt', '打印小票', 'MJJS-2BIUI')
       +       paymentCheckoutOption(draft.autoDispatch, 'auto-dispatch', '快递打单发货', '申通快递')
       +     '</div>'
-      +     '<button type="button" class="btn btn--strong btn--lg order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '><span>' + confirmState.label + '</span>' + (confirmDetail ? '<small>(' + confirmDetail + ')</small>' : '') + '</button>'
+      +     '<button type="button" class="btn btn--strong btn--lg order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '>' + paymentConfirmContent(draft, t.payable, confirmState) + '</button>'
       +   '</footer>'
       +   overlay
       + '</div>';
@@ -1979,7 +1977,7 @@
   }
 
   function paymentSmallCheckbox(checked) {
-    return '<span class="checkbox checkbox--sm ' + (checked ? 'checkbox--checked' : '') + '" data-component-slug="checkbox" data-variant-name="Checkbox_Small"><span class="checkbox__inner"></span>' + (checked ? '<span class="checkbox__icon"><img class="checkbox__asset" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>' : '') + '</span>';
+    return '<div class="checkbox checkbox--sm' + (checked ? ' checkbox--checked' : '') + '" data-component="checkbox" data-component-slug="checkbox" data-variant-name="Checkbox_Small"><div class="checkbox__inner"></div>' + (checked ? '<div class="checkbox__icon"><img class="checkbox__asset" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></div>' : '') + '</div>';
   }
 
   function paymentReferenceBalance(draft, payable) {
@@ -2080,6 +2078,13 @@
     var allocated = paymentAllocatedCents(draft) / 100;
     if (allocated > 0) parts.push((draft.kind === 'online' ? '在线收款' : '私下收款') + money(allocated));
     return parts.join(' + ');
+  }
+
+  function paymentConfirmContent(draft, payable, confirmState) {
+    var stateValue = confirmState || paymentConfirmState(draft, payable);
+    var detail = stateValue.detail || paymentConfirmDetail(draft, payable);
+    if (!detail) return '<span>' + stateValue.label + '</span>';
+    return '<span>' + stateValue.label + '</span><small>' + (stateValue.plainDetail ? detail : '(' + detail + ')') + '</small>';
   }
 
   function paymentReferenceFlow(draft, payable) {
@@ -2221,6 +2226,9 @@
     if (draft.kind === 'debt') return { enabled: Boolean(state.customer), label: '确认开单' };
     if (isSingleQrCodePayment(draft)) {
       return { enabled: true, label: '确认并显示收款码' };
+    }
+    if (draft.kind === 'online' && draft.mode === 'single' && draft.method === 'scanpay') {
+      return { enabled: true, label: '打开扫一扫', detail: '扫码枪和扫码盒子可以直接扫', plainDetail: true };
     }
     var targetCents = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable));
     var selected = selectedPaymentMethods(draft);
