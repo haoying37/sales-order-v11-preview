@@ -8457,6 +8457,10 @@ button.order-payment-method-card {
     width: 100%;
   }
 
+  .order-catalog-filter-anchor--search > .btn.is-filtered {
+    color: var(--icon-brand);
+  }
+
   .order-barcode-scanner,
   .order-barcode-scanner__video {
     width: 100%;
@@ -9393,6 +9397,10 @@ button.order-payment-method-card {
       transform: translateX(0);
     }
   }
+}
+
+.order-desktop__catalog--filter.order-catalog-filter--static {
+  animation: none !important;
 }
 
 

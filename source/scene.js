@@ -303,11 +303,10 @@
     catalogResizePointerId: null,
     catalogViewMode: storedCatalogViewMode(),
     catalogCategory: '全部',
-    catalogScopeType: 'all',
-    catalogScopeValue: '',
+    catalogFilters: { addedTime: '', source: '', tag: '' },
     catalogFilterPanelOpen: false,
-    catalogFilterDraftType: 'all',
-    catalogFilterDraftValue: '',
+    catalogFilterDraft: { addedTime: '', source: '', tag: '' },
+    catalogFilterMotion: false,
     discount: 100,
     discountMode: null,
     discountValue: 0,
@@ -1347,7 +1346,7 @@
     var editable = arguments.length > 2 ? Boolean(arguments[2]) : false;
     var keyword = manualDesktop ? '' : state.catalogKeyword.trim();
     var rows = (sourceRows || activeCatalogProducts()).filter(function (item) {
-      var scopeMatched = manualDesktop || state.catalogScopeType === 'all' || item[state.catalogScopeType] === state.catalogScopeValue;
+      var scopeMatched = manualDesktop || catalogProductMatchesFilters(item, state.catalogFilters);
       var keywordMatched = !keyword || item.name.indexOf(keyword) >= 0 || item.code.toLowerCase().indexOf(keyword.toLowerCase()) >= 0;
       return scopeMatched && keywordMatched;
     });
@@ -1395,7 +1394,7 @@
     var normalized = String(keyword || '').trim().toLowerCase();
     if (!normalized) return [];
     return activeCatalogProducts().filter(function (item) {
-      var scopeMatched = state.catalogScopeType === 'all' || item[state.catalogScopeType] === state.catalogScopeValue;
+      var scopeMatched = catalogProductMatchesFilters(item, state.catalogFilters);
       var keywordMatched = item.name.toLowerCase().indexOf(normalized) >= 0 || item.code.toLowerCase().indexOf(normalized) >= 0;
       return scopeMatched && keywordMatched;
     });
@@ -1466,8 +1465,10 @@
     var listSearchResultClass = inCatalog && state.catalogViewMode === 'list' && state.desktopCatalogSearchActive && state.desktopProductKeyword.trim()
       ? ' order-desktop-product-search--list-results'
       : '';
-    var sidebarFilterButton = '<div class="order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-open-catalog-filter aria-label="筛选" title="筛选" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
-    var collapsedFilterButton = '<div class="order-desktop-search-filter order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-open-catalog-filter aria-label="筛选" title="筛选" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
+    var filterActiveClass = hasActiveCatalogFilters(state.catalogFilters) ? ' is-filtered' : '';
+    var filterAriaLabel = hasActiveCatalogFilters(state.catalogFilters) ? '筛选（已应用）' : '筛选';
+    var sidebarFilterButton = '<div class="order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only' + filterActiveClass + '" data-component-slug="button" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
+    var collapsedFilterButton = '<div class="order-desktop-search-filter order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only' + filterActiveClass + '" data-component-slug="button" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
     return ''
       + '<div class="order-desktop-product-search ' + (inCatalog ? 'order-desktop-product-search--catalog' : 'order-desktop-product-search--collapsed') + listSearchResultClass + '">'
       +   '<div class="order-desktop-product-search__row">'
@@ -1506,11 +1507,62 @@
       + '</aside>';
   }
 
+  function emptyCatalogFilters() {
+    return { addedTime: '', source: '', tag: '' };
+  }
+
+  function cloneCatalogFilters(filters) {
+    filters = filters || emptyCatalogFilters();
+    return {
+      addedTime: filters.addedTime || '',
+      source: filters.source || '',
+      tag: filters.tag || ''
+    };
+  }
+
+  function hasActiveCatalogFilters(filters) {
+    filters = filters || emptyCatalogFilters();
+    return Boolean(filters.addedTime || filters.source || filters.tag);
+  }
+
+  function catalogProductAddedDaysAgo(item) {
+    if (Number.isFinite(Number(item.addedDaysAgo))) return Math.max(0, Number(item.addedDaysAgo));
+    var index = activeCatalogProducts().indexOf(item);
+    var demoAddedDaysAgo = [0, 2, 4, 8, 12, 20, 32, 45, 60, 5, 15, 90];
+    return demoAddedDaysAgo[index] != null ? demoAddedDaysAgo[index] : 0;
+  }
+
+  function catalogProductMatchesFilters(item, filters) {
+    filters = filters || emptyCatalogFilters();
+    var daysAgo = catalogProductAddedDaysAgo(item);
+    var timeMatched = !filters.addedTime
+      || (filters.addedTime === 'today' && daysAgo === 0)
+      || (filters.addedTime === '7d' && daysAgo <= 7)
+      || (filters.addedTime === '30d' && daysAgo <= 30);
+    var sourceMatched = !filters.source || item.source === filters.source;
+    var tagMatched = !filters.tag || (item.tags || []).indexOf(filters.tag) >= 0;
+    return timeMatched && sourceMatched && tagMatched;
+  }
+
+  function catalogFilterTagOptions() {
+    return activeCatalogProducts().reduce(function (options, item) {
+      (item.tags || []).forEach(function (tag) {
+        if (options.indexOf(tag) < 0) options.push(tag);
+      });
+      return options;
+    }, []);
+  }
+
   function catalogFilterGroups() {
     return [
-      { title: '商品范围', options: [{ type: 'all', value: '', label: '全部商品' }] },
-      { title: '商品分类', options: ['上衣', '裤装', '裙装'].map(function (value) { return { type: 'category', value: value, label: value }; }) },
-      { title: '商品来源', options: ['微购相册', '采购入库', '手动创建'].map(function (value) { return { type: 'source', value: value, label: value }; }) }
+      { title: '添加时间', key: 'addedTime', options: [
+        { value: '', label: '全部时间' },
+        { value: 'today', label: '今天' },
+        { value: '7d', label: '近7天' },
+        { value: '30d', label: '近30天' }
+      ] },
+      { title: '来源', key: 'source', options: [{ value: '', label: '全部来源' }].concat(['微购相册', '采购入库', '手动创建'].map(function (value) { return { value: value, label: value }; })) },
+      { title: '标签', key: 'tag', options: [{ value: '', label: '全部标签' }].concat(catalogFilterTagOptions().map(function (value) { return { value: value, label: value }; })) }
     ];
   }
 
@@ -1519,18 +1571,19 @@
     var drawerStyle = inDrawer && !isTabletPortrait()
       ? ' style="width:' + Math.max(320, Math.min(560, state.catalogWidth != null ? state.catalogWidth : 379)) + 'px"'
       : '';
+    var motionClass = state.catalogFilterMotion ? '' : ' order-catalog-filter--static';
     var groups = catalogFilterGroups().map(function (group) {
       return ''
         + '<section class="order-catalog-business-filter__section">'
         +   '<h3>' + group.title + '</h3>'
         +   '<div class="order-catalog-business-filter__options">' + group.options.map(function (option) {
-          var active = state.catalogFilterDraftType === option.type && state.catalogFilterDraftValue === option.value;
-          return '<button type="button" class="tag tag--28 ' + (active ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-variant-name="' + (active ? 'Tag_28_Gray_Selected' : 'Tag_28_Gray_Normal') + '" data-catalog-filter-option data-filter-type="3" data-filter-option-type="' + option.type + '" data-filter-option-value="' + escapeHtml(option.value) + '" aria-pressed="' + active + '"><span class="tag__label">' + option.label + '</span></button>';
+          var active = state.catalogFilterDraft[group.key] === option.value;
+          return '<button type="button" class="tag tag--28 ' + (active ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-variant-name="' + (active ? 'Tag_28_Gray_Selected' : 'Tag_28_Gray_Normal') + '" data-catalog-filter-option data-filter-type="3" data-filter-group="' + group.key + '" data-filter-option-value="' + escapeHtml(option.value) + '" aria-pressed="' + active + '"><span class="tag__label">' + option.label + '</span></button>';
         }).join('') + '</div>'
         + '</section>';
     }).join('');
     return ''
-      + '<aside class="order-desktop__catalog order-desktop__catalog--filter' + drawerClass + '"' + (inDrawer ? ' role="dialog" aria-modal="true"' : ' role="region"') + drawerStyle + ' aria-label="筛选商品" data-business-component="FilterPage" data-business-view="ActionSidebar" data-filter-view-model="FilterViewModel">'
+      + '<aside class="order-desktop__catalog order-desktop__catalog--filter' + drawerClass + motionClass + '"' + (inDrawer ? ' role="dialog" aria-modal="true"' : ' role="region"') + drawerStyle + ' aria-label="筛选商品" data-business-component="FilterPage" data-business-view="ActionSidebar" data-filter-view-model="FilterViewModel">'
       +   '<div class="order-catalog-business-filter">'
       +     '<header class="order-catalog-business-filter__header"><h2>筛选</h2><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-catalog-filter aria-label="关闭筛选"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
       +     '<div class="order-catalog-business-filter__body">' + groups + '</div>'
@@ -1544,8 +1597,8 @@
 
   function openCatalogFilter() {
     if (state.scannerOpen) closeBarcodeScanner(false);
-    state.catalogFilterDraftType = state.catalogScopeType;
-    state.catalogFilterDraftValue = state.catalogScopeValue;
+    state.catalogFilterDraft = cloneCatalogFilters(state.catalogFilters);
+    state.catalogFilterMotion = true;
     state.catalogFilterPanelOpen = true;
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = false;
     renderActive();
@@ -1558,6 +1611,7 @@
   function closeCatalogFilter(restoreFocus) {
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
     state.catalogFilterPanelOpen = false;
+    state.catalogFilterMotion = false;
     renderActive();
     if (restoreFocus !== false) {
       window.requestAnimationFrame(function () {
@@ -1606,13 +1660,15 @@
   }
 
   function desktopCatalogBody() {
-    var historyProducts = merchantRecentProducts();
+    var historyProducts = merchantRecentProducts().filter(function (item) {
+      return catalogProductMatchesFilters(item, state.catalogFilters);
+    });
     var searchMatches = desktopProductMatches(state.desktopProductKeyword);
     var showingSearchResults = state.desktopCatalogSearchActive && Boolean(state.desktopProductKeyword.trim());
     var allProducts = (showingSearchResults ? searchMatches : activeCatalogProducts()).filter(function (item) {
       if (showingSearchResults) return true;
       var categoryMatched = state.catalogCategory === '全部' || item.category === state.catalogCategory || (item.tags || []).indexOf(state.catalogCategory) >= 0;
-      var scopeMatched = state.catalogScopeType === 'all' || item[state.catalogScopeType] === state.catalogScopeValue;
+      var scopeMatched = catalogProductMatchesFilters(item, state.catalogFilters);
       return categoryMatched && scopeMatched;
     });
     return ''
@@ -4533,8 +4589,8 @@
         state.selectedRow = null;
         state.catalogViewMode = nextIndustry === 'phone' ? 'list' : 'grid';
         state.catalogCategory = '全部';
-        state.catalogScopeType = 'all';
-        state.catalogScopeValue = '';
+        state.catalogFilters = emptyCatalogFilters();
+        state.catalogFilterDraft = emptyCatalogFilters();
         state.panel = null;
         state.saveStatus = '已切换行业，开单清单已清空';
       }
@@ -4640,20 +4696,22 @@
       return;
     }
     if (target.matches('[data-catalog-filter-option]')) {
-      state.catalogFilterDraftType = target.dataset.filterOptionType || 'all';
-      state.catalogFilterDraftValue = target.dataset.filterOptionValue || '';
+      var filterGroup = target.dataset.filterGroup;
+      if (filterGroup && Object.prototype.hasOwnProperty.call(state.catalogFilterDraft, filterGroup)) {
+        state.catalogFilterDraft[filterGroup] = target.dataset.filterOptionValue || '';
+      }
+      state.catalogFilterMotion = false;
       renderActive();
       return;
     }
     if (target.matches('[data-reset-catalog-filter]')) {
-      state.catalogFilterDraftType = 'all';
-      state.catalogFilterDraftValue = '';
+      state.catalogFilterDraft = emptyCatalogFilters();
+      state.catalogFilterMotion = false;
       renderActive();
       return;
     }
     if (target.matches('[data-confirm-catalog-filter]')) {
-      state.catalogScopeType = state.catalogFilterDraftType;
-      state.catalogScopeValue = state.catalogFilterDraftValue;
+      state.catalogFilters = cloneCatalogFilters(state.catalogFilterDraft);
       resetDesktopProductSearch();
       closeCatalogFilter(true);
       return;
@@ -5301,8 +5359,8 @@
       } else {
         PRODUCTS.unshift(newProduct);
         state.catalogCategory = '全部';
-        state.catalogScopeType = 'all';
-        state.catalogScopeValue = '';
+        state.catalogFilters = emptyCatalogFilters();
+        state.catalogFilterDraft = emptyCatalogFilters();
         state.catalogFilterPanelOpen = false;
       }
       state.productCreateDraft = null;
