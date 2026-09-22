@@ -40,6 +40,40 @@
     { id: 'm6', code: 'VIVO-X200-GB-12-256', name: 'vivo X200 冰川蓝 12GB+256GB', category: 'vivo', tags: ['vivo'], source: '采购入库', listPrice: 6599, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-fold.png', specs: ['标准规格'] }
   ];
 
+  var DRAFT_DEMOS = [
+    {
+      id: 'draft-multi',
+      customer: { name: '玛尼轰', avatar: './scenes/bcg/开单/assets/customer-picker/customer-mani.png' },
+      time: '18:12',
+      commodityNum: '共3件',
+      products: [
+        { name: '韩版休闲T恤', image: './lib/assets/image/clothing/clothing_2/clothing_2_1.jpg.jpg' },
+        { name: '高腰牛仔短裤', image: './lib/assets/image/clothing/clothing_4/1663741015641_38566.jpg' },
+        { name: '碎花连衣裙', image: './lib/assets/image/clothing/clothing_5/1663741067252_48951.jpg' }
+      ],
+      receiver: '玛尼大吉 13800138001 广东省深圳市南山区科技园18号',
+      sellerRemark: '送货前请先电话联系'
+    },
+    {
+      id: 'draft-single',
+      customer: { name: 'HZP-广州', initial: 'H' },
+      time: '17:46',
+      commodityNum: '共2件',
+      products: [
+        { name: '高腰牛仔短裤', code: 'JK-1082', image: './lib/assets/image/clothing/clothing_4/1663741015641_38566.jpg' }
+      ],
+      buyerRemark: '[图片]需要深蓝色款'
+    },
+    {
+      id: 'draft-empty',
+      customer: null,
+      time: '16:08',
+      commodityNum: '共0件',
+      products: [],
+      receiver: '陈女士 13600136002 广东省广州市越秀区站西路57号'
+    }
+  ];
+
   var MERCHANT_RECENT_PRODUCT_IDS = ['p3', 'p1', 'p2', 'p4'];
 
   var CATALOG_CATEGORIES = ['全部', '上衣', '裤装', '裙装', 'T恤', '牛仔', '针织', '连衣裙'];
@@ -292,6 +326,9 @@
     quickOp: null,
     saveStatus: '已自动保存 18:26',
     draftAvailable: true,
+    draftPanelMotion: '',
+    draftPanelCloseTimer: null,
+    draftDeleteConfirmId: '',
     panel: null,
     panelPayload: null,
     customerPopoverClosing: false,
@@ -2464,12 +2501,81 @@
         }).join('');
   }
 
-  function draftsPanel() {
+  function mobileDraftsPanel() {
     return ''
       + '<div class="order-side-panel__head"><strong>草稿箱</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>'
       + (state.draftAvailable
         ? '<div class="cell-group" data-component-slug="cell"><div class="cell-group__content"><button type="button" class="cell cell--double cell--bg-white cell--clickable" data-component-slug="cell" data-restore-draft><div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">李四批发部</span></div><div class="cell__subtitle">2款3件 · 18:12 保存</div></div><div class="cell__action"><span class="cell__action-text">恢复</span><i class="cell__arrow wego-iconfont-s icon-youjiantou16"></i></div></div></button></div></div>'
         : '<div class="order-panel-note">暂无未完成草稿</div>');
+  }
+
+  function draftAvatar(draft) {
+    var customer = draft.customer;
+    if (customer && customer.avatar) {
+      return '<span class="avatar avatar--24 avatar--image" data-component="avatar" data-variant-name="Avatar_24_Default"><img src="' + customer.avatar + '" alt=""></span>';
+    }
+    if (customer && customer.name) {
+      return '<span class="avatar avatar--24 avatar--initial" data-component="avatar" data-variant-name="Avatar_24_Initial" aria-label="' + escapeHtml(customer.name) + '文字头像">' + escapeHtml(customer.initial || customer.name.slice(0, 1)) + '</span>';
+    }
+    return '<span class="avatar avatar--24 avatar--default" data-component="avatar" data-variant-name="Avatar_24_Default"><img src="./lib/assets/image/avatar-defult.png" alt="默认头像"></span>';
+  }
+
+  function draftProductImage(product) {
+    return '<span class="wg-image wg-image--rounded-md order-draft-card__image" data-component="image"><img class="wg-image__src is-loaded" src="' + product.image + '" alt="' + escapeHtml(product.name || '草稿商品') + '"></span>';
+  }
+
+  function draftProducts(draft) {
+    if (!draft.products.length) return '';
+    if (draft.products.length > 1) {
+      return ''
+        + '<div class="order-draft-card__products order-draft-card__products--multiple">'
+        +   '<div class="order-draft-card__product-strip">' + draft.products.map(draftProductImage).join('') + '</div>'
+        +   '<span class="order-draft-card__count">' + escapeHtml(draft.commodityNum) + '</span>'
+        + '</div>';
+    }
+    var product = draft.products[0];
+    return ''
+      + '<div class="order-draft-card__products order-draft-card__products--single">'
+      +   draftProductImage(product)
+      +   '<div class="order-draft-card__product-info"><strong class="' + (product.code ? 'is-single-line' : '') + '">' + (product.name ? escapeHtml(product.name) : '<span>无标题</span>') + '</strong>' + (product.code ? '<small>货号：' + escapeHtml(product.code) + '</small>' : '') + '</div>'
+      +   '<span class="order-draft-card__count">' + escapeHtml(draft.commodityNum) + '</span>'
+      + '</div>';
+  }
+
+  function draftRemarks(draft) {
+    var rows = [];
+    if (draft.receiver) rows.push('收货信息：' + draft.receiver);
+    if (draft.sellerRemark) rows.push('商家备注：' + draft.sellerRemark);
+    if (draft.buyerRemark) rows.push('客户备注：' + draft.buyerRemark);
+    if (!rows.length) return '';
+    return '<div class="order-draft-card__remarks">' + rows.map(function (row) { return '<span title="' + escapeHtml(row) + '">' + escapeHtml(row) + '</span>'; }).join('') + '</div>';
+  }
+
+  function draftCard(draft) {
+    return ''
+      + '<article class="card card--surface card--vertical order-draft-card" data-component="card">'
+      +   '<div class="card__content order-draft-card__content">'
+      +     '<header class="order-draft-card__customer">' + draftAvatar(draft) + '<strong>' + escapeHtml(draft.customer ? draft.customer.name : '未选择客户') + '</strong><time>' + escapeHtml(draft.time) + '</time></header>'
+      +     draftProducts(draft)
+      +     draftRemarks(draft)
+      +   '</div>'
+      +   '<footer class="card__footer order-draft-card__actions">'
+      +     '<button type="button" class="order-draft-card__delete" data-delete-draft-demo="' + draft.id + '" aria-label="删除草稿"><i class="wego-iconfont-s icon-shanchu" aria-hidden="true"></i></button>'
+      +     '<button type="button" class="button btn btn--medium btn--sm" data-component="button" data-variant-name="Button_32_GrayGreen_Normal" data-continue-draft-demo="' + draft.id + '">继续开单</button>'
+      +   '</footer>'
+      + '</article>';
+  }
+
+  function desktopDraftsPanel() {
+    return ''
+      + '<div class="order-draft-panel">'
+      +   '<div class="order-draft-panel__head"><strong>草稿箱</strong><button type="button" class="link link--14" data-component="link" data-variant-name="Link_14" data-close-panel>关闭</button></div>'
+      +   '<div class="layout-scroll order-draft-panel__list" data-component="layout-scroll">' + DRAFT_DEMOS.map(draftCard).join('') + '</div>'
+      + '</div>';
+  }
+
+  function draftsPanel() {
+    return isDesktopWorkbench() ? desktopDraftsPanel() : mobileDraftsPanel();
   }
 
   function catalogPanel() {
@@ -3176,7 +3282,10 @@
 
   function desktopRightPanel() {
     if (desktopShowsCatalog()) return desktopCatalog();
-    return '<aside class="order-desktop__side">' + sidePanelContent() + '</aside>';
+    var draftPanelClass = state.panel === 'drafts'
+      ? ' order-desktop__side--drafts' + (state.draftPanelMotion ? ' is-' + state.draftPanelMotion : '')
+      : '';
+    return '<aside class="order-desktop__side' + draftPanelClass + '">' + sidePanelContent() + '</aside>';
   }
 
   function desktopShowsCatalog() {
@@ -3425,6 +3534,21 @@
       + '</div>';
   }
 
+  function draftDeleteConfirm() {
+    if (!state.draftDeleteConfirmId) return '';
+    return ''
+      + '<div class="dialog dialog--text order-draft-delete-dialog" role="dialog" aria-modal="true" aria-labelledby="order-draft-delete-title" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_2" data-variant-cn="按钮数量=2">'
+      +   '<div class="dialog__card">'
+      +     '<div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="order-draft-delete-title">确认删除该草稿吗？</h3></div></div>'
+      +     '<div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual">'
+      +       '<button type="button" class="dialog__btn dialog__btn--dismiss" data-cancel-draft-delete>取消</button>'
+      +       '<span class="dialog__divider" aria-hidden="true"></span>'
+      +       '<button type="button" class="dialog__btn dialog__btn--danger" data-confirm-draft-delete>删除</button>'
+      +     '</div></div>'
+      +   '</div>'
+      + '</div>';
+  }
+
   function mobileModal() {
     if (!state.panel) return '';
     if (state.panel === 'clipboard-address') return '';
@@ -3478,7 +3602,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
@@ -4554,6 +4678,15 @@
           if (search) search.focus();
         }
       } else {
+        if (type === 'drafts' && isDesktopWorkbench()) {
+          window.clearTimeout(state.draftPanelCloseTimer);
+          state.draftPanelMotion = 'entering';
+          state.draftPanelCloseTimer = window.setTimeout(function () {
+            state.draftPanelMotion = '';
+            var draftSide = root.querySelector('.order-desktop__side--drafts');
+            if (draftSide) draftSide.classList.remove('is-entering');
+          }, 220);
+        }
         if (type === 'quick') state.quickOp = target.dataset.quickOp || 'member';
         if (type === 'delivery') {
           state.deliveryDraft = deliveryDraftFromState();
@@ -4834,6 +4967,23 @@
       ctx.toast('已清除');
       return;
     }
+    if (target.matches('[data-delete-draft-demo]')) {
+      state.draftDeleteConfirmId = target.dataset.deleteDraftDemo;
+      renderActive();
+      window.requestAnimationFrame(function () {
+        var cancelDraftDelete = activeContext.root.querySelector('[data-cancel-draft-delete]');
+        if (cancelDraftDelete) cancelDraftDelete.focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (target.matches('[data-cancel-draft-delete], [data-confirm-draft-delete]')) {
+      state.draftDeleteConfirmId = '';
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-continue-draft-demo]')) {
+      return;
+    }
     if (target.matches('[data-close-panel]')) {
       if ((state.panel === 'checkout' || state.panel === 'payment') && state.paymentStatus === 'processing') {
         ctx.toast('正在确认收款结果，请稍候');
@@ -4841,6 +4991,18 @@
       }
       if ((state.panel === 'checkout' || state.panel === 'payment') && state.paymentDraft && state.paymentDraft.flowMethodId && state.paymentStatus !== 'idle') {
         ctx.toast('请先取消当前在线收款');
+        return;
+      }
+      if (state.panel === 'drafts' && isDesktopWorkbench() && state.draftPanelMotion !== 'leaving') {
+        window.clearTimeout(state.draftPanelCloseTimer);
+        state.draftPanelMotion = 'leaving';
+        renderActive();
+        state.draftPanelCloseTimer = window.setTimeout(function () {
+          state.panel = null;
+          state.draftPanelMotion = '';
+          state.draftPanelCloseTimer = null;
+          renderActive();
+        }, 180);
         return;
       }
       var closingAddPanel = state.panel === 'add';
@@ -6496,6 +6658,11 @@
         } else {
           closeClipboardRecipientModal();
         }
+        return;
+      }
+      if (event.key === 'Escape' && state.draftDeleteConfirmId) {
+        state.draftDeleteConfirmId = '';
+        renderActive();
         return;
       }
       var quickModeOption = event.target.closest && event.target.closest('[data-quick-mode]');
