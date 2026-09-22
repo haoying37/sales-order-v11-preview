@@ -2016,9 +2016,8 @@
     } else {
       content = '<div class="order-reference-payment__private-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__private-method order-reference-payment__private-method--' + method.id + (active ? ' is-active' : '') + '" data-component-slug="stack" data-select-payment-method="' + method.id + '" aria-label="' + method.label + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i></button>';
-      }).join('') + '</div>'
-        + (selectedMethod ? '<div class="order-reference-payment__private-selected"><span><i class="wego-iconfont-s ' + selectedMethod.icon + '" aria-hidden="true"></i>' + selectedMethod.label + '</span><label><b>¥</b><input type="text" inputmode="decimal" value="' + escapeHtml(draft.singleAmount || '') + '" data-payment-amount="' + selectedMethod.id + '" aria-label="' + selectedMethod.label + '收款金额"></label><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></div>' : '');
+        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+      }).join('') + '</div>';
     }
     return '<section class="order-reference-payment__methods"><header><strong>支付方式</strong><button type="button" class="order-reference-payment__mode-switch" role="switch" aria-checked="' + (draft.mode === 'combo') + '" data-payment-mode="' + (draft.mode === 'combo' ? 'single' : 'combo') + '"><span>组合支付</span><i class="switch ' + (draft.mode === 'combo' ? 'switch--on' : 'switch--off') + '" data-component-slug="switch"><span class="switch__thumb"></span></i></button></header>' + content + '</section>';
   }

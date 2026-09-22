@@ -2688,88 +2688,10 @@ button.order-payment-method-card {
 }
 
 .order-reference-payment__private-methods {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--spacer-12);
-  margin-top: calc(var(--size-24) * -1);
-}
-
-.order-reference-payment__private-method {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--size-32);
-  height: var(--size-32);
-  color: var(--text-secondary);
-  font-size: var(--size-16);
-  background: var(--bg-subtle);
-  border: var(--stroke-hairline) solid transparent;
-  border-radius: 50%;
-}
-
-.order-reference-payment__private-method--wechat { color: var(--text-brand); }
-.order-reference-payment__private-method--alipay { color: var(--text-link); }
-.order-reference-payment__private-method--cash { color: var(--status-warning-default); }
-.order-reference-payment__private-method.is-active {
-  background: var(--bg-brand-surface-l1);
-  border-color: var(--border-brand);
-  box-shadow: 0 0 0 2px var(--bg-brand-surface-l1);
-}
-
-.order-reference-payment__private-selected {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--spacer-12);
-  min-height: var(--size-56);
-  margin-top: var(--spacer-12);
-  padding: var(--spacer-8) var(--spacer-12);
-  overflow: hidden;
-  background: var(--bg-surface);
-  border: var(--stroke-hairline) solid var(--border-brand);
-  border-radius: var(--radius-8);
-}
-
-.order-reference-payment__private-selected > span,
-.order-reference-payment__private-selected > label {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--spacer-8);
-}
-
-.order-reference-payment__private-selected > span > i {
-  color: var(--text-brand);
-}
-
-.order-reference-payment__private-selected > label {
-  margin-left: auto;
-}
-
-.order-reference-payment__private-selected input {
-  width: 92px;
-  color: var(--text-default);
-  font: inherit;
-  font-weight: var(--font-weight-semibold);
-  text-align: right;
-  background: transparent;
-  border: 0;
-  outline: 0;
-}
-
-.order-reference-payment__private-selected > i {
-  position: absolute;
-  top: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--size-24);
-  height: var(--size-24);
-  color: var(--text-inverse);
-  font-size: var(--body-xs-font-size);
-  background: var(--bg-brand);
-  clip-path: polygon(0 0, 100% 0, 100% 100%);
+  margin-top: var(--spacer-12);
 }
 
 .order-reference-payment__change {
@@ -9672,12 +9594,10 @@ button.order-payment-method-card {
 }
 
 .order-reference-payment__private-methods {
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacer-8);
   margin: 0;
-}
-
-.order-reference-payment__private-selected {
-  background: var(--bg-brand-surface-l1);
 }
 
 .order-reference-payment__debt {
@@ -9824,7 +9744,7 @@ button.order-payment-method-card {
   .order-desktop-modal--checkout .order-desktop-modal__panel {
     position: relative;
     width: min(calc(var(--size-96) * 5), calc(100% - var(--spacer-48)));
-    height: min(calc(var(--size-104) * 5 + var(--size-40)), calc(100% - var(--spacer-48)));
+    height: min(calc(var(--size-104) * 7), calc(100% - var(--spacer-48)));
     max-height: calc(100% - var(--spacer-48));
     overflow: hidden;
     background: var(--bg-page);
@@ -9878,6 +9798,7 @@ button.order-payment-method-card {
   .order-desktop-modal--checkout .order-reference-payment {
     height: 100%;
   }
+
 }
 
 @media (max-width: 767px) {
@@ -9957,6 +9878,12 @@ button.order-payment-method-card {
 
 .order-reference-payment__footer {
   flex: 0 0 auto;
+}
+
+@media (min-width: 768px) and (min-height: 776px) {
+  .order-desktop-modal--checkout .order-reference-payment__sheet {
+    overflow-y: hidden;
+  }
 }
 
 /* 剪贴板收货信息识别：复用发货方式弹窗宽度与正式表单、级联选择器。 */
