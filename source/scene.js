@@ -2218,19 +2218,19 @@
 
   function paymentConfirmState(draft, payable) {
     if (!draft || !draft.kind) return { enabled: false, label: '请选择收款状态' };
+    var targetCents = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable));
     if (isSingleQrCodePayment(draft) && draft.flowMethodId === 'qrpay' && state.paymentStatus !== 'idle') {
       return { enabled: false, label: '扫码支付中' };
     }
     if (state.paymentStatus === 'processing') return { enabled: false, label: '正在确认…' };
     if (draft.kind === 'unpaid') return { enabled: true, label: '确认开单' };
     if (draft.kind === 'debt') return { enabled: Boolean(state.customer), label: '确认开单' };
-    if (isSingleQrCodePayment(draft)) {
+    if (targetCents > 0 && isSingleQrCodePayment(draft)) {
       return { enabled: true, label: '确认并显示收款码' };
     }
-    if (draft.kind === 'online' && draft.mode === 'single' && draft.method === 'scanpay') {
+    if (targetCents > 0 && draft.kind === 'online' && draft.mode === 'single' && draft.method === 'scanpay') {
       return { enabled: true, label: '打开扫一扫', detail: '扫码枪和扫码盒子可以直接扫', plainDetail: true };
     }
-    var targetCents = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable));
     var selected = selectedPaymentMethods(draft);
     if (targetCents > 0 && !selected.length) return { enabled: true, label: '确认开单' };
     return { enabled: true, label: '确认收款 ' + money(payable) };
