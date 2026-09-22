@@ -8370,7 +8370,7 @@ button.order-payment-method-card {
     position: relative;
     overflow: hidden;
     background: var(--bg-surface);
-    border-radius: var(--radius-16) 0 0 0;
+    border-radius: var(--radius-8) 0 0 0;
     animation: order-barcode-scanner-enter var(--duration-normal) var(--ease-enter) both;
   }
 
@@ -8477,7 +8477,7 @@ button.order-payment-method-card {
   .order-barcode-scanner__close {
     position: absolute;
     top: var(--spacer-16);
-    left: var(--spacer-16);
+    right: var(--spacer-16);
     z-index: var(--z-raised);
     color: var(--text-inverse);
     background: var(--bg-mask-modal);
@@ -8486,7 +8486,7 @@ button.order-payment-method-card {
   .order-barcode-scanner__actions {
     position: absolute;
     top: var(--spacer-16);
-    right: var(--spacer-16);
+    left: var(--spacer-16);
     z-index: var(--z-raised);
     display: flex;
     gap: var(--spacer-8);
