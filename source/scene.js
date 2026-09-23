@@ -1622,6 +1622,16 @@
     }
   }
 
+  function isCatalogFilterInteraction(target) {
+    return target.matches([
+      '[data-open-catalog-filter]',
+      '[data-close-catalog-filter]',
+      '[data-catalog-filter-option]',
+      '[data-reset-catalog-filter]',
+      '[data-confirm-catalog-filter]'
+    ].join(', '));
+  }
+
   function desktopCatalog() {
     if (state.catalogFilterPanelOpen) {
       var filterUsesDrawer = isTabletPortrait() || effectiveCatalogCollapsed();
@@ -4565,6 +4575,9 @@
       delete document.body.dataset.orderLayout;
       ctx.back();
       return;
+    }
+    if (state.catalogFilterPanelOpen && !isCatalogFilterInteraction(target)) {
+      closeCatalogFilter(false);
     }
     if (target.matches('[data-order-settings]')) {
       ctx.toast('开单设置入口已保留，本期不展开');
