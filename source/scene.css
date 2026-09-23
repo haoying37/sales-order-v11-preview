@@ -1334,6 +1334,10 @@ body[data-order-layout="landscape"] .phone-indicator {
   padding: var(--spacer-20) 0 calc(var(--spacer-24) + var(--safe-area-bottom));
 }
 
+.order-delivery-settings-link {
+  margin-right: auto;
+}
+
 .order-add-product {
   display: flex;
   gap: var(--spacer-12);

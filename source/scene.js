@@ -3153,7 +3153,7 @@
       + '<div class="order-side-panel__head"><strong>选择发货方式</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>'
       + '<div class="order-delivery-panel">'
       +   '<div class="order-delivery-panel__scroll">' + deliveryChoices() + detail + (state.deliveryScrollSpacer ? '<div class="order-delivery-scroll-spacer" style="height:' + state.deliveryScrollSpacer + 'px" aria-hidden="true"></div>' : '') + '</div>'
-      +   '<div class="order-side-actions order-delivery-actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button('确定', 'strong', 'md', 'data-save-delivery') + '</div>'
+      +   '<div class="order-side-actions order-delivery-actions"><button type="button" class="link order-delivery-settings-link" data-component="link" data-component-slug="link" data-variant-name="Link_14" data-open-shipping-settings>发货/运费设置</button>' + button('取消', 'weak', 'md', 'data-close-panel') + button('确定', 'strong', 'md', 'data-save-delivery') + '</div>'
       + '</div>';
   }
 
@@ -5493,6 +5493,10 @@
     }
     if (target.matches('[data-history-address], [data-edit-sender], [data-add-pickup-point]')) {
       ctx.toast('该入口已保留，本期暂不展开');
+      return;
+    }
+    if (target.matches('[data-open-shipping-settings]')) {
+      ctx.toast('将外跳至发货设置页');
       return;
     }
     if (target.matches('[data-address-region]')) {
