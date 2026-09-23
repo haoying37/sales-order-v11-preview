@@ -351,6 +351,8 @@
       lastActiveClickAt: 0,
       tipSeen: tipSeen,
       tipVisible: false,
+      stripScrollLeft: 0,
+      stripScrollResetPending: false,
       dragActive: false
     };
   }
@@ -877,12 +879,22 @@
   function renderActive() {
     if (isRendering) return;
     if (activeContext && activeContext.root && activeContext.root.isConnected) {
+      var currentImageStrip = activeContext.root.querySelector('.order-image-search-strip');
+      var resetImageStripScroll = Boolean(state.imageSearch && state.imageSearch.stripScrollResetPending);
+      if (currentImageStrip && state.imageSearch && !resetImageStripScroll) {
+        state.imageSearch.stripScrollLeft = currentImageStrip.scrollLeft;
+      }
       isRendering = true;
       try {
         renderWorkbench(activeContext.root, activeContext);
       } finally {
         isRendering = false;
       }
+      var nextImageStrip = activeContext.root.querySelector('.order-image-search-strip');
+      if (nextImageStrip && state.imageSearch) {
+        nextImageStrip.scrollLeft = resetImageStripScroll ? 0 : state.imageSearch.stripScrollLeft;
+      }
+      if (state.imageSearch) state.imageSearch.stripScrollResetPending = false;
     }
   }
 
@@ -1642,6 +1654,8 @@
     state.imageSearch.searchStatus = 'idle';
     state.imageSearch.cache = {};
     state.imageSearch.tipVisible = false;
+    state.imageSearch.stripScrollLeft = 0;
+    state.imageSearch.stripScrollResetPending = false;
     state.imageSearch.dragActive = false;
     imageSearchDragDepth = 0;
   }
@@ -1802,6 +1816,8 @@
       state.imageSearch.uploadStatus = 'success';
       state.imageSearch.searchStatus = 'idle';
       state.imageSearch.tipVisible = entries.length > 1 && !state.imageSearch.tipSeen;
+      state.imageSearch.stripScrollLeft = 0;
+      state.imageSearch.stripScrollResetPending = true;
       state.desktopProductKeyword = '';
       state.desktopCatalogSearchActive = false;
       state.desktopSearchResultsOpen = false;
@@ -1813,7 +1829,6 @@
       runImageSearch(entries[0]);
       preloadImageSearchResults(sessionId);
       if (invalidCount) ctx.toast('已识别' + entries.length + '个文件，另有' + invalidCount + '个文件不支持或超出20个限制');
-      else ctx.toast(entries.length > 1 ? '已上传' + entries.length + '个文件，可点击缩略图切换图搜结果' : '图片上传成功，正在识别相似商品');
     });
   }
 
@@ -1984,7 +1999,7 @@
     var collapsedFilterButton = '<div class="order-desktop-search-filter order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only' + filterActiveClass + '" data-component-slug="button" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
     var summaryImage = state.imageSearch.images[0] || null;
     var imageToken = summaryImage
-      ? '<span class="searchbox__image-token ' + (state.imageSearch.images.length > 1 ? 'searchbox__image-token--multi' : 'searchbox__image-token--single') + '" aria-label="已选择' + state.imageSearch.images.length + '个图搜文件"><img class="searchbox__image-thumb" src="' + escapeHtml(summaryImage.url) + '" alt="">' + (state.imageSearch.images.length > 1 ? '<span class="searchbox__image-count">' + state.imageSearch.images.length + '</span>' : '') + '</span>'
+      ? '<span class="searchbox__image-token ' + (state.imageSearch.images.length > 1 ? 'searchbox__image-token--multi' : 'searchbox__image-token--single') + '" aria-label="本次图搜共 ' + state.imageSearch.images.length + ' 张"><img class="searchbox__image-thumb" src="' + escapeHtml(summaryImage.url) + '" alt="">' + (state.imageSearch.images.length > 1 ? '<span class="searchbox__image-count">共 ' + state.imageSearch.images.length + ' 张</span>' : '') + '</span>'
       : '';
     var clearSearch = (state.desktopProductKeyword || imageSearchActive)
       ? '<button type="button" class="searchbox__action searchbox__clear" aria-label="清空搜索" data-clear-header-search><i class="wego-iconfont-s icon-yuancha-mian" aria-hidden="true"></i></button>'
@@ -1993,7 +2008,7 @@
     return ''
       + '<div class="order-desktop-product-search ' + (inCatalog ? 'order-desktop-product-search--catalog' : 'order-desktop-product-search--collapsed') + listSearchResultClass + '">'
       +   '<div class="order-desktop-product-search__row">'
-      +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-context-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="' + (imageSearchActive ? '继续输入文字切回文搜' : '搜索商品名称、货号') + '" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
+      +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-context-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="搜索商品" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
       +     '<input type="file" accept="image/jpeg,image/png,image/jpg,image/bmp,image/webp,video/mp4" multiple data-header-image-input hidden>'
       +     (inCatalog ? '' : '<button type="button" class="btn btn--medium btn--sm order-desktop-product-search__submit" data-component-slug="button" data-submit-header-search ' + (state.desktopProductKeyword.trim() ? '' : 'hidden') + '>搜索</button>')
       +     (inCatalog ? sidebarFilterButton : collapsedFilterButton)
@@ -4241,7 +4256,7 @@
       +   '<header class="order-desktop__header">'
       +     '<div class="order-desktop__header-left"><button type="button" class="btn btn--weak btn--sm order-desktop-back" data-component-slug="button" data-back><i class="btn__icon icon-zuojiantou16" aria-hidden="true"></i>返回</button><span class="order-desktop__title-anchor"><h1 class="order-desktop__title">收银开单</h1>' + (featureEnabled('warehouseSwitch') ? '<button type="button" class="order-desktop-warehouse" data-open-panel="warehouse"><span>' + escapeHtml(state.warehouse.name) + '</span><i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></button>' : '') + '</span></div>'
       +     '<div class="order-desktop__header-center"></div>'
-      +     '<div class="order-desktop__header-right"><div class="order-industry-switch"><button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-toggle-industry-menu aria-haspopup="menu" aria-expanded="' + state.industryMenuOpen + '">切换行业<i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></button>' + (state.industryMenuOpen ? '<div class="order-industry-menu" role="menu" aria-label="切换行业"><button type="button" role="menuitemradio" aria-checked="' + (state.industry === 'clothing') + '" data-industry="clothing"><span>服装</span>' + (state.industry === 'clothing' ? '<i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>' : '') + '</button><button type="button" role="menuitemradio" aria-checked="' + (state.industry === 'phone') + '" data-industry="phone"><span>手机</span>' + (state.industry === 'phone' ? '<i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>' : '') + '</button></div>' : '') + '</div><button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-open-panel="drafts"><i class="btn__icon icon-caogaoxiang" aria-hidden="true"></i>草稿箱 (' + state.draftCount + ')</button><button type="button" class="btn btn--weak btn--sm order-desktop-history" data-component-slug="button"><i class="btn__icon icon-dingdan" aria-hidden="true"></i>历史订单</button><div class="order-desktop-guide-anchor"><button type="button" class="btn btn--weak btn--sm order-desktop-guide-selector" data-component-slug="button" data-toggle-guide aria-haspopup="dialog" aria-expanded="' + state.guidePickerOpen + '">导购员：' + escapeHtml(state.guide.name) + '<i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></button>' + (state.guidePickerOpen ? '<div class="order-desktop-guide-menu" role="dialog" aria-label="选择导购员">' + GUIDES.map(function (guide) { return '<button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-guide-id="' + guide.id + '" aria-pressed="' + (state.guide.id === guide.id) + '">' + escapeHtml(guide.name) + '</button>'; }).join('') + '</div>' : '') + '</div><div class="order-desktop-clerk-summary">' + (featureEnabled('clerkIdentity') ? '<span class="order-desktop-clerk">开单员：' + escapeHtml(CURRENT_CLERK.name) + '</span><span class="order-desktop-clerk-divider" aria-hidden="true"></span>' : '') + '<span class="order-desktop-daily-total">今日合计：' + state.clerkDailyTotal.count + '单 ' + dailyTotalAmount(state.clerkDailyTotal.amount) + '元</span></div></div>'
+      +     '<div class="order-desktop__header-right"><div class="order-industry-switch"><button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-toggle-industry-menu aria-haspopup="menu" aria-expanded="' + state.industryMenuOpen + '">切换行业<i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></button>' + (state.industryMenuOpen ? '<div class="order-industry-menu" role="menu" aria-label="切换行业"><button type="button" role="menuitemradio" aria-checked="' + (state.industry === 'clothing') + '" data-industry="clothing"><span>服装</span>' + (state.industry === 'clothing' ? '<i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>' : '') + '</button><button type="button" role="menuitemradio" aria-checked="' + (state.industry === 'phone') + '" data-industry="phone"><span>手机</span>' + (state.industry === 'phone' ? '<i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>' : '') + '</button></div>' : '') + '</div><button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-open-panel="drafts"><i class="btn__icon icon-caogaoxiang" aria-hidden="true"></i>草稿箱 (' + state.draftCount + ')</button><button type="button" class="btn btn--weak btn--sm order-desktop-history" data-component-slug="button"><i class="btn__icon icon-dingdan" aria-hidden="true"></i>历史订单</button><div class="order-desktop-guide-anchor"><button type="button" class="btn btn--weak btn--sm order-desktop-guide-selector" data-component-slug="button" data-toggle-guide aria-haspopup="dialog" aria-expanded="' + state.guidePickerOpen + '">员工：' + escapeHtml(state.guide.name) + '<i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></button>' + (state.guidePickerOpen ? '<div class="order-desktop-guide-menu" role="dialog" aria-label="选择员工">' + GUIDES.map(function (guide) { return '<button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-guide-id="' + guide.id + '" aria-pressed="' + (state.guide.id === guide.id) + '">' + escapeHtml(guide.name) + '</button>'; }).join('') + '</div>' : '') + '</div><div class="order-desktop-clerk-summary">' + (featureEnabled('clerkIdentity') ? '<span class="order-desktop-clerk">开单员：' + escapeHtml(CURRENT_CLERK.name) + '</span><span class="order-desktop-clerk-divider" aria-hidden="true"></span>' : '') + '<span class="order-desktop-daily-total">今日合计：' + state.clerkDailyTotal.count + '单 ' + dailyTotalAmount(state.clerkDailyTotal.amount) + '元</span></div></div>'
       +   '</header>'
       +   '<div class="order-desktop__workspace' + catalogCollapsedClass + catalogResizableClass + orderFullscreenClass + '"' + desktopWorkspaceStyle() + '>'
       +     desktopOrder()
@@ -4255,13 +4270,17 @@
   function clearOrderConfirm() {
     if (!state.confirmClearOrder) return '';
     return ''
-      + '<div class="order-clear-confirm" role="dialog" aria-modal="true" aria-labelledby="order-clear-confirm-title" data-state="open">'
-      +   '<div class="order-clear-confirm__panel">'
-      +     '<strong id="order-clear-confirm-title">确定清空已添加商品</strong>'
-      +     '<div class="order-clear-confirm__actions">'
-      +       button('取消', 'weak', 'md', 'data-clear-cancel')
-      +       button('确定', 'strong', 'md', 'data-clear-confirm')
+      + '<div class="dialog dialog--text" role="dialog" aria-modal="true" aria-labelledby="order-clear-confirm-title" aria-describedby="order-clear-confirm-content" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_2" data-variant-cn="按钮数量=2">'
+      +   '<div class="dialog__card">'
+      +     '<div class="dialog__body">'
+      +       '<div class="dialog__header"><h3 class="dialog__title" id="order-clear-confirm-title">确定清空已添加商品？</h3></div>'
+      +       '<div class="dialog__content" id="order-clear-confirm-content">清空后，已添加商品将无法恢复。</div>'
       +     '</div>'
+      +     '<div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual">'
+      +       '<button type="button" class="dialog__btn dialog__btn--dismiss" data-clear-cancel>取消</button>'
+      +       '<span class="dialog__divider" aria-hidden="true"></span>'
+      +       '<button type="button" class="dialog__btn dialog__btn--danger" data-clear-confirm>确定清空</button>'
+      +     '</div></div>'
       +   '</div>'
       + '</div>';
   }
@@ -4350,7 +4369,7 @@
       var scannerWidth = state.catalogWidth != null ? state.catalogWidth : 379;
       var scanningWorkspace = root.querySelector('.order-desktop__workspace');
       if (scanningWorkspace) {
-        scanningWorkspace.style.gridTemplateColumns = 'minmax(0,1fr) var(--spacer-8) minmax(0,' + Math.round(scannerWidth) + 'px)';
+        scanningWorkspace.style.gridTemplateColumns = 'minmax(0,1fr) 0 minmax(0,' + Math.round(scannerWidth) + 'px)';
       }
       syncCatalogGridColumns(root);
     } else if (!state.desktopOrderFullscreen && !isTabletPortrait() && state.catalogWidth != null && !effectiveCatalogCollapsed()) applyCatalogWidth(root, state.catalogWidth);
@@ -4412,7 +4431,7 @@
     var workspaceWidth = workspace ? workspace.getBoundingClientRect().width : window.innerWidth;
     var minCatalog = Math.min(360, Math.max(300, workspaceWidth * 0.26));
     var minOrder = workspaceWidth * 0.5;
-    var resizerWidth = 8;
+    var resizerWidth = 0;
     var maxCatalog = Math.max(minCatalog, workspaceWidth - minOrder - resizerWidth);
     return { min: minCatalog, max: maxCatalog, workspaceWidth: workspaceWidth };
   }
@@ -4436,7 +4455,7 @@
     var limits = catalogResizeLimits(workspace);
     var clamped = Math.max(limits.min, Math.min(limits.max, Number(nextWidth || 0)));
     state.catalogWidth = clamped;
-    workspace.style.gridTemplateColumns = 'minmax(0,1fr) var(--spacer-8) minmax(300px,' + Math.round(clamped) + 'px)';
+    workspace.style.gridTemplateColumns = 'minmax(0,1fr) 0 minmax(300px,' + Math.round(clamped) + 'px)';
     syncCatalogGridColumns(root, clamped);
   }
 
@@ -5341,7 +5360,7 @@
       if (nextGuide) state.guide = nextGuide;
       state.guidePickerOpen = false;
       renderActive();
-      ctx.toast('已切换导购员：' + state.guide.name);
+      ctx.toast('已切换员工：' + state.guide.name);
       return;
     }
     if (target.matches('[data-save-draft]')) {
