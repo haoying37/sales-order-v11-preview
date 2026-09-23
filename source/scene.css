@@ -4911,6 +4911,14 @@ button.order-payment-method-card {
     transform-origin: top;
   }
 
+  .order-catalog-sticky-stack {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-sticky);
+    flex: 0 0 auto;
+    background: var(--bg-surface);
+  }
+
   .order-catalog-hidden-tools.is-closing {
     pointer-events: none;
     animation: order-catalog-hidden-tools-close 180ms var(--ease-exit) both;
@@ -5107,9 +5115,7 @@ button.order-payment-method-card {
   }
 
   .order-catalog-toolbar {
-    position: sticky;
-    top: 0;
-    z-index: var(--z-sticky);
+    position: relative;
     display: flex;
     flex: 0 0 auto;
     align-items: center;
@@ -5164,6 +5170,17 @@ button.order-payment-method-card {
     flex: 0 0 auto;
     min-height: 0;
     overflow-x: hidden;
+  }
+
+  .order-catalog-empty-result {
+    --result-page-height: 552px;
+    flex: 1 0 100%;
+    width: 100%;
+    min-height: var(--result-page-height);
+  }
+
+  .order-catalog-empty-result .result__copy {
+    gap: 0;
   }
 
   .order-catalog-filter-anchor {
@@ -9666,14 +9683,32 @@ button.order-payment-method-card {
 
 
 /* 开单场景：默认 toast 浮层在页面垂直居中 */
-.app-toast-host .toast.is-floating,
-.app-toast-host .toast.is-floating.is-leaving {
+.app-toast-host.toast {
+  --toast-default-max-width: min(480px, calc(100vw - var(--spacer-32)));
+}
+
+.app-toast-host.toast--default {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+}
+
+.app-toast-host.toast--default .toast__text {
+  display: block;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  -webkit-line-clamp: unset;
+}
+
+.app-toast-host.toast.is-floating,
+.app-toast-host.toast.is-floating.is-leaving {
   top: 50%;
   bottom: auto;
   transform: translate(-50%, calc(-50% + var(--spacer-8)));
 }
 
-.app-toast-host .toast.is-floating.is-visible {
+.app-toast-host.toast.is-floating.is-visible {
   top: 50%;
   bottom: auto;
   transform: translate(-50%, -50%);

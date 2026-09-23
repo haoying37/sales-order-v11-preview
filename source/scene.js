@@ -807,6 +807,20 @@
     });
   }
 
+  function renderCatalogPreservingScroll(root, focusHiddenType) {
+    var currentScroller = root && root.querySelector ? root.querySelector('.order-desktop__catalog-scroll') : null;
+    var scrollTop = currentScroller ? currentScroller.scrollTop : 0;
+    renderActive();
+    var nextScroller = root && root.querySelector ? root.querySelector('.order-desktop__catalog-scroll') : null;
+    if (nextScroller) nextScroller.scrollTop = scrollTop;
+    window.requestAnimationFrame(function () {
+      if (nextScroller && nextScroller.isConnected) nextScroller.scrollTop = scrollTop;
+      if (!focusHiddenType || !root || !root.querySelector) return;
+      var nextControl = root.querySelector('[data-toggle-catalog-hidden-type="' + focusHiddenType + '"]');
+      if (nextControl) nextControl.focus({ preventScroll: true });
+    });
+  }
+
   function renderPaymentPreservingScroll(root) {
     var selector = isDesktopWorkbench()
       ? '.order-desktop-modal--checkout .order-desktop-modal__body'
@@ -1464,6 +1478,23 @@
       + '</div>';
   }
 
+  function catalogEmptyResult() {
+    return ''
+      + '<div class="result-page result-page--80 order-catalog-empty-result" data-component="result" data-component-slug="result" data-variant-name="Result_80" data-variant-cn="缺省页">'
+      +   '<section class="result-page__info">'
+      +     '<div class="result result--in-page" role="group" aria-label="无匹配结果">'
+      +       '<div class="result__copy"><h2 class="result__title">无匹配结果</h2></div>'
+      +     '</div>'
+      +     '<div class="result-gradient" aria-hidden="true"></div>'
+      +     '<div class="result-actions result-actions--locked-2">'
+      +       button('创建商品', 'weak', 'lg', 'data-create-product-type="product"')
+      +       button('创建临时商品', 'weak', 'lg', 'data-create-product-type="temporary"')
+      +     '</div>'
+      +   '</section>'
+      +   '<section class="result-page__actions" aria-hidden="true"></section>'
+      + '</div>';
+  }
+
   function desktopProductMatches(keyword) {
     var normalized = String(keyword || '').trim().toLowerCase();
     if (!normalized) return [];
@@ -1850,11 +1881,13 @@
       +   desktopProductSearch(true)
       +   '<div class="order-desktop__catalog-scroll">'
       +   (!showingSearchResults && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
-      +   catalogHiddenControls()
-      +   '<section class="order-catalog-products' + (showingSearchResults ? ' order-catalog-products--searching' : '') + '">'
+      +   '<div class="order-catalog-sticky-stack">'
+      +     catalogHiddenControls()
       +     (showingSearchResults ? '' : '<div class="order-catalog-toolbar">' + catalogCategoryTabs() + '</div>')
-      +     '<div class="order-catalog-products__body">' + (showingSearchResults && !allProducts.length
-        ? '<div class="order-catalog-search-result-empty"><div class="result" data-component-slug="result" role="group" aria-label="搜索结果"><div class="result__icon" aria-hidden="true"><i class="wego-iconfont-s icon-tanhao-mian"></i></div><div class="result__title">未搜索到相关商品</div></div></div>'
+      +   '</div>'
+      +   '<section class="order-catalog-products' + (showingSearchResults ? ' order-catalog-products--searching' : '') + '">'
+      +     '<div class="order-catalog-products__body">' + (!allProducts.length
+        ? catalogEmptyResult()
         : '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + '</div>') + '</div>'
       +   '</section>'
       +   '</div>';
@@ -4945,7 +4978,7 @@
       if (hiddenTypeIndex >= 0) state.catalogHiddenTypes.splice(hiddenTypeIndex, 1);
       else state.catalogHiddenTypes.push(hiddenType);
       rememberCatalogHiddenSettings();
-      renderActive();
+      renderCatalogPreservingScroll(root, hiddenType);
       return;
     }
     if (target.matches('[data-hide-catalog-hidden-bar]')) {
