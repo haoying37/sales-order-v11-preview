@@ -8378,7 +8378,7 @@ button.order-payment-method-card {
     position: relative;
     overflow: hidden;
     background: var(--bg-surface);
-    border-radius: var(--radius-8) 0 0 0;
+    border-radius: var(--radius-8) var(--radius-8) 0 0;
     animation: order-barcode-scanner-enter var(--duration-normal) var(--ease-enter) both;
   }
 
