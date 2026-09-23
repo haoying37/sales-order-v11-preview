@@ -1446,7 +1446,8 @@
     var categories = state.industry === 'phone' ? ['全部', 'Apple', 'HUAWEI', 'HONOR', 'Xiaomi', 'OPPO', 'vivo'] : CATALOG_CATEGORIES;
     return '<div class="order-catalog-category-tabs layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="none" data-peek="none" aria-label="商品标签分类">' + categories.map(function (category) {
       var selected = state.catalogCategory === category;
-      return '<button type="button" class="tag tag--28 ' + (selected ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag" aria-pressed="' + selected + '" data-catalog-category="' + escapeHtml(category) + '"><span class="tag__label">' + escapeHtml(category) + '</span></button>';
+      var variantName = selected ? 'Tag_28_Gray_Selected' : 'Tag_28_Gray_Normal';
+      return '<button type="button" class="tag tag--28 ' + (selected ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-variant-name="' + variantName + '" aria-pressed="' + selected + '" data-catalog-category="' + escapeHtml(category) + '"><span class="tag__label">' + escapeHtml(category) + '</span></button>';
     }).join('') + '</div>';
   }
 

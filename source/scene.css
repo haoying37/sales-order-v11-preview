@@ -8280,7 +8280,8 @@ button.order-payment-method-card {
   }
 
   .order-desktop-product-search--catalog .order-desktop-inline-image-search i,
-  .order-desktop-product-search--catalog .order-catalog-filter-anchor--search .btn__icon {
+  .order-desktop-product-search--catalog .order-catalog-filter-anchor--search .btn__icon,
+  .order-desktop-product-search--catalog .order-desktop-barcode-search .btn__icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -9613,7 +9614,8 @@ button.order-payment-method-card {
   }
 
   .order-desktop-product-search--collapsed .order-desktop-inline-image-search i,
-  .order-desktop-product-search--collapsed .order-catalog-filter-anchor--search .btn__icon {
+  .order-desktop-product-search--collapsed .order-catalog-filter-anchor--search .btn__icon,
+  .order-desktop-product-search--collapsed .order-desktop-barcode-search .btn__icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
