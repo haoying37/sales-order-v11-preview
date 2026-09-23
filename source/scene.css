@@ -4903,6 +4903,112 @@ button.order-payment-method-card {
     border-bottom: var(--stroke-hairline) solid var(--border-neutral-l2);
   }
 
+  .order-catalog-hidden-tools {
+    flex: 0 0 auto;
+    max-height: calc(var(--size-40) + var(--spacer-8));
+    overflow: hidden;
+    background: var(--bg-surface);
+    transform-origin: top;
+  }
+
+  .order-catalog-hidden-tools.is-closing {
+    pointer-events: none;
+    animation: order-catalog-hidden-tools-close 180ms var(--ease-exit) both;
+  }
+
+  .order-catalog-hidden-separator {
+    width: 100%;
+    height: var(--spacer-8);
+    background: var(--bg-page);
+  }
+
+  .order-catalog-hidden-bar {
+    position: relative;
+    display: flex;
+    min-height: var(--size-40);
+    align-items: center;
+    padding: 0 var(--spacer-16);
+    overflow: hidden;
+    background: var(--bg-surface);
+    border-bottom: var(--stroke-hairline) solid var(--border-neutral-l2);
+  }
+
+  .order-catalog-hidden-options {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .order-catalog-hidden-label,
+  .order-catalog-hidden-option .checkbox-field__text {
+    color: var(--text-secondary);
+    font-size: var(--body-sm-font-size);
+    font-weight: var(--font-weight-regular);
+    line-height: var(--size-16);
+  }
+
+  .order-catalog-hidden-option {
+    display: inline-flex;
+    min-width: 0;
+    min-height: var(--size-40);
+    align-items: center;
+    gap: var(--spacer-4);
+    padding: 0;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+
+  .order-catalog-hidden-option + .order-catalog-hidden-option {
+    margin-left: var(--spacer-8);
+  }
+
+  .order-catalog-hidden-option .checkbox {
+    flex: 0 0 auto;
+  }
+
+  .order-catalog-hidden-dismiss {
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: inline-flex;
+    height: var(--size-24);
+    align-items: center;
+    gap: 0;
+    padding: var(--spacer-4);
+    color: var(--text-secondary);
+    font-size: var(--body-xs-font-size);
+    line-height: var(--body-xs-line-height);
+    background: var(--bg-overlay-l1);
+    border: 0;
+    border-radius: 0 0 0 var(--radius-4);
+    cursor: pointer;
+  }
+
+  .order-catalog-hidden-dismiss i {
+    display: inline-flex;
+    width: var(--size-12);
+    height: var(--size-12);
+    align-items: center;
+    justify-content: center;
+    font-size: var(--size-12);
+  }
+
+  @keyframes order-catalog-hidden-tools-close {
+    from {
+      max-height: calc(var(--size-40) + var(--spacer-8));
+      opacity: 1;
+      transform: translateY(0) scaleY(1);
+    }
+    to {
+      max-height: 0;
+      opacity: 0;
+      transform: translateY(calc(-1 * var(--spacer-8))) scaleY(0.88);
+    }
+  }
+
   .order-catalog-history__actions {
     display: flex;
     flex-direction: column;

@@ -19,12 +19,12 @@
   var PRODUCTS = [
     { id: 'p1', code: 'TS-2408', name: '韩版休闲T恤', category: '上衣', tags: ['T恤'], source: '微购相册', listPrice: 89, costPrice: 42.72, lastDiscountPrice: 80, freightTemplate: { requiresRealName: true }, image: './lib/assets/image/clothing/clothing_2/clothing_2_1.jpg.jpg', specs: ['白色/S', '白色/M', '白色/L', '白色/XL', '黑色/S', '黑色/M', '黑色/L', '黑色/XL'] },
     { id: 'p2', code: 'JK-1082', name: '高腰牛仔短裤', category: '裤装', tags: ['牛仔'], source: '采购入库', listPrice: 129, image: './lib/assets/image/clothing/clothing_4/1663741015641_38566.jpg', specs: ['蓝色/27', '蓝色/28', '蓝色/29', '蓝色/30', '黑色/28', '黑色/30'] },
-    { id: 'p3', code: 'DR-3610', name: '碎花连衣裙', category: '裙装', tags: ['连衣裙'], source: '微购相册', listPrice: 259, image: './lib/assets/image/clothing/clothing_5/1663741067252_48951.jpg', specs: ['粉色/S', '粉色/M', '粉色/L', '绿色/S', '绿色/M', '绿色/L'] },
-    { id: 'p4', code: 'CT-2290', name: '羊毛针织开衫', category: '上衣', tags: ['针织'], source: '手动创建', listPrice: 199, image: './lib/assets/image/clothing/clothing_7/1663741042726_75173.jpg', specs: ['米白/M', '米白/L', '燕麦色/M', '燕麦色/L', '藏青/M', '藏青/L'] },
+    { id: 'p3', code: 'DR-3610', name: '碎花连衣裙', category: '裙装', tags: ['连衣裙'], source: '微购相册', listPrice: 259, isPinned: true, image: './lib/assets/image/clothing/clothing_5/1663741067252_48951.jpg', specs: ['粉色/S', '粉色/M', '粉色/L', '绿色/S', '绿色/M', '绿色/L'] },
+    { id: 'p4', code: 'CT-2290', name: '羊毛针织开衫', category: '上衣', tags: ['针织'], source: '手动创建', listPrice: 199, hasPrice: false, image: './lib/assets/image/clothing/clothing_7/1663741042726_75173.jpg', specs: ['米白/M', '米白/L', '燕麦色/M', '燕麦色/L', '藏青/M', '藏青/L'] },
     { id: 'p5', code: 'JE-3507', name: '高腰直筒牛仔裤', category: '裤装', tags: ['牛仔'], source: '微购相册', listPrice: 159, image: './lib/assets/image/clothing/clothing_1/clothing_1_6.jpg', specs: ['浅蓝/27', '浅蓝/28', '浅蓝/29', '深蓝/28', '深蓝/29', '深蓝/30'] },
     { id: 'p6', code: 'JK-6631', name: '阔腿牛仔裤', category: '裤装', tags: ['牛仔'], source: '采购入库', listPrice: 179, image: './lib/assets/image/clothing/clothing_3/1663741004075_93363.jpg', specs: ['牛仔蓝/S', '牛仔蓝/M', '牛仔蓝/L', '黑色/S', '黑色/M', '黑色/L'] },
     { id: 'p7', code: 'DR-8812', name: '法式收腰连衣裙', category: '裙装', tags: ['连衣裙'], source: '微购相册', listPrice: 299, image: './lib/assets/image/clothing/clothing_13/1664276865081_87837.jpg', specs: ['杏色/S', '杏色/M', '杏色/L', '黑色/S', '黑色/M', '黑色/L'] },
-    { id: 'p8', code: 'JK-9205', name: '休闲短款夹克', category: '上衣', tags: ['夹克'], source: '手动创建', listPrice: 249, image: './lib/assets/image/clothing/clothing_11/1663741015636_38129.jpg', specs: ['卡其/M', '卡其/L', '卡其/XL', '黑色/M', '黑色/L', '黑色/XL'] },
+    { id: 'p8', code: 'JK-9205', name: '休闲短款夹克', category: '上衣', tags: ['夹克'], source: '手动创建', listPrice: 249, isPrivate: true, image: './lib/assets/image/clothing/clothing_11/1663741015636_38129.jpg', specs: ['卡其/M', '卡其/L', '卡其/XL', '黑色/M', '黑色/L', '黑色/XL'] },
     { id: 'p9', code: 'JK-1180', name: '复古牛仔外套', category: '上衣', tags: ['牛仔', '外套'], source: '采购入库', listPrice: 269, image: './lib/assets/image/clothing/clothing_6/img_1708defc_20240216_i1708092843_7820_16.jpg.jpg', specs: ['浅蓝/M', '浅蓝/L', '深蓝/M', '深蓝/L', '深蓝/XL'] },
     { id: 'p10', code: 'CT-6602', name: '气质长款大衣', category: '上衣', tags: ['大衣'], source: '微购相册', listPrice: 399, image: './lib/assets/image/clothing/clothing_15/1664277250602_34448.jpg', specs: ['驼色/M', '驼色/L', '黑色/M', '黑色/L', '黑色/XL'] },
     { id: 'p11', code: 'WS-3901', name: '简约连帽卫衣', category: '上衣', tags: ['卫衣'], source: '手动创建', listPrice: 189, image: './lib/assets/image/clothing/clothing_9/1663740558495_35610.jpg', specs: ['灰色/M', '灰色/L', '藏蓝/M', '藏蓝/L', '藏蓝/XL'] },
@@ -32,11 +32,11 @@
   ];
 
   var PHONE_PRODUCTS = [
-    { id: 'm1', code: 'APL-IP16P-OB-8-256', name: 'Apple iPhone 16 Pro 曜石黑 8GB+256GB', category: 'Apple', tags: ['Apple'], source: '采购入库', listPrice: 4299, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-black.png', specs: ['标准规格'] },
+    { id: 'm1', code: 'APL-IP16P-OB-8-256', name: 'Apple iPhone 16 Pro 曜石黑 8GB+256GB', category: 'Apple', tags: ['Apple'], source: '采购入库', listPrice: 4299, stock: 1, isPinned: true, image: './scenes/bcg/开单/assets/phones/phone-black.png', specs: ['标准规格'] },
     { id: 'm2', code: 'HW-M70-GB-12-256', name: 'HUAWEI Mate 70 冰川蓝 12GB+256GB', category: 'HUAWEI', tags: ['HUAWEI'], source: '采购入库', listPrice: 3699, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-blue.png', specs: ['标准规格'] },
-    { id: 'm3', code: 'HONOR-MV3-MS-16-512', name: 'HONOR Magic V3 月影银 16GB+512GB', category: 'HONOR', tags: ['HONOR'], source: '手动创建', listPrice: 7999, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-fold.png', specs: ['标准规格'] },
+    { id: 'm3', code: 'HONOR-MV3-MS-16-512', name: 'HONOR Magic V3 月影银 16GB+512GB', category: 'HONOR', tags: ['HONOR'], source: '手动创建', listPrice: 7999, stock: 1, hasPrice: false, image: './scenes/bcg/开单/assets/phones/phone-fold.png', specs: ['标准规格'] },
     { id: 'm4', code: 'MI-15P-SG-16-512', name: 'Xiaomi 15 Pro 松林绿 16GB+512GB', category: 'Xiaomi', tags: ['Xiaomi'], source: '采购入库', listPrice: 5999, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-green.png', specs: ['标准规格'] },
-    { id: 'm5', code: 'OPPO-R14-OB-12-256', name: 'OPPO Reno14 曜石黑 12GB+256GB', category: 'OPPO', tags: ['OPPO'], source: '手动创建', listPrice: 2299, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-black.png', specs: ['标准规格'] },
+    { id: 'm5', code: 'OPPO-R14-OB-12-256', name: 'OPPO Reno14 曜石黑 12GB+256GB', category: 'OPPO', tags: ['OPPO'], source: '手动创建', listPrice: 2299, stock: 1, isPrivate: true, image: './scenes/bcg/开单/assets/phones/phone-black.png', specs: ['标准规格'] },
     { id: 'm6', code: 'VIVO-X200-GB-12-256', name: 'vivo X200 冰川蓝 12GB+256GB', category: 'vivo', tags: ['vivo'], source: '采购入库', listPrice: 6599, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-fold.png', specs: ['标准规格'] }
   ];
 
@@ -138,6 +138,9 @@
     '上海市': { '上海市': ['黄浦区', '徐汇区', '长宁区', '静安区', '浦东新区'] }
   };
   var CLIPBOARD_RECIPIENT_SEEN_KEY = 'wego-order-clipboard-recipient-seen';
+  var CATALOG_HIDDEN_TYPES_KEY = 'wego-order-catalog-hidden-types';
+  var CATALOG_HIDDEN_BAR_VISIBLE_KEY = 'wego-order-catalog-hidden-bar-visible';
+  var CATALOG_HIDDEN_TYPE_IDS = ['noPrice', 'private', 'pinned'];
 
   var PAYMENT_METHODS = [
     { id: 'qrpay', label: '出示收款码', icon: 'icon-erweima', category: 'online' },
@@ -172,6 +175,30 @@
       if (saved === 'grid' || saved === 'list') return saved;
     } catch (error) {}
     return USER_INDUSTRY === '服鞋箱包' ? 'grid' : 'list';
+  }
+
+  function storedCatalogHiddenTypes() {
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(CATALOG_HIDDEN_TYPES_KEY) || '[]');
+      return Array.isArray(saved) ? saved.filter(function (value) { return CATALOG_HIDDEN_TYPE_IDS.indexOf(value) >= 0; }) : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function storedCatalogHiddenBarVisible() {
+    try {
+      return window.localStorage.getItem(CATALOG_HIDDEN_BAR_VISIBLE_KEY) !== 'false';
+    } catch (error) {
+      return true;
+    }
+  }
+
+  function rememberCatalogHiddenSettings() {
+    try {
+      window.localStorage.setItem(CATALOG_HIDDEN_TYPES_KEY, JSON.stringify(state.catalogHiddenTypes));
+      window.localStorage.setItem(CATALOG_HIDDEN_BAR_VISIBLE_KEY, String(state.catalogHiddenBarVisible));
+    } catch (error) {}
   }
 
   function storedAddMode() {
@@ -303,6 +330,10 @@
     catalogResizePointerId: null,
     catalogViewMode: storedCatalogViewMode(),
     catalogCategory: '全部',
+    catalogHiddenTypes: storedCatalogHiddenTypes(),
+    catalogHiddenBarVisible: storedCatalogHiddenBarVisible(),
+    catalogHiddenBarClosing: false,
+    catalogHiddenBarCloseTimer: null,
     catalogFilters: { dateRange: [], fromId: [], tagId: [] },
     catalogFilterPanelOpen: false,
     catalogFilterDraft: { dateRange: [], fromId: [], tagId: [] },
@@ -397,6 +428,18 @@
 
   function activeCatalogProducts() {
     return state.industry === 'phone' ? PHONE_PRODUCTS : PRODUCTS;
+  }
+
+  function catalogProductMatchesHiddenSettings(item) {
+    var types = state.catalogHiddenTypes || [];
+    if (types.indexOf('noPrice') >= 0 && item.hasPrice === false) return false;
+    if (types.indexOf('private') >= 0 && item.isPrivate === true) return false;
+    if (types.indexOf('pinned') >= 0 && item.isPinned === true) return false;
+    return true;
+  }
+
+  function catalogProductsAfterHiddenSettings(source) {
+    return (source || activeCatalogProducts()).filter(catalogProductMatchesHiddenSettings);
   }
 
   function allCatalogProducts() {
@@ -1348,6 +1391,7 @@
     var editable = arguments.length > 2 ? Boolean(arguments[2]) : false;
     var keyword = manualDesktop ? '' : state.catalogKeyword.trim();
     var rows = (sourceRows || activeCatalogProducts()).filter(function (item) {
+      if (!catalogProductMatchesHiddenSettings(item)) return false;
       var scopeMatched = manualDesktop || catalogProductMatchesFilters(item, state.catalogFilters);
       var keywordMatched = !keyword || item.name.indexOf(keyword) >= 0 || item.code.toLowerCase().indexOf(keyword.toLowerCase()) >= 0;
       return scopeMatched && keywordMatched;
@@ -1381,7 +1425,7 @@
     if (state.industry === 'phone') return [];
     return MERCHANT_RECENT_PRODUCT_IDS.map(function (productId) {
       return PRODUCTS.find(function (item) { return item.id === productId; });
-    }).filter(Boolean);
+    }).filter(Boolean).filter(catalogProductMatchesHiddenSettings);
   }
 
   function catalogCategoryTabs() {
@@ -1392,10 +1436,38 @@
     }).join('') + '</div>';
   }
 
+  function catalogHiddenCheckbox(type, label) {
+    var checked = state.catalogHiddenTypes.indexOf(type) >= 0;
+    return ''
+      + '<button type="button" class="checkbox-field order-catalog-hidden-option" data-toggle-catalog-hidden-type="' + type + '" role="checkbox" aria-checked="' + checked + '">'
+      +   '<span class="checkbox checkbox--sm' + (checked ? ' checkbox--checked' : '') + '" data-component="checkbox" data-component-slug="checkbox" data-variant-name="Checkbox_Small">'
+      +     '<span class="checkbox__inner"></span>'
+      +     (checked ? '<span class="checkbox__icon"><img class="checkbox__asset" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>' : '')
+      +   '</span>'
+      +   '<span class="checkbox-field__text">' + label + '</span>'
+      + '</button>';
+  }
+
+  function catalogHiddenControls() {
+    if (!state.catalogHiddenBarVisible) return '';
+    return ''
+      + '<div class="order-catalog-hidden-tools' + (state.catalogHiddenBarClosing ? ' is-closing' : '') + '" data-scene-extension="catalog-hidden-controls">'
+      +   '<div class="order-catalog-hidden-separator" aria-hidden="true"></div>'
+      +   '<section class="order-catalog-hidden-bar" aria-label="隐藏商品设置">'
+      +     '<div class="order-catalog-hidden-options"><span class="order-catalog-hidden-label">隐藏：</span>'
+      +       catalogHiddenCheckbox('noPrice', '无价格商品')
+      +       catalogHiddenCheckbox('private', '私密商品')
+      +       catalogHiddenCheckbox('pinned', '置顶商品')
+      +     '</div>'
+      +     '<button type="button" class="order-catalog-hidden-dismiss" data-hide-catalog-hidden-bar aria-label="不再显示隐藏商品栏"><span>不再显示</span><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
+      +   '</section>'
+      + '</div>';
+  }
+
   function desktopProductMatches(keyword) {
     var normalized = String(keyword || '').trim().toLowerCase();
     if (!normalized) return [];
-    return activeCatalogProducts().filter(function (item) {
+    return catalogProductsAfterHiddenSettings().filter(function (item) {
       var scopeMatched = catalogProductMatchesFilters(item, state.catalogFilters);
       var keywordMatched = item.name.toLowerCase().indexOf(normalized) >= 0 || item.code.toLowerCase().indexOf(normalized) >= 0;
       return scopeMatched && keywordMatched;
@@ -1583,7 +1655,7 @@
   }
 
   function catalogFilterTagOptions() {
-    return activeCatalogProducts().reduce(function (options, item) {
+    return catalogProductsAfterHiddenSettings().reduce(function (options, item) {
       (item.tags || []).forEach(function (tag) {
         if (options.indexOf(tag) < 0) options.push(tag);
       });
@@ -1767,7 +1839,7 @@
     });
     var searchMatches = desktopProductMatches(state.desktopProductKeyword);
     var showingSearchResults = state.desktopCatalogSearchActive && Boolean(state.desktopProductKeyword.trim());
-    var allProducts = (showingSearchResults ? searchMatches : activeCatalogProducts()).filter(function (item) {
+    var allProducts = (showingSearchResults ? searchMatches : catalogProductsAfterHiddenSettings()).filter(function (item) {
       if (showingSearchResults) return true;
       var categoryMatched = state.catalogCategory === '全部' || item.category === state.catalogCategory || (item.tags || []).indexOf(state.catalogCategory) >= 0;
       var scopeMatched = catalogProductMatchesFilters(item, state.catalogFilters);
@@ -1778,6 +1850,7 @@
       +   desktopProductSearch(true)
       +   '<div class="order-desktop__catalog-scroll">'
       +   (!showingSearchResults && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
+      +   catalogHiddenControls()
       +   '<section class="order-catalog-products' + (showingSearchResults ? ' order-catalog-products--searching' : '') + '">'
       +     (showingSearchResults ? '' : '<div class="order-catalog-toolbar">' + catalogCategoryTabs() + '</div>')
       +     '<div class="order-catalog-products__body">' + (showingSearchResults && !allProducts.length
@@ -4863,6 +4936,30 @@
         var historyGap = Number.parseFloat(window.getComputedStyle(historyList).columnGap) || 0;
         historyList.scrollTo({ left: reachedHistoryEnd ? 0 : historyList.scrollLeft + historyCard.offsetWidth + historyGap, behavior: 'smooth' });
       }
+      return;
+    }
+    if (target.matches('[data-toggle-catalog-hidden-type]')) {
+      var hiddenType = target.dataset.toggleCatalogHiddenType;
+      if (CATALOG_HIDDEN_TYPE_IDS.indexOf(hiddenType) < 0) return;
+      var hiddenTypeIndex = state.catalogHiddenTypes.indexOf(hiddenType);
+      if (hiddenTypeIndex >= 0) state.catalogHiddenTypes.splice(hiddenTypeIndex, 1);
+      else state.catalogHiddenTypes.push(hiddenType);
+      rememberCatalogHiddenSettings();
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-hide-catalog-hidden-bar]')) {
+      if (state.catalogHiddenBarClosing) return;
+      window.clearTimeout(state.catalogHiddenBarCloseTimer);
+      state.catalogHiddenBarClosing = true;
+      renderActive();
+      state.catalogHiddenBarCloseTimer = window.setTimeout(function () {
+        state.catalogHiddenBarVisible = false;
+        state.catalogHiddenBarClosing = false;
+        rememberCatalogHiddenSettings();
+        renderActive();
+        ctx.toast('隐藏商品已关闭，可在「开单设置」中修改设置');
+      }, 180);
       return;
     }
     if (target.matches('[data-catalog-view]')) {
