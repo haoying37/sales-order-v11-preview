@@ -5646,6 +5646,7 @@ button.order-payment-method-card {
     width: var(--size-24);
     height: var(--size-24);
     padding: 0;
+    color: var(--icon-inverse);
     background: transparent;
     border: 0;
   }
@@ -8459,7 +8460,7 @@ button.order-payment-method-card {
     width: var(--size-24);
     height: var(--size-24);
     padding: 0;
-    color: var(--text-inverse);
+    color: var(--icon-inverse);
     background: transparent;
     border: 0;
   }

@@ -139,7 +139,6 @@
   };
   var CLIPBOARD_RECIPIENT_SEEN_KEY = 'wego-order-clipboard-recipient-seen';
   var CATALOG_HIDDEN_TYPES_KEY = 'wego-order-catalog-hidden-types';
-  var CATALOG_HIDDEN_BAR_VISIBLE_KEY = 'wego-order-catalog-hidden-bar-visible';
   var CATALOG_HIDDEN_TYPE_IDS = ['noPrice', 'private', 'pinned'];
 
   var PAYMENT_METHODS = [
@@ -186,18 +185,9 @@
     }
   }
 
-  function storedCatalogHiddenBarVisible() {
-    try {
-      return window.localStorage.getItem(CATALOG_HIDDEN_BAR_VISIBLE_KEY) !== 'false';
-    } catch (error) {
-      return true;
-    }
-  }
-
   function rememberCatalogHiddenSettings() {
     try {
       window.localStorage.setItem(CATALOG_HIDDEN_TYPES_KEY, JSON.stringify(state.catalogHiddenTypes));
-      window.localStorage.setItem(CATALOG_HIDDEN_BAR_VISIBLE_KEY, String(state.catalogHiddenBarVisible));
     } catch (error) {}
   }
 
@@ -331,7 +321,7 @@
     catalogViewMode: storedCatalogViewMode(),
     catalogCategory: '全部',
     catalogHiddenTypes: storedCatalogHiddenTypes(),
-    catalogHiddenBarVisible: storedCatalogHiddenBarVisible(),
+    catalogHiddenBarVisible: true,
     catalogHiddenBarClosing: false,
     catalogHiddenBarCloseTimer: null,
     catalogFilters: { dateRange: [], fromId: [], tagId: [] },
@@ -4990,7 +4980,6 @@
       state.catalogHiddenBarCloseTimer = window.setTimeout(function () {
         state.catalogHiddenBarVisible = false;
         state.catalogHiddenBarClosing = false;
-        rememberCatalogHiddenSettings();
         renderActive();
         ctx.toast('隐藏商品已关闭，可在「开单设置」中修改设置');
       }, 180);
