@@ -383,6 +383,7 @@
   var scannerFrameId = null;
   var scannerDetecting = false;
   var scannerLastValue = '';
+  var scannerRequestVersion = 0;
   var paymentScannerStream = null;
   var paymentScannerDetector = null;
   var paymentScannerFrameId = null;
@@ -1629,6 +1630,14 @@
       '[data-catalog-filter-option]',
       '[data-reset-catalog-filter]',
       '[data-confirm-catalog-filter]'
+    ].join(', '));
+  }
+
+  function isBarcodeScannerInteraction(target) {
+    return target.matches([
+      '[data-scan]',
+      '[data-close-barcode-scanner]',
+      '[data-scanner-image-pick]'
     ].join(', '));
   }
 
@@ -3952,6 +3961,7 @@
   }
 
   function closeBarcodeScanner(shouldRender) {
+    scannerRequestVersion += 1;
     stopBarcodeScanner();
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
     state.scannerOpen = false;
@@ -4032,6 +4042,7 @@
       ctx.toast('无法使用该功能');
       return;
     }
+    var requestVersion = ++scannerRequestVersion;
     state.scannerRequesting = true;
     var trigger = activeContext && activeContext.root && activeContext.root.querySelector('[data-scan]');
     if (trigger) {
@@ -4042,20 +4053,30 @@
       var formats = typeof window.BarcodeDetector.getSupportedFormats === 'function'
         ? await window.BarcodeDetector.getSupportedFormats()
         : [];
+      if (requestVersion !== scannerRequestVersion || !state.scannerRequesting) return;
       var wantedFormats = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf'];
       var supportedFormats = wantedFormats.filter(function (format) { return formats.indexOf(format) >= 0; });
       scannerDetector = supportedFormats.length
         ? new window.BarcodeDetector({ formats: supportedFormats })
         : new window.BarcodeDetector();
-      scannerStream = await navigator.mediaDevices.getUserMedia({
+      var requestedStream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: { ideal: 'environment' } }
       });
+      if (requestVersion !== scannerRequestVersion || !state.scannerRequesting) {
+        requestedStream.getTracks().forEach(function (track) { track.stop(); });
+        return;
+      }
+      scannerStream = requestedStream;
       var probeVideo = document.createElement('video');
       probeVideo.muted = true;
       probeVideo.playsInline = true;
       probeVideo.srcObject = scannerStream;
       await probeVideo.play();
+      if (requestVersion !== scannerRequestVersion || !state.scannerRequesting) {
+        stopBarcodeScanner();
+        return;
+      }
       probeVideo.pause();
       probeVideo.srcObject = null;
       state.scannerRequesting = false;
@@ -4065,6 +4086,7 @@
       renderActive();
       scanBarcodeFrame(ctx);
     } catch (error) {
+      if (requestVersion !== scannerRequestVersion) return;
       failBarcodeScanner(ctx);
     }
   }
@@ -4578,6 +4600,9 @@
     }
     if (state.catalogFilterPanelOpen && !isCatalogFilterInteraction(target)) {
       closeCatalogFilter(false);
+    }
+    if ((state.scannerOpen || state.scannerRequesting) && !isBarcodeScannerInteraction(target)) {
+      closeBarcodeScanner(true);
     }
     if (target.matches('[data-order-settings]')) {
       ctx.toast('开单设置入口已保留，本期不展开');
