@@ -139,6 +139,9 @@
   };
   var CLIPBOARD_RECIPIENT_SEEN_KEY = 'wego-order-clipboard-recipient-seen';
   var CATALOG_HIDDEN_TYPES_KEY = 'wego-order-catalog-hidden-types';
+  var CREATED_PRODUCTS_STORAGE_KEY = 'wego-sales-order-created-products-v1';
+  var IMAGE_SEARCH_SWITCH_TIP_KEY = 'CASHIER_ORDER_IMAGE_SEARCH_SWITCH_TIP_SEEN';
+  var IMAGE_SEARCH_MAX_FILES = 20;
   var CATALOG_HIDDEN_TYPE_IDS = ['noPrice', 'private', 'pinned'];
 
   var PAYMENT_METHODS = [
@@ -190,6 +193,63 @@
       window.localStorage.setItem(CATALOG_HIDDEN_TYPES_KEY, JSON.stringify(state.catalogHiddenTypes));
     } catch (error) {}
   }
+
+  function normalizeStoredCreatedProduct(item, index) {
+    if (!item || typeof item !== 'object') return null;
+    var name = String(item.name || '').trim();
+    var code = String(item.code || '').trim();
+    var specs = Array.isArray(item.specs) ? item.specs.map(String).filter(Boolean) : [];
+    var colors = Array.isArray(item.colors) ? item.colors.map(String).filter(Boolean) : [];
+    var image = String(item.image || '');
+    if (image && !/^(data:image\/|\.{1,2}\/)/.test(image)) image = '';
+    if (!name || !code || !specs.length) return null;
+    var listPrice = Number(item.listPrice);
+    var costPrice = Number(item.costPrice);
+    var weight = Number(item.weight);
+    var inventory = item.inventory == null || item.inventory === '' ? null : Number(item.inventory);
+    return {
+      id: String(item.id || ('p-created-restored-' + index)).replace(/[^a-zA-Z0-9_-]/g, '-'),
+      code: code,
+      name: name,
+      category: String(item.category || '其他'),
+      tags: Array.isArray(item.tags) ? item.tags.map(String).filter(Boolean) : [],
+      source: item.createdType === 'temporary' ? '临时商品' : '手动创建',
+      listPrice: Number.isFinite(listPrice) && listPrice >= 0 ? listPrice : 0,
+      costPrice: Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
+      image: image,
+      specs: specs,
+      colors: colors,
+      weight: Number.isFinite(weight) && weight >= 0 ? weight : 0,
+      inventory: Number.isFinite(inventory) && inventory >= 0 ? inventory : null,
+      isUserCreated: true,
+      createdType: item.createdType === 'temporary' ? 'temporary' : 'product'
+    };
+  }
+
+  function storedCreatedProducts() {
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(CREATED_PRODUCTS_STORAGE_KEY) || '[]');
+      return Array.isArray(saved) ? saved.map(normalizeStoredCreatedProduct).filter(Boolean) : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function rememberCreatedProducts() {
+    try {
+      var createdProducts = PRODUCTS.filter(function (item) { return item.isUserCreated; });
+      window.localStorage.setItem(CREATED_PRODUCTS_STORAGE_KEY, JSON.stringify(createdProducts));
+    } catch (error) {}
+  }
+
+  function restoreCreatedProducts() {
+    storedCreatedProducts().slice().reverse().forEach(function (item) {
+      var duplicate = PRODUCTS.some(function (product) { return product.id === item.id || product.code === item.code; });
+      if (!duplicate) PRODUCTS.unshift(item);
+    });
+  }
+
+  restoreCreatedProducts();
 
   function storedAddMode() {
     try {
@@ -261,6 +321,38 @@
     } catch (error) {
       return { count: 0, amount: 0 };
     }
+  }
+
+  function initialImageSearchState() {
+    var params;
+    try { params = new URLSearchParams(window.location.search); } catch (error) { params = null; }
+    var vipParam = params ? params.get('imageVip') : null;
+    var vipValue = vipParam == null ? NaN : Number(vipParam);
+    var vipState = [0, 1, 2, 3].indexOf(vipValue) >= 0 ? vipValue : 1;
+    var enabledParam = params ? params.get('imageEnabled') : null;
+    var enableFailParam = params ? params.get('imageEnableFail') : null;
+    var tipSeen = false;
+    try { tipSeen = window.localStorage.getItem(IMAGE_SEARCH_SWITCH_TIP_KEY) === '1'; } catch (error) {}
+    return {
+      vipState: vipState,
+      enabled: enabledParam == null ? true : enabledParam !== '0',
+      enableShouldFail: enableFailParam === '1',
+      enabling: false,
+      permissionLoading: true,
+      dialog: '',
+      uploadStatus: 'idle',
+      searchStatus: 'idle',
+      images: [],
+      activeId: '',
+      cache: {},
+      requestVersion: 0,
+      uploadSessionId: 0,
+      lastActiveClickId: '',
+      lastActiveClickAt: 0,
+      tipSeen: tipSeen,
+      tipVisible: false,
+      dragActive: false
+    };
   }
 
   function recordClerkDailyTotal(amount) {
@@ -359,7 +451,7 @@
     desktopProductKeyword: '',
     desktopCatalogSearchActive: false,
     desktopSearchResultsOpen: false,
-    imageSearchFileName: '',
+    imageSearch: initialImageSearchState(),
     scannerConnected: true,
     scannerRequesting: false,
     scannerOpen: false,
@@ -415,6 +507,9 @@
   var clipboardRegionCloseTimer = 0;
   var clipboardRegionListTimer = 0;
   var scannerLastDetectedAt = 0;
+  var imageSearchTimer = 0;
+  var imageSearchPermissionTimer = 0;
+  var imageSearchDragDepth = 0;
 
   function activeCatalogProducts() {
     return state.industry === 'phone' ? PHONE_PRODUCTS : PRODUCTS;
@@ -482,6 +577,10 @@
     return product.inventory != null || product.stock != null;
   }
 
+  function singleQuantityLimit(product, spec) {
+    return productTracksInventory(product) ? specStock(product, spec) : 9999;
+  }
+
   function batchQuantityLimit(product, spec) {
     if (!productTracksInventory(product)) return 9999;
     var stock = specStock(product, spec);
@@ -544,6 +643,7 @@
   }
 
   function pendingSizeStock(product, size) {
+    if (!productTracksInventory(product)) return 9999;
     return addProductMatrix(product).colors.reduce(function (maxStock, color) {
       var candidateSpec = specKey(product, color, size);
       return Math.max(maxStock, candidateSpec ? specStock(product, candidateSpec) : 0);
@@ -1496,6 +1596,322 @@
     });
   }
 
+  function imageSearchHasImages() {
+    return Boolean(state.imageSearch && state.imageSearch.images.length);
+  }
+
+  function activeImageSearchItem() {
+    if (!imageSearchHasImages()) return null;
+    return state.imageSearch.images.find(function (item) { return item.id === state.imageSearch.activeId; }) || state.imageSearch.images[0];
+  }
+
+  function imageSearchFilterKey() {
+    var filters = cloneCatalogFilters(state.catalogFilters);
+    return [
+      state.industry,
+      filters.dateRange.join('~'),
+      filters.fromId.join(','),
+      filters.tagId.join(','),
+      (state.catalogHiddenTypes || []).slice().sort().join(',')
+    ].join('|');
+  }
+
+  function imageSearchCacheKey(item) {
+    return item ? item.id + '|' + imageSearchFilterKey() : '';
+  }
+
+  function releaseImageSearchImages() {
+    if (!state.imageSearch) return;
+    state.imageSearch.images.forEach(function (item) {
+      if (item.objectUrl && window.URL && window.URL.revokeObjectURL) {
+        try { window.URL.revokeObjectURL(item.objectUrl); } catch (error) {}
+      }
+    });
+  }
+
+  function clearImageSearchState() {
+    if (!state.imageSearch) return;
+    window.clearTimeout(imageSearchTimer);
+    imageSearchTimer = 0;
+    state.imageSearch.requestVersion += 1;
+    state.imageSearch.uploadSessionId += 1;
+    releaseImageSearchImages();
+    state.imageSearch.images = [];
+    state.imageSearch.activeId = '';
+    state.imageSearch.uploadStatus = 'idle';
+    state.imageSearch.searchStatus = 'idle';
+    state.imageSearch.cache = {};
+    state.imageSearch.tipVisible = false;
+    state.imageSearch.dragActive = false;
+    imageSearchDragDepth = 0;
+  }
+
+  function imageSearchMockResult(item) {
+    var name = String(item && item.name || '').toLowerCase();
+    if (/error|失败|报错/.test(name)) return { status: 'error', productIds: [] };
+    var candidates = catalogProductsAfterHiddenSettings().filter(function (product) {
+      return catalogProductMatchesFilters(product, state.catalogFilters);
+    });
+    if (/empty|空结果|无结果/.test(name) || !candidates.length) return { status: 'empty', productIds: [] };
+    var hash = 0;
+    String(item.id + item.name).split('').forEach(function (character) { hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0; });
+    var start = Math.abs(hash) % candidates.length;
+    var limit = Math.min(candidates.length, state.industry === 'phone' ? 4 : 8);
+    var ids = [];
+    for (var index = 0; index < limit; index += 1) ids.push(candidates[(start + index) % candidates.length].id);
+    return { status: ids.length ? 'success' : 'empty', productIds: ids };
+  }
+
+  function runImageSearch(item, options) {
+    options = options || {};
+    if (!item || !state.imageSearch) return Promise.resolve();
+    var key = imageSearchCacheKey(item);
+    var cached = !options.force && state.imageSearch.cache[key];
+    if (cached) {
+      if (!options.silent && state.imageSearch.activeId === item.id) {
+        state.imageSearch.searchStatus = cached.status;
+        renderActive();
+      }
+      return Promise.resolve(cached);
+    }
+    state.imageSearch.requestVersion += 1;
+    var sessionId = state.imageSearch.uploadSessionId;
+    if (!options.silent && state.imageSearch.activeId === item.id) {
+      state.imageSearch.searchStatus = 'loading';
+      renderActive();
+    }
+    var delay = options.silent ? 260 + (Math.abs(item.name.length * 37) % 260) : 460;
+    return new Promise(function (resolve) {
+      window.setTimeout(function () {
+        if (!state.imageSearch || state.imageSearch.uploadSessionId !== sessionId || !state.imageSearch.images.some(function (entry) { return entry.id === item.id; })) {
+          resolve(null);
+          return;
+        }
+        var result = imageSearchMockResult(item);
+        state.imageSearch.cache[key] = result;
+        if (!options.silent && state.imageSearch.activeId === item.id && key === imageSearchCacheKey(activeImageSearchItem())) {
+          state.imageSearch.searchStatus = result.status;
+          renderActive();
+        }
+        resolve(result);
+      }, delay);
+    });
+  }
+
+  function preloadImageSearchResults(sessionId) {
+    var queue = state.imageSearch.images.filter(function (item) { return item.id !== state.imageSearch.activeId; });
+    var cursor = 0;
+    function worker() {
+      if (!state.imageSearch || state.imageSearch.uploadSessionId !== sessionId || cursor >= queue.length) return;
+      var item = queue[cursor++];
+      runImageSearch(item, { silent: true }).then(worker);
+    }
+    for (var workerIndex = 0; workerIndex < Math.min(3, queue.length); workerIndex += 1) worker();
+  }
+
+  function supportedImageSearchFile(file) {
+    if (!file) return false;
+    var type = String(file.type || '').toLowerCase();
+    var name = String(file.name || '').toLowerCase();
+    return /^(image\/(jpeg|jpg|png|bmp|webp)|video\/mp4)$/.test(type)
+      || /\.(jpe?g|png|bmp|webp|mp4)$/.test(name);
+  }
+
+  function imageSearchFileSignature(file) {
+    return [file.name, file.size, file.lastModified].join(':');
+  }
+
+  function readImageSearchEntry(file, sessionId, index, fallbackImage) {
+    var isVideo = String(file.type || '').toLowerCase() === 'video/mp4' || /\.mp4$/i.test(file.name);
+    if (isVideo) {
+      return Promise.resolve({
+        id: 'image-search-' + sessionId + '-' + index,
+        name: file.name,
+        signature: imageSearchFileSignature(file),
+        sourceType: 'video-cover',
+        url: fallbackImage,
+        objectUrl: ''
+      });
+    }
+    return new Promise(function (resolve) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve({
+          id: 'image-search-' + sessionId + '-' + index,
+          name: file.name,
+          signature: imageSearchFileSignature(file),
+          sourceType: 'image',
+          url: String(reader.result || ''),
+          objectUrl: ''
+        });
+      };
+      reader.onerror = function () { resolve(null); };
+      reader.onabort = reader.onerror;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function processImageSearchFiles(fileList, ctx) {
+    var files = Array.from(fileList || []);
+    if (!files.length) return;
+    var supported = [];
+    var signatures = {};
+    var invalidCount = 0;
+    files.forEach(function (file) {
+      var signature = imageSearchFileSignature(file);
+      if (!supportedImageSearchFile(file) || signatures[signature]) {
+        invalidCount += 1;
+        return;
+      }
+      signatures[signature] = true;
+      supported.push(file);
+    });
+    if (supported.length > IMAGE_SEARCH_MAX_FILES) {
+      invalidCount += supported.length - IMAGE_SEARCH_MAX_FILES;
+      supported = supported.slice(0, IMAGE_SEARCH_MAX_FILES);
+    }
+    if (!supported.length) {
+      ctx.toast('请选择 JPG、PNG、BMP、WEBP 图片或 MP4 视频，最多20个文件');
+      return;
+    }
+    var sessionId = state.imageSearch.uploadSessionId + 1;
+    var fallbackProducts = activeCatalogProducts();
+    var readPromise = Promise.all(supported.map(function (file, index) {
+      var fallbackImage = fallbackProducts.length ? fallbackProducts[index % fallbackProducts.length].image : '';
+      return readImageSearchEntry(file, sessionId, index, fallbackImage);
+    }));
+    state.imageSearch.uploadSessionId = sessionId;
+    state.imageSearch.requestVersion += 1;
+    state.imageSearch.uploadStatus = 'loading';
+    renderActive();
+    Promise.all([readPromise, new Promise(function (resolve) { window.setTimeout(resolve, 320); })]).then(function (values) {
+      if (!state.imageSearch || state.imageSearch.uploadSessionId !== sessionId) return;
+      var readEntries = values[0];
+      var entries = readEntries.filter(Boolean);
+      invalidCount += readEntries.length - entries.length;
+      if (!entries.length) {
+        state.imageSearch.uploadStatus = state.imageSearch.images.length ? 'success' : 'idle';
+        renderActive();
+        ctx.toast('文件读取失败，请重试');
+        return;
+      }
+      releaseImageSearchImages();
+      state.imageSearch.cache = {};
+      state.imageSearch.images = entries;
+      state.imageSearch.activeId = entries[0].id;
+      state.imageSearch.uploadStatus = 'success';
+      state.imageSearch.searchStatus = 'idle';
+      state.imageSearch.tipVisible = entries.length > 1 && !state.imageSearch.tipSeen;
+      state.desktopProductKeyword = '';
+      state.desktopCatalogSearchActive = false;
+      state.desktopSearchResultsOpen = false;
+      if (effectiveCatalogCollapsed()) {
+        state.catalogCollapsed = false;
+        state.tabletCatalogAutoCollapsed = false;
+      }
+      renderActive();
+      runImageSearch(entries[0]);
+      preloadImageSearchResults(sessionId);
+      if (invalidCount) ctx.toast('已识别' + entries.length + '个文件，另有' + invalidCount + '个文件不支持或超出20个限制');
+      else ctx.toast(entries.length > 1 ? '已上传' + entries.length + '个文件，可点击缩略图切换图搜结果' : '图片上传成功，正在识别相似商品');
+    });
+  }
+
+  function openImageSearchPicker(root, ctx) {
+    if (state.imageSearch.permissionLoading) {
+      ctx.toast('正在获取图搜权限，请稍候');
+      return;
+    }
+    if (state.imageSearch.vipState !== 1) {
+      state.imageSearch.dialog = 'pay';
+      renderActive();
+      return;
+    }
+    if (!state.imageSearch.enabled) {
+      state.imageSearch.dialog = 'enable';
+      renderActive();
+      return;
+    }
+    var input = root.querySelector('[data-header-image-input]');
+    if (input) input.click();
+  }
+
+  function selectImageSearchItem(itemId) {
+    var item = state.imageSearch.images.find(function (entry) { return entry.id === itemId; });
+    if (!item) return;
+    var now = Date.now();
+    var force = state.imageSearch.activeId === itemId
+      && state.imageSearch.lastActiveClickId === itemId
+      && now - state.imageSearch.lastActiveClickAt <= 350;
+    state.imageSearch.lastActiveClickId = itemId;
+    state.imageSearch.lastActiveClickAt = now;
+    state.imageSearch.activeId = itemId;
+    state.imageSearch.tipVisible = false;
+    if (!state.imageSearch.tipSeen) {
+      state.imageSearch.tipSeen = true;
+      try { window.localStorage.setItem(IMAGE_SEARCH_SWITCH_TIP_KEY, '1'); } catch (error) {}
+    }
+    var catalogScroller = activeContext && activeContext.root ? activeContext.root.querySelector('.order-desktop__catalog-scroll') : null;
+    if (catalogScroller) catalogScroller.scrollTop = 0;
+    runImageSearch(item, { force: force });
+  }
+
+  function imageSearchResults() {
+    var item = activeImageSearchItem();
+    if (!item) return [];
+    var cached = state.imageSearch.cache[imageSearchCacheKey(item)];
+    if (!cached || cached.status !== 'success') return [];
+    return cached.productIds.map(function (id) {
+      return activeCatalogProducts().find(function (product) { return product.id === id; });
+    }).filter(Boolean).filter(catalogProductMatchesHiddenSettings).filter(function (product) {
+      return catalogProductMatchesFilters(product, state.catalogFilters);
+    });
+  }
+
+  function imageSearchStrip() {
+    if (state.imageSearch.images.length < 2) return '';
+    var secondImage = state.imageSearch.images[1];
+    return '<div class="order-image-search-strip-wrap"><div class="order-image-search-strip" aria-label="图搜文件">' + state.imageSearch.images.map(function (item) {
+      var active = item.id === state.imageSearch.activeId;
+      return '<button type="button" class="order-image-search-thumb' + (active ? ' is-active' : '') + '" data-image-search-item="' + item.id + '" aria-pressed="' + active + '" aria-label="' + escapeHtml((active ? '当前图片：' : '切换到：') + item.name) + '">'
+        + '<span class="wg-image wg-image--rounded-md wg-image--clickable" data-component="image" data-variant-name="fit=cover,size=custom-rect,radius=rounded-md,state=loaded,interaction=clickable"><img class="wg-image__src is-loaded" src="' + escapeHtml(item.url) + '" alt=""><span class="wg-image__overlay"></span></span>'
+        + (item.sourceType === 'video-cover' ? '<span class="order-image-search-thumb__video"><i class="wego-iconfont-s icon-bofang-mian" aria-hidden="true"></i></span>' : '')
+        + (active ? '<span class="order-image-search-thumb__check"><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></span>' : '')
+        + '</button>';
+    }).join('') + '</div>' + (state.imageSearch.tipVisible && secondImage ? '<button type="button" class="order-image-search-switch-tip" data-image-search-item="' + secondImage.id + '" aria-label="点击可切换到第二张图片">点击可切换</button>' : '') + '</div>';
+  }
+
+  function imageSearchLoadingResult() {
+    return '<div class="order-image-search-loading" role="status" aria-label="正在识别相似商品">'
+      + '<span class="loading loading--circle loading--32" data-component="loading" data-variant-name="Loading_Circle"><span class="loading__circle"></span></span>'
+      + '<span>正在识别相似商品</span></div>';
+  }
+
+  function imageSearchFailureResult() {
+    return '<div class="result-40 order-image-search-result" data-component="result" data-variant-name="Result_40" data-action-mode="one-button">'
+      + '<div class="result-40__body"><div class="result result--in-page" role="group" aria-label="图搜失败"><div class="result__copy"><h2 class="result__title">图片识别失败</h2><p class="result__description">请检查文件后重试</p></div></div>'
+      + '<div class="result-actions result-actions--40"><button type="button" class="btn btn--strong btn--md" data-retry-image-search>重新识别</button></div></div></div>';
+  }
+
+  function imageSearchPermissionDialog() {
+    var mode = state.imageSearch.dialog;
+    if (!mode) return '';
+    var title = mode === 'pay' ? '图搜为会员功能' : (mode === 'enable' ? '开启以图搜图功能' : '开启成功');
+    var content = mode === 'pay'
+      ? '开通会员后即可上传图片或视频封面，快速查找相似商品。'
+      : (mode === 'enable' ? '你的相册尚未开启以图搜图功能，是否现在开启？' : '正在同步您的图片，预计一个小时后可使用图搜');
+    var actions = mode === 'success'
+      ? '<div class="dialog__buttons"><button type="button" class="dialog__btn dialog__btn--default" data-close-image-search-dialog>我知道了</button></div>'
+      : '<div class="dialog__buttons dialog__buttons--dual"><button type="button" class="dialog__btn dialog__btn--dismiss" data-close-image-search-dialog>取消</button><span class="dialog__divider"></span><button type="button" class="dialog__btn dialog__btn--confirm" ' + (mode === 'pay' ? 'data-pay-image-search' : 'data-enable-image-search') + (state.imageSearch.enabling ? ' disabled aria-busy="true"' : '') + '>' + (mode === 'pay' ? '立即开通' : (state.imageSearch.enabling ? '开启中' : '开启')) + '</button></div>';
+    return '<div class="dialog dialog--text order-image-search-dialog" role="dialog" aria-modal="true" aria-labelledby="image-search-dialog-title" data-state="open" data-component="dialog" data-variant-name="' + (mode === 'success' ? 'Dialog_Text_1' : 'Dialog_Text_2') + '">'
+      + '<div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="image-search-dialog-title">' + title + '</h3></div><div class="dialog__content">' + content + '</div></div><div class="dialog__actions">' + actions + '</div></div></div>';
+  }
+
+  function imageSearchDropOverlay() {
+    if (!state.imageSearch.dragActive) return '';
+    return '<div class="order-image-search-drop" role="status" aria-live="polite"><div class="order-image-search-drop__panel"><i class="wego-iconfont-s icon-tupian" aria-hidden="true"></i><strong>松开即可图搜</strong><span>（支持多图搜索）</span></div></div>';
+  }
+
   function desktopSearchResultDropdown() {
     var matches = desktopProductMatches(state.desktopProductKeyword);
     if (!state.desktopSearchResultsOpen || matches.length < 2) return '';
@@ -1558,23 +1974,33 @@
 
   function desktopProductSearch(inCatalog) {
     var scannerConnectedClass = state.scannerConnected ? 'is-connected' : 'is-disconnected';
-    var listSearchResultClass = inCatalog && state.catalogViewMode === 'list' && state.desktopCatalogSearchActive && state.desktopProductKeyword.trim()
+    var imageSearchActive = imageSearchHasImages();
+    var listSearchResultClass = inCatalog && state.catalogViewMode === 'list' && ((state.desktopCatalogSearchActive && state.desktopProductKeyword.trim()) || imageSearchActive)
       ? ' order-desktop-product-search--list-results'
       : '';
     var filterActiveClass = hasActiveCatalogFilters(state.catalogFilters) ? ' is-filtered' : '';
     var filterAriaLabel = hasActiveCatalogFilters(state.catalogFilters) ? '筛选（已应用）' : '筛选';
     var sidebarFilterButton = '<div class="order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only' + filterActiveClass + '" data-component-slug="button" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
     var collapsedFilterButton = '<div class="order-desktop-search-filter order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only' + filterActiveClass + '" data-component-slug="button" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
+    var summaryImage = state.imageSearch.images[0] || null;
+    var imageToken = summaryImage
+      ? '<span class="searchbox__image-token ' + (state.imageSearch.images.length > 1 ? 'searchbox__image-token--multi' : 'searchbox__image-token--single') + '" aria-label="已选择' + state.imageSearch.images.length + '个图搜文件"><img class="searchbox__image-thumb" src="' + escapeHtml(summaryImage.url) + '" alt="">' + (state.imageSearch.images.length > 1 ? '<span class="searchbox__image-count">' + state.imageSearch.images.length + '</span>' : '') + '</span>'
+      : '';
+    var clearSearch = (state.desktopProductKeyword || imageSearchActive)
+      ? '<button type="button" class="searchbox__action searchbox__clear" aria-label="清空搜索" data-clear-header-search><i class="wego-iconfont-s icon-yuancha-mian" aria-hidden="true"></i></button>'
+      : '';
+    var imageSearchDisabled = state.imageSearch.uploadStatus === 'loading';
     return ''
       + '<div class="order-desktop-product-search ' + (inCatalog ? 'order-desktop-product-search--catalog' : 'order-desktop-product-search--collapsed') + listSearchResultClass + '">'
       +   '<div class="order-desktop-product-search__row">'
-      +     '<div class="input-group input-group--surface-white order-desktop-context-search" data-component-slug="search" data-variant-name="Searchbox_mini"><label class="field-label" for="order-v2-context-search">搜索商品</label><div class="input-wrapper"><span class="order-desktop-context-search__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><input id="order-v2-context-search" type="text" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="搜索商品名称、货号" enterkeyhint="search" autocomplete="off" data-header-catalog-search><button type="button" class="input-clear" aria-label="清空搜索" data-clear-header-search><i class="icon-yuancha-mian" aria-hidden="true"></i></button><button type="button" class="order-desktop-inline-image-search" data-trigger-image-search aria-label="图搜" title="图搜"><i class="wego-iconfont-s icon-tupian" aria-hidden="true"></i></button></div></div>'
-      +     '<input type="file" accept="image/*" data-header-image-input hidden>'
+      +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-context-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="' + (imageSearchActive ? '继续输入文字切回文搜' : '搜索商品名称、货号') + '" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
+      +     '<input type="file" accept="image/jpeg,image/png,image/jpg,image/bmp,image/webp,video/mp4" multiple data-header-image-input hidden>'
       +     (inCatalog ? '' : '<button type="button" class="btn btn--medium btn--sm order-desktop-product-search__submit" data-component-slug="button" data-submit-header-search ' + (state.desktopProductKeyword.trim() ? '' : 'hidden') + '>搜索</button>')
       +     (inCatalog ? sidebarFilterButton : collapsedFilterButton)
       +     '<button type="button" class="btn btn--weak btn--sm btn--icon-only order-desktop-barcode-search is-active ' + scannerConnectedClass + '" data-component-slug="button" data-scan aria-label="扫条码" title="扫条码"><i class="btn__icon wego-iconfont-s icon-saotiaoma" aria-hidden="true"></i></button>'
       +   '</div>'
-      +   (inCatalog ? '' : desktopSearchResultDropdown())
+      +   imageSearchStrip()
+      +   (inCatalog || imageSearchActive ? '' : desktopSearchResultDropdown())
       + '</div>';
   }
 
@@ -1861,25 +2287,36 @@
     });
     var searchMatches = desktopProductMatches(state.desktopProductKeyword);
     var showingSearchResults = state.desktopCatalogSearchActive && Boolean(state.desktopProductKeyword.trim());
-    var allProducts = (showingSearchResults ? searchMatches : catalogProductsAfterHiddenSettings()).filter(function (item) {
-      if (showingSearchResults) return true;
-      var categoryMatched = state.catalogCategory === '全部' || item.category === state.catalogCategory || (item.tags || []).indexOf(state.catalogCategory) >= 0;
+    var showingImageResults = imageSearchHasImages();
+    var showingFilterResults = hasActiveCatalogFilters(state.catalogFilters);
+    var showingResultMode = showingSearchResults || showingImageResults || showingFilterResults;
+    var allProducts = (showingImageResults ? imageSearchResults() : (showingSearchResults ? searchMatches : catalogProductsAfterHiddenSettings())).filter(function (item) {
+      if (showingSearchResults || showingImageResults) return true;
+      var categoryMatched = showingFilterResults || state.catalogCategory === '全部' || item.category === state.catalogCategory || (item.tags || []).indexOf(state.catalogCategory) >= 0;
       var scopeMatched = catalogProductMatchesFilters(item, state.catalogFilters);
       return categoryMatched && scopeMatched;
     });
+    var productBody = '';
+    if (showingImageResults && (state.imageSearch.uploadStatus === 'loading' || state.imageSearch.searchStatus === 'loading' || state.imageSearch.searchStatus === 'idle')) {
+      productBody = imageSearchLoadingResult();
+    } else if (showingImageResults && state.imageSearch.searchStatus === 'error') {
+      productBody = imageSearchFailureResult();
+    } else if (!allProducts.length) {
+      productBody = catalogEmptyResult();
+    } else {
+      productBody = '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + '</div>';
+    }
     return ''
       +   '<header class="order-catalog-header"><div class="order-catalog-header__title"><strong>商品库</strong><div class="order-catalog-view-switch" aria-label="商品库显示模式"><button type="button" class="' + (state.catalogViewMode === 'grid' ? 'is-active' : '') + '" data-catalog-view="grid">大图</button><button type="button" class="' + (state.catalogViewMode === 'list' ? 'is-active' : '') + '" data-catalog-view="list">列表</button></div></div><div class="order-catalog-create-anchor"><button type="button" class="btn btn--weak btn--sm order-catalog-publish" data-component-slug="button" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="btn__icon icon-yuanjia" aria-hidden="true"></i>创建</button></div></header>'
       +   desktopProductSearch(true)
       +   '<div class="order-desktop__catalog-scroll">'
-      +   (!showingSearchResults && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
+      +   (!showingResultMode && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
       +   '<div class="order-catalog-sticky-stack">'
       +     catalogHiddenControls()
-      +     (showingSearchResults ? '' : '<div class="order-catalog-toolbar">' + catalogCategoryTabs() + '</div>')
+      +     (showingResultMode ? '' : '<div class="order-catalog-toolbar">' + catalogCategoryTabs() + '</div>')
       +   '</div>'
-      +   '<section class="order-catalog-products' + (showingSearchResults ? ' order-catalog-products--searching' : '') + '">'
-      +     '<div class="order-catalog-products__body">' + (!allProducts.length
-        ? catalogEmptyResult()
-        : '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + '</div>') + '</div>'
+      +   '<section class="order-catalog-products' + (showingResultMode ? ' order-catalog-products--searching' : '') + '">'
+      +     '<div class="order-catalog-products__body">' + productBody + '</div>'
       +   '</section>'
       +   '</div>';
   }
@@ -3352,11 +3789,11 @@
     var availableSizes = matrix.sizes;
     var spec = selectedColor && selectedSize ? specKey(product, selectedColor, selectedSize) : '';
     var quantity = spec ? Number(draft.skuQty[spec] || 0) : 0;
-    var stock = spec ? specStock(product, spec) : 0;
+    var stock = spec ? singleQuantityLimit(product, spec) : 0;
     var desktopSpecRows = availableSizes.map(function (size) {
       var rowSpec = selectedColor ? specKey(product, selectedColor, size) : '';
       var rowQuantity = selectedColor ? Number((rowSpec && draft.skuQty[rowSpec]) || 0) : Number((draft.pendingSizeQty && draft.pendingSizeQty[size]) || 0);
-      var rowStock = selectedColor ? (rowSpec ? specStock(product, rowSpec) : 0) : pendingSizeStock(product, size);
+      var rowStock = selectedColor ? (rowSpec ? singleQuantityLimit(product, rowSpec) : 0) : pendingSizeStock(product, size);
       var rowUnavailable = Boolean(selectedColor) && !rowSpec;
       var counterDisabled = rowUnavailable || rowStock <= 0;
       return '<div class="order-add-spec-counter-row' + (rowUnavailable ? ' is-disabled' : '') + '">'
@@ -3897,7 +4334,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + imageSearchPermissionDialog() + imageSearchDropOverlay() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
@@ -3922,6 +4359,12 @@
     syncCatalogCategoryTabs(root);
     positionDesktopDisplayModeMenu(root);
     positionDesktopCatalogCreateMenu(root);
+    if (state.imageSearch.dialog) {
+      window.requestAnimationFrame(function () {
+        var dialogButton = root.querySelector('.order-image-search-dialog .dialog__btn');
+        if (dialogButton) dialogButton.focus({ preventScroll: true });
+      });
+    }
   }
 
   function positionDesktopDisplayModeMenu(root) {
@@ -4084,8 +4527,10 @@
     return target.closest('.order-desktop__side, .order-desktop-modal__body, .order-v2-modal__body') || root;
   }
 
-  function startAdd(productId) {
-    var product = activeCatalogProducts().find(function (item) { return item.id === productId; });
+  function startAdd(productOrId) {
+    var product = productOrId && typeof productOrId === 'object'
+      ? productOrId
+      : activeCatalogProducts().find(function (item) { return item.id === productOrId; });
     if (!product) return;
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
     var skuQty = {};
@@ -4112,7 +4557,11 @@
       selectedSize: '',
       note: '',
       noteOpen: false,
-      batchSelection: null
+      batchSelection: null,
+      searchMeta: {
+        used_multi_picture_search: imageSearchHasImages() && state.imageSearch.images.length > 1,
+        used_picture_precise_search: false
+      }
     };
     state.panel = 'add';
     renderActive();
@@ -4123,7 +4572,12 @@
     if (!product || product.specs.length !== 1) return false;
     var skuQty = {};
     skuQty[product.specs[0]] = 1;
-    mergeProductIntoOrder(product, skuQty, 'single', '');
+    mergeProductIntoOrder(product, skuQty, 'single', '', {
+      searchMeta: {
+        used_multi_picture_search: imageSearchHasImages() && state.imageSearch.images.length > 1,
+        used_picture_precise_search: false
+      }
+    });
     markDirty(ctx);
     ctx.toast('已加入开单清单');
     return true;
@@ -4317,6 +4771,10 @@
     state.selectedRow = null;
     var priceMode = pricing && pricing.priceMode ? pricing.priceMode : 'retail';
     var unitPrice = pricing && pricing.unitPrice != null ? Number(pricing.unitPrice) : customerPrice(product);
+    var searchMeta = pricing && pricing.searchMeta ? pricing.searchMeta : {
+      used_multi_picture_search: false,
+      used_picture_precise_search: false
+    };
     var existing = state.products.find(function (item) {
       return item.code === product.code && (item.priceMode || 'retail') === priceMode && Number(item.price) === unitPrice;
     });
@@ -4328,6 +4786,8 @@
         return sum + Number(existing.skuQty[spec] || 0);
       }, 0);
       if (note && !existing.note) existing.note = note;
+      existing.used_multi_picture_search = Boolean(existing.used_multi_picture_search || searchMeta.used_multi_picture_search);
+      existing.used_picture_precise_search = Boolean(existing.used_picture_precise_search || searchMeta.used_picture_precise_search);
       return existing;
     }
     var created = {
@@ -4343,7 +4803,9 @@
       mode: mode,
       skuQty: Object.assign({}, skuQty),
       note: note || '',
-      manualPrice: priceMode !== 'retail'
+      manualPrice: priceMode !== 'retail',
+      used_multi_picture_search: Boolean(searchMeta.used_multi_picture_search),
+      used_picture_precise_search: Boolean(searchMeta.used_picture_precise_search)
     };
     state.products.push(created);
     return created;
@@ -4801,6 +5263,7 @@
       var nextIndustry = target.dataset.industry;
       var industryChanged = nextIndustry !== state.industry;
       if (industryChanged) {
+        clearImageSearchState();
         state.industry = nextIndustry;
         state.products = [];
         state.orderTotalAdjustment = 0;
@@ -4823,8 +5286,54 @@
       return;
     }
     if (target.matches('[data-trigger-image-search]')) {
-      var localImageInput = root.querySelector('[data-header-image-input]');
-      if (localImageInput) localImageInput.click();
+      openImageSearchPicker(root, ctx);
+      return;
+    }
+    if (target.matches('[data-image-search-item]')) {
+      selectImageSearchItem(target.dataset.imageSearchItem);
+      return;
+    }
+    if (target.matches('[data-retry-image-search]')) {
+      var retryImage = activeImageSearchItem();
+      if (retryImage) runImageSearch(retryImage, { force: true });
+      return;
+    }
+    if (target.matches('[data-close-image-search-dialog]')) {
+      if (state.imageSearch.enabling) {
+        window.clearTimeout(imageSearchPermissionTimer);
+        state.imageSearch.enabling = false;
+        state.imageSearch.permissionLoading = false;
+      }
+      state.imageSearch.dialog = '';
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-pay-image-search]')) {
+      state.imageSearch.dialog = '';
+      renderActive();
+      ctx.toast('会员开通页为外部流程，当前演示不跳转');
+      return;
+    }
+    if (target.matches('[data-enable-image-search]')) {
+      if (state.imageSearch.enabling) return;
+      state.imageSearch.enabling = true;
+      state.imageSearch.permissionLoading = true;
+      renderActive();
+      window.clearTimeout(imageSearchPermissionTimer);
+      imageSearchPermissionTimer = window.setTimeout(function () {
+        state.imageSearch.enabling = false;
+        if (state.imageSearch.enableShouldFail) {
+          state.imageSearch.permissionLoading = false;
+          state.imageSearch.dialog = '';
+          renderActive();
+          ctx.toast('图搜开启失败');
+          return;
+        }
+        state.imageSearch.enabled = true;
+        state.imageSearch.permissionLoading = false;
+        state.imageSearch.dialog = 'success';
+        renderActive();
+      }, 650);
       return;
     }
     if (target.matches('[data-guide-id]')) {
@@ -4950,6 +5459,8 @@
       state.catalogFilters = cloneCatalogFilters(state.catalogFilterDraft);
       resetDesktopProductSearch();
       closeCatalogFilter(true);
+      var filteredImage = activeImageSearchItem();
+      if (filteredImage) runImageSearch(filteredImage);
       return;
     }
     if (target.matches('[data-scroll-history]')) {
@@ -4969,7 +5480,9 @@
       if (hiddenTypeIndex >= 0) state.catalogHiddenTypes.splice(hiddenTypeIndex, 1);
       else state.catalogHiddenTypes.push(hiddenType);
       rememberCatalogHiddenSettings();
-      renderCatalogPreservingScroll(root, hiddenType);
+      var hiddenImage = activeImageSearchItem();
+      if (hiddenImage) runImageSearch(hiddenImage, { force: true });
+      else renderCatalogPreservingScroll(root, hiddenType);
       return;
     }
     if (target.matches('[data-hide-catalog-hidden-bar]')) {
@@ -5517,6 +6030,7 @@
         editedProduct.weight = nextWeight;
         editedProduct.inventory = nextInventory;
         if (editedProduct.stock != null) editedProduct.stock = nextInventory == null ? editedProduct.stock : nextInventory;
+        rememberCreatedProducts();
       }
       if (editedOrderItem) {
         editedOrderItem.name = nextName;
@@ -5609,25 +6123,21 @@
         specs: createSpecs,
         colors: createColors,
         weight: createWeight,
-        inventory: createInventory
+        inventory: createInventory,
+        isUserCreated: true,
+        createdType: createDraft.type === 'temporary' ? 'temporary' : 'product'
       };
-      if (createDraft.type === 'temporary') {
-        var temporarySkuQty = {};
-        temporarySkuQty[createSpecs[0]] = 1;
-        mergeProductIntoOrder(newProduct, temporarySkuQty, 'single', '');
-      } else {
-        PRODUCTS.unshift(newProduct);
+      PRODUCTS.unshift(newProduct);
+      rememberCreatedProducts();
+      if (createDraft.type !== 'temporary') {
         state.catalogCategory = '全部';
         state.catalogFilters = emptyCatalogFilters();
         state.catalogFilterDraft = emptyCatalogFilters();
         state.catalogFilterPanelOpen = false;
       }
       state.productCreateDraft = null;
-      state.panel = null;
-      if (createDraft.type === 'temporary') markDirty(ctx);
-      else renderActive();
-      focusCatalogCreateTrigger();
-      ctx.toast(createDraft.type === 'temporary' ? '临时商品已加入开单清单' : '商品已发布');
+      startAdd(newProduct);
+      ctx.toast(createDraft.type === 'temporary' ? '临时商品创建成功' : '商品已发布');
       return;
     }
     if (target.matches('[data-product-id]')) {
@@ -5876,7 +6386,7 @@
         Object.keys(carriedSizeQuantities).forEach(function (size) {
           var carriedSpec = specKey(state.addDraft.product, state.addDraft.selectedColor, size);
           if (!carriedSpec) return;
-          state.addDraft.skuQty[carriedSpec] = Math.min(specStock(state.addDraft.product, carriedSpec), Number(carriedSizeQuantities[size] || 0));
+          state.addDraft.skuQty[carriedSpec] = Math.min(singleQuantityLimit(state.addDraft.product, carriedSpec), Number(carriedSizeQuantities[size] || 0));
         });
         state.addDraft.pendingSizeQty = Object.assign({}, carriedSizeQuantities);
       }
@@ -5911,7 +6421,7 @@
         ctx.toast('该颜色暂无此规格');
         return;
       }
-      var singleStock = specStock(draftNow.product, singleSpec);
+      var singleStock = singleQuantityLimit(draftNow.product, singleSpec);
       if (!desktopSpecCounter && Number(target.dataset.singleQtyDelta) > 0) {
         Object.keys(draftNow.skuQty).forEach(function (key) {
           if (key !== singleSpec) draftNow.skuQty[key] = 0;
@@ -6050,7 +6560,7 @@
       var noteInput = addScope.querySelector('[data-add-note]');
       draft.note = noteInput ? noteInput.value.trim() : draft.note;
       if (draft.mode === 'batch') rememberBatchPattern(draft);
-      mergeProductIntoOrder(draft.product, draft.skuQty, draft.mode, draft.note, { priceMode: draft.priceMode, unitPrice: draft.unitPrice });
+      mergeProductIntoOrder(draft.product, draft.skuQty, draft.mode, draft.note, { priceMode: draft.priceMode, unitPrice: draft.unitPrice, searchMeta: draft.searchMeta });
       state.panel = null;
       state.addDraft = null;
       state.desktopProductKeyword = '';
@@ -6416,6 +6926,7 @@
     }
     if (target.matches('[data-clear-header-search]')) {
       resetDesktopProductSearch();
+      clearImageSearchState();
       renderActive();
       var headerSearch = activeContext.root.querySelector('[data-header-catalog-search]');
       if (headerSearch) headerSearch.focus({ preventScroll: true });
@@ -6524,25 +7035,23 @@
         target.value = '';
         return;
       }
-      if (state.productCreateDraft.objectUrl && window.URL && window.URL.revokeObjectURL) window.URL.revokeObjectURL(state.productCreateDraft.objectUrl);
-      var objectUrl = window.URL && window.URL.createObjectURL ? window.URL.createObjectURL(productImageFile) : '';
-      state.productCreateDraft.image = objectUrl;
-      state.productCreateDraft.objectUrl = objectUrl;
-      state.productCreateDraft.imageName = productImageFile.name;
-      renderActive();
-      focusProductCreateControl('[data-trigger-product-create-image]');
-      ctx.toast('已添加商品图片');
+      var imageDraft = state.productCreateDraft;
+      var imageReader = new FileReader();
+      imageReader.onload = function () {
+        if (state.productCreateDraft !== imageDraft) return;
+        imageDraft.image = String(imageReader.result || '');
+        imageDraft.imageName = productImageFile.name;
+        renderActive();
+        focusProductCreateControl('[data-trigger-product-create-image]');
+        ctx.toast('已添加商品图片');
+      };
+      imageReader.onerror = function () { ctx.toast('商品图片读取失败，请重试'); };
+      imageReader.readAsDataURL(productImageFile);
       return;
     }
     if (target.matches('[data-header-image-input]')) {
-      var imageFile = target.files && target.files[0];
-      if (!imageFile) return;
-      if (imageFile.type && imageFile.type.indexOf('image/') !== 0) {
-        ctx.toast('请选择图片文件');
-        return;
-      }
-      state.imageSearchFileName = imageFile.name;
-      ctx.toast('已选择图片：' + imageFile.name + '，正在识别相似商品');
+      processImageSearchFiles(target.files, ctx);
+      target.value = '';
       return;
     }
     if (target.matches('[data-scanner-image-input]')) {
@@ -6602,9 +7111,30 @@
       return;
     }
     if (target.matches('[data-header-catalog-search]')) {
+      var switchingFromImageSearch = Boolean(target.value && (imageSearchHasImages() || imageSearchTimer));
+      if (target.value && imageSearchHasImages()) clearImageSearchState();
       state.desktopProductKeyword = target.value;
       var wasCatalogSearchActive = state.desktopCatalogSearchActive;
       var headerMatches = desktopProductMatches(target.value);
+      if (switchingFromImageSearch && target.value.trim()) {
+        window.clearTimeout(imageSearchTimer);
+        state.desktopSearchResultsOpen = false;
+        state.desktopCatalogSearchActive = false;
+        imageSearchTimer = window.setTimeout(function () {
+          imageSearchTimer = 0;
+          if (!state.desktopProductKeyword.trim()) return;
+          var delayedMatches = desktopProductMatches(state.desktopProductKeyword);
+          state.desktopSearchResultsOpen = effectiveCatalogCollapsed() && delayedMatches.length >= 2;
+          state.desktopCatalogSearchActive = !effectiveCatalogCollapsed();
+          renderActive();
+          focusDesktopProductSearch();
+        }, 300);
+        renderActive();
+        focusDesktopProductSearch();
+        return;
+      }
+      window.clearTimeout(imageSearchTimer);
+      imageSearchTimer = 0;
       state.desktopSearchResultsOpen = effectiveCatalogCollapsed() && headerMatches.length >= 2;
       state.desktopCatalogSearchActive = !effectiveCatalogCollapsed() && Boolean(target.value.trim());
       var headerClear = target.parentElement.querySelector('.input-clear');
@@ -6677,7 +7207,7 @@
         target.value = '-';
         return;
       }
-      var singleInputStock = specStock(singleDraft.product, singleInputSpec);
+      var singleInputStock = singleQuantityLimit(singleDraft.product, singleInputSpec);
       singleParsed = Math.max(desktopSpecInput ? 0 : -9999, Math.min(singleInputStock, singleParsed));
       target.value = singleParsed;
       if (!desktopSpecInput) {
@@ -6822,6 +7352,11 @@
     layoutWatchSnapshot();
     bindLayoutWatch();
     renderWorkbench(root, ctx);
+    window.clearTimeout(imageSearchPermissionTimer);
+    imageSearchPermissionTimer = window.setTimeout(function () {
+      if (!state.imageSearch) return;
+      state.imageSearch.permissionLoading = false;
+    }, 220);
     scheduleClipboardRecipientCheck();
     root.addEventListener('pointerdown', function (event) {
       if (event.button !== 0) return;
@@ -6955,6 +7490,58 @@
       pasteTarget.value = pastedText;
       fillRecognizedAddress(panelScope(pasteTarget, root), pastedText, ctx);
     });
+    root.addEventListener('dragenter', function (event) {
+      var transferTypes = event.dataTransfer && Array.from(event.dataTransfer.types || []);
+      if (!transferTypes || transferTypes.indexOf('Files') < 0) return;
+      var transferItems = event.dataTransfer && Array.from(event.dataTransfer.items || []);
+      if (transferItems.length && !transferItems.some(function (item) {
+        return item.kind === 'file' && (/^image\/(jpeg|jpg|png|bmp|webp)$/i.test(item.type || '') || /^video\/mp4$/i.test(item.type || ''));
+      })) return;
+      event.preventDefault();
+      imageSearchDragDepth += 1;
+      if (!state.imageSearch.dragActive) {
+        state.imageSearch.dragActive = true;
+        renderActive();
+      }
+    });
+    root.addEventListener('dragover', function (event) {
+      if (!state.imageSearch.dragActive) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    });
+    root.addEventListener('dragleave', function (event) {
+      if (!state.imageSearch.dragActive) return;
+      event.preventDefault();
+      imageSearchDragDepth = Math.max(0, imageSearchDragDepth - 1);
+      if (!imageSearchDragDepth) {
+        state.imageSearch.dragActive = false;
+        renderActive();
+      }
+    });
+    root.addEventListener('drop', function (event) {
+      var dropTypes = event.dataTransfer && Array.from(event.dataTransfer.types || []);
+      if (!dropTypes || dropTypes.indexOf('Files') < 0) return;
+      event.preventDefault();
+      if (!state.imageSearch.dragActive) return;
+      imageSearchDragDepth = 0;
+      state.imageSearch.dragActive = false;
+      if (state.imageSearch.permissionLoading) {
+        renderActive();
+        ctx.toast('正在获取图搜权限，请稍候');
+        return;
+      }
+      if (state.imageSearch.vipState !== 1) {
+        state.imageSearch.dialog = 'pay';
+        renderActive();
+        return;
+      }
+      if (!state.imageSearch.enabled) {
+        state.imageSearch.dialog = 'enable';
+        renderActive();
+        return;
+      }
+      processImageSearchFiles(event.dataTransfer && event.dataTransfer.files, ctx);
+    });
     root.addEventListener('focusin', function (event) {
       var target = event.target;
       if (target.matches('[data-payment-amount][data-online-combo-index]')) {
@@ -7003,6 +7590,11 @@
       markDirty(ctx);
     }, true);
     root.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && state.imageSearch.dialog) {
+        state.imageSearch.dialog = '';
+        renderActive();
+        return;
+      }
       if (event.key === 'Tab' && state.panel === 'clipboard-address') {
         var clipboardDialog = root.querySelector('.order-clipboard-address-modal .order-desktop-modal__panel');
         var clipboardFocusable = clipboardDialog ? Array.from(clipboardDialog.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function (element) {
@@ -7137,6 +7729,16 @@
         event.preventDefault();
         if (!applyDesktopSearch(event.target.value, ctx)) ctx.toast('没有找到匹配商品，请检查名称或货号');
       }
+    });
+    ctx.onDestroy(function () {
+      window.clearTimeout(imageSearchPermissionTimer);
+      if (state.imageSearch) {
+        state.imageSearch.enabling = false;
+        clearImageSearchState();
+        state.imageSearch.dialog = '';
+      }
+      imageSearchDragDepth = 0;
+      if (state.imageSearch) state.imageSearch.dragActive = false;
     });
   }
 
