@@ -8391,6 +8391,25 @@ button.order-payment-method-card {
     background: var(--bg-subtle);
   }
 
+  .order-filter-frame__header {
+    display: flex;
+    flex: 0 0 var(--size-56);
+    min-height: var(--size-56);
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--spacer-16);
+    background: var(--bg-surface);
+    border-bottom: var(--stroke-hairline) solid var(--border-neutral-l2);
+  }
+
+  .order-filter-frame__header h2 {
+    margin: 0;
+    color: var(--text-default);
+    font-size: var(--heading-sm-font-size);
+    font-weight: var(--font-weight-semibold);
+    line-height: var(--heading-sm-line-height);
+  }
+
   .order-filter-frame__scroll {
     flex: 1 1 auto;
     min-height: 0;
@@ -8522,8 +8541,11 @@ button.order-payment-method-card {
   }
 
   .order-filter-frame .wgoo-ffr__tag_list_close {
-    max-height: 104px;
     overflow: hidden;
+  }
+
+  .order-filter-frame .wgoo-ffr__tag_list_close > :nth-child(n + 7) {
+    display: none;
   }
 
   .order-filter-frame .col-1-3 {

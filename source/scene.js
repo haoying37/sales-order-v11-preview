@@ -1656,6 +1656,12 @@
     return ''
       + '<aside class="order-desktop__catalog order-desktop__catalog--filter' + drawerClass + motionClass + '"' + (inDrawer ? ' role="dialog" aria-modal="true"' : ' role="region"') + drawerStyle + ' aria-label="筛选商品" data-business-component="FilterFrame" data-runtime-package="@wgoo/core" data-runtime-props="visible,formConfig,onSuccess">'
       +   '<div class="wgoo-ffr order-filter-frame">'
+      +     '<header class="order-filter-frame__header" data-scene-extension="filter-titlebar">'
+      +       '<h2>筛选</h2>'
+      +       '<button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-catalog-filter aria-label="关闭筛选">'
+      +         '<i class="btn__icon icon-cha16" aria-hidden="true"></i>'
+      +       '</button>'
+      +     '</header>'
       +     '<div class="order-filter-frame__scroll">'
       +       filterFrameDateGroup()
       +       filterFrameChoiceGroup({ title: '来源', name: 'fromId', type: 'goods-from-select', options: fromOptions })
@@ -1679,7 +1685,7 @@
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = false;
     renderActive();
     window.requestAnimationFrame(function () {
-      var firstControl = activeContext && activeContext.root && activeContext.root.querySelector('[data-catalog-filter-date-index], [data-catalog-filter-option]');
+      var firstControl = activeContext && activeContext.root && activeContext.root.querySelector('[data-close-catalog-filter]');
       if (firstControl) firstControl.focus({ preventScroll: true });
     });
   }
