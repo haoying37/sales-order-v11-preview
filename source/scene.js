@@ -303,9 +303,10 @@
     catalogResizePointerId: null,
     catalogViewMode: storedCatalogViewMode(),
     catalogCategory: '全部',
-    catalogFilters: { addedTime: '', source: '', tag: '' },
+    catalogFilters: { dateRange: [], fromId: [], tagId: [] },
     catalogFilterPanelOpen: false,
-    catalogFilterDraft: { addedTime: '', source: '', tag: '' },
+    catalogFilterDraft: { dateRange: [], fromId: [], tagId: [] },
+    catalogFilterTagExpanded: false,
     catalogFilterMotion: false,
     discount: 100,
     discountMode: null,
@@ -1509,21 +1510,55 @@
   }
 
   function emptyCatalogFilters() {
-    return { addedTime: '', source: '', tag: '' };
+    return { dateRange: [], fromId: [], tagId: [] };
   }
 
   function cloneCatalogFilters(filters) {
     filters = filters || emptyCatalogFilters();
     return {
-      addedTime: filters.addedTime || '',
-      source: filters.source || '',
-      tag: filters.tag || ''
+      dateRange: Array.isArray(filters.dateRange) ? filters.dateRange.slice(0, 2) : [],
+      fromId: Array.isArray(filters.fromId) ? filters.fromId.slice(0, 1) : [],
+      tagId: Array.isArray(filters.tagId) ? filters.tagId.slice(0, 1) : []
     };
   }
 
   function hasActiveCatalogFilters(filters) {
     filters = filters || emptyCatalogFilters();
-    return Boolean(filters.addedTime || filters.source || filters.tag);
+    return Boolean(
+      (filters.dateRange || []).some(Boolean)
+      || (filters.fromId || []).length
+      || (filters.tagId || []).length
+    );
+  }
+
+  function localDateValue(date) {
+    var year = date.getFullYear();
+    var month = String(date.getMonth() + 1).padStart(2, '0');
+    var day = String(date.getDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function catalogFilterDatePreset(key) {
+    var now = new Date();
+    var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var end = new Date(start);
+    if (key === 'yesterday') {
+      start.setDate(start.getDate() - 1);
+      end = new Date(start);
+    } else if (key === 'thisMonth') {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    } else if (key === 'lastMonth') {
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      end = new Date(now.getFullYear(), now.getMonth(), 0);
+    } else if (key === 'thisYear') {
+      start = new Date(now.getFullYear(), 0, 1);
+      end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    } else if (key === 'lastYear') {
+      start = new Date(now.getFullYear() - 1, 0, 1);
+      end = new Date(now.getFullYear() - 1, 11, 31);
+    }
+    return [localDateValue(start), localDateValue(end)];
   }
 
   function catalogProductAddedDaysAgo(item) {
@@ -1536,12 +1571,14 @@
   function catalogProductMatchesFilters(item, filters) {
     filters = filters || emptyCatalogFilters();
     var daysAgo = catalogProductAddedDaysAgo(item);
-    var timeMatched = !filters.addedTime
-      || (filters.addedTime === 'today' && daysAgo === 0)
-      || (filters.addedTime === '7d' && daysAgo <= 7)
-      || (filters.addedTime === '30d' && daysAgo <= 30);
-    var sourceMatched = !filters.source || item.source === filters.source;
-    var tagMatched = !filters.tag || (item.tags || []).indexOf(filters.tag) >= 0;
+    var itemDate = new Date();
+    itemDate.setHours(0, 0, 0, 0);
+    itemDate.setDate(itemDate.getDate() - daysAgo);
+    var itemDateValue = localDateValue(itemDate);
+    var range = Array.isArray(filters.dateRange) ? filters.dateRange : [];
+    var timeMatched = (!range[0] || itemDateValue >= range[0]) && (!range[1] || itemDateValue <= range[1]);
+    var sourceMatched = !(filters.fromId || []).length || item.source === filters.fromId[0];
+    var tagMatched = !(filters.tagId || []).length || (item.tags || []).indexOf(filters.tagId[0]) >= 0;
     return timeMatched && sourceMatched && tagMatched;
   }
 
@@ -1554,17 +1591,58 @@
     }, []);
   }
 
-  function catalogFilterGroups() {
-    return [
-      { title: '添加时间', key: 'addedTime', options: [
-        { value: '', label: '全部时间' },
-        { value: 'today', label: '今天' },
-        { value: '7d', label: '近7天' },
-        { value: '30d', label: '近30天' }
-      ] },
-      { title: '来源', key: 'source', options: [{ value: '', label: '全部来源' }].concat(['微购相册', '采购入库', '手动创建'].map(function (value) { return { value: value, label: value }; })) },
-      { title: '标签', key: 'tag', options: [{ value: '', label: '全部标签' }].concat(catalogFilterTagOptions().map(function (value) { return { value: value, label: value }; })) }
+  function filterFrameTag(label, group, value, active) {
+    return ''
+      + '<div class="col-1-3">'
+      +   '<button type="button" class="wgoo-ffr__tag ' + (active ? 'wgoo-ffr__tag_checked' : 'wgoo-ffr__tag_uncheck') + '" data-runtime-subcomponent="FilterFrame.Tag" data-catalog-filter-option data-filter-group="' + group + '" data-filter-option-value="' + escapeHtml(value) + '" aria-pressed="' + active + '">' + escapeHtml(label) + '</button>'
+      + '</div>';
+  }
+
+  function filterFrameDateGroup() {
+    var values = state.catalogFilterDraft.dateRange || [];
+    var presets = [
+      { value: 'today', label: '今天' },
+      { value: 'yesterday', label: '昨天' },
+      { value: 'thisMonth', label: '本月' },
+      { value: 'lastMonth', label: '上月' },
+      { value: 'thisYear', label: '今年' },
+      { value: 'lastYear', label: '去年' }
     ];
+    return ''
+      + '<section class="order-filter-frame__group order-filter-frame__group--first" data-filter-form-type="date-range" data-filter-form-name="dateRange">'
+      +   '<div class="wgoo-ffr__title"><div class="wgoo-ffr__title_wrap">添加时间</div>'
+      +     (values.some(Boolean) ? '<button type="button" class="wgoo-ffr__title_act" data-clear-catalog-filter-date>清空</button>' : '')
+      +   '</div>'
+      +   '<div class="wgoo-ffr__panel_range">'
+      +     '<label class="wgoo-input-v3 wgoo-ffr__price_input ' + (values[0] ? 'wgoo-ffr__date-picker-insert' : 'wgoo-ffr__date-picker-none') + '"><span>' + (values[0] || '开始日期') + '</span><input type="date" value="' + escapeHtml(values[0] || '') + '" data-catalog-filter-date-index="0" aria-label="开始日期"></label>'
+      +     '<div class="wgoo-ffr__range_line">-</div>'
+      +     '<label class="wgoo-input-v3 wgoo-ffr__price_input ' + (values[1] ? 'wgoo-ffr__date-picker-insert' : 'wgoo-ffr__date-picker-none') + '"><span>' + (values[1] || '结束日期') + '</span><input type="date" value="' + escapeHtml(values[1] || '') + '" data-catalog-filter-date-index="1" aria-label="结束日期"></label>'
+      +   '</div>'
+      +   '<div class="wgoo-ffr__tag_list row-3">' + presets.map(function (preset) {
+        var presetRange = catalogFilterDatePreset(preset.value);
+        return filterFrameTag(preset.label, 'dateRange', preset.value, values[0] === presetRange[0] && values[1] === presetRange[1]);
+      }).join('') + '</div>'
+      + '</section>';
+  }
+
+  function filterFrameChoiceGroup(config) {
+    var values = state.catalogFilterDraft[config.name] || [];
+    var selectedLabels = config.options.filter(function (option) { return values.indexOf(option.value) >= 0; }).map(function (option) { return option.label; });
+    var collapsible = config.options.length > 6;
+    var expanded = config.name !== 'tagId' || state.catalogFilterTagExpanded;
+    var titleOpen = '<div class="wgoo-ffr__title order-filter-frame__choice-title">';
+    if (collapsible) titleOpen = '<button type="button" class="wgoo-ffr__title order-filter-frame__choice-title" data-toggle-catalog-filter-tags aria-expanded="' + expanded + '">';
+    var titleClose = collapsible ? '</button>' : '</div>';
+    return ''
+      + '<section class="order-filter-frame__group" data-filter-form-type="' + config.type + '" data-filter-form-name="' + config.name + '">'
+      +   titleOpen
+      +     '<span class="wgoo-ffr__title_wrap"><span>' + config.title + '</span><span class="wgoo-ffr__selected_tags">' + escapeHtml(selectedLabels.join('、')) + '</span></span>'
+      +     (collapsible ? '<i class="wego-iconfont-s icon-' + (expanded ? 'shangjiantou16' : 'xiajiantou16') + '" aria-hidden="true"></i>' : '')
+      +   titleClose
+      +   '<div class="wgoo-ffr__tag_list row-3' + (collapsible && !expanded ? ' wgoo-ffr__tag_list_close' : '') + '">' + config.options.map(function (option) {
+        return filterFrameTag(option.label, config.name, option.value, values.indexOf(option.value) >= 0);
+      }).join('') + '</div>'
+      + '</section>';
   }
 
   function desktopCatalogFilter(inDrawer) {
@@ -1573,24 +1651,20 @@
       ? ' style="width:' + Math.max(320, Math.min(560, state.catalogWidth != null ? state.catalogWidth : 379)) + 'px"'
       : '';
     var motionClass = state.catalogFilterMotion ? '' : ' order-catalog-filter--static';
-    var groups = catalogFilterGroups().map(function (group) {
-      return ''
-        + '<section class="order-catalog-business-filter__section">'
-        +   '<h3>' + group.title + '</h3>'
-        +   '<div class="order-catalog-business-filter__options">' + group.options.map(function (option) {
-          var active = state.catalogFilterDraft[group.key] === option.value;
-          return '<button type="button" class="tag tag--28 ' + (active ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-variant-name="' + (active ? 'Tag_28_Gray_Selected' : 'Tag_28_Gray_Normal') + '" data-catalog-filter-option data-filter-type="3" data-filter-group="' + group.key + '" data-filter-option-value="' + escapeHtml(option.value) + '" aria-pressed="' + active + '"><span class="tag__label">' + option.label + '</span></button>';
-        }).join('') + '</div>'
-        + '</section>';
-    }).join('');
+    var fromOptions = ['微购相册', '采购入库', '手动创建'].map(function (value) { return { value: value, label: value }; });
+    var tagOptions = catalogFilterTagOptions().map(function (value) { return { value: value, label: value }; });
     return ''
-      + '<aside class="order-desktop__catalog order-desktop__catalog--filter' + drawerClass + motionClass + '"' + (inDrawer ? ' role="dialog" aria-modal="true"' : ' role="region"') + drawerStyle + ' aria-label="筛选商品" data-business-component="FilterPage" data-business-view="ActionSidebar" data-filter-view-model="FilterViewModel">'
-      +   '<div class="order-catalog-business-filter">'
-      +     '<header class="order-catalog-business-filter__header"><h2>筛选</h2><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-catalog-filter aria-label="关闭筛选"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
-      +     '<div class="order-catalog-business-filter__body">' + groups + '</div>'
-      +     '<footer class="order-catalog-business-filter__actions">'
-      +       '<button type="button" class="button btn btn--weak btn--md" data-component="button" data-component-slug="button" data-variant-name="Button_40_Gray_Normal" data-reset-catalog-filter>重置</button>'
-      +       '<button type="button" class="button btn btn--strong btn--md" data-component="button" data-component-slug="button" data-variant-name="Button_40_Green_Normal" data-confirm-catalog-filter>确定</button>'
+      + '<aside class="order-desktop__catalog order-desktop__catalog--filter' + drawerClass + motionClass + '"' + (inDrawer ? ' role="dialog" aria-modal="true"' : ' role="region"') + drawerStyle + ' aria-label="筛选商品" data-business-component="FilterFrame" data-runtime-package="@wgoo/core" data-runtime-props="visible,formConfig,onSuccess">'
+      +   '<div class="wgoo-ffr order-filter-frame">'
+      +     '<div class="order-filter-frame__scroll">'
+      +       filterFrameDateGroup()
+      +       filterFrameChoiceGroup({ title: '来源', name: 'fromId', type: 'goods-from-select', options: fromOptions })
+      +       filterFrameChoiceGroup({ title: '标签', name: 'tagId', type: 'goods-tag-select', options: tagOptions })
+      +       '<div class="order-filter-frame__footer-spacer" aria-hidden="true"></div>'
+      +     '</div>'
+      +     '<footer class="order-filter-frame__actions" data-runtime-subcomponent="FilterFrame.FixedFooter">'
+      +       '<button type="button" class="button btn btn--weak btn--lg" data-component="button" data-component-slug="button" data-variant-name="Button_48_Gray_Normal" data-reset-catalog-filter>重置</button>'
+      +       '<button type="button" class="button btn btn--strong btn--lg" data-component="button" data-component-slug="button" data-variant-name="Button_48_Green_Normal" data-confirm-catalog-filter>确定</button>'
       +     '</footer>'
       +   '</div>'
       + '</aside>';
@@ -1599,13 +1673,14 @@
   function openCatalogFilter() {
     if (state.scannerOpen) closeBarcodeScanner(false);
     state.catalogFilterDraft = cloneCatalogFilters(state.catalogFilters);
+    state.catalogFilterTagExpanded = false;
     state.catalogFilterMotion = true;
     state.catalogFilterPanelOpen = true;
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = false;
     renderActive();
     window.requestAnimationFrame(function () {
-      var closeButton = activeContext && activeContext.root && activeContext.root.querySelector('[data-close-catalog-filter]');
-      if (closeButton) closeButton.focus({ preventScroll: true });
+      var firstControl = activeContext && activeContext.root && activeContext.root.querySelector('[data-catalog-filter-date-index], [data-catalog-filter-option]');
+      if (firstControl) firstControl.focus({ preventScroll: true });
     });
   }
 
@@ -1628,6 +1703,8 @@
       '[data-open-catalog-filter]',
       '[data-close-catalog-filter]',
       '[data-catalog-filter-option]',
+      '[data-clear-catalog-filter-date]',
+      '[data-toggle-catalog-filter-tags]',
       '[data-reset-catalog-filter]',
       '[data-confirm-catalog-filter]'
     ].join(', '));
@@ -4733,10 +4810,28 @@
       closeCatalogFilter(true);
       return;
     }
+    if (target.matches('[data-clear-catalog-filter-date]')) {
+      state.catalogFilterDraft.dateRange = [];
+      state.catalogFilterMotion = false;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-toggle-catalog-filter-tags]')) {
+      state.catalogFilterTagExpanded = !state.catalogFilterTagExpanded;
+      state.catalogFilterMotion = false;
+      renderActive();
+      return;
+    }
     if (target.matches('[data-catalog-filter-option]')) {
       var filterGroup = target.dataset.filterGroup;
       if (filterGroup && Object.prototype.hasOwnProperty.call(state.catalogFilterDraft, filterGroup)) {
-        state.catalogFilterDraft[filterGroup] = target.dataset.filterOptionValue || '';
+        if (filterGroup === 'dateRange') {
+          state.catalogFilterDraft.dateRange = catalogFilterDatePreset(target.dataset.filterOptionValue);
+        } else {
+          var optionValue = target.dataset.filterOptionValue || '';
+          var currentValues = state.catalogFilterDraft[filterGroup] || [];
+          state.catalogFilterDraft[filterGroup] = currentValues[0] === optionValue ? [] : [optionValue];
+        }
       }
       state.catalogFilterMotion = false;
       renderActive();
@@ -6214,6 +6309,19 @@
 
   function handleInput(event, root, ctx) {
     var target = event.target;
+    if (state.catalogFilterPanelOpen && target.matches('[data-catalog-filter-date-index]')) {
+      var dateIndex = Number(target.dataset.catalogFilterDateIndex);
+      var nextRange = (state.catalogFilterDraft.dateRange || []).slice(0, 2);
+      nextRange[dateIndex] = target.value || '';
+      if (nextRange[0] && nextRange[1] && nextRange[0] > nextRange[1]) {
+        if (dateIndex === 0) nextRange[1] = nextRange[0];
+        else nextRange[0] = nextRange[1];
+      }
+      state.catalogFilterDraft.dateRange = nextRange;
+      state.catalogFilterMotion = false;
+      if (event.type === 'change') renderActive();
+      return;
+    }
     if (state.panel === 'clipboard-address' && target.matches('[data-clipboard-address-field]')) {
       var clipboardField = target.dataset.clipboardAddressField;
       var clipboardValue = target.value;
