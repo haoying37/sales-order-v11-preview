@@ -31,6 +31,83 @@
     { id: 'p12', code: 'DR-5516', name: '优雅中长裙', category: '裙装', tags: ['连衣裙'], source: '微购相册', listPrice: 329, image: './lib/assets/image/clothing/clothing_8/img_1708defc_20240216_i1708092843_8369_2.jpg.jpg', specs: ['米色/S', '米色/M', '黑色/S', '黑色/M', '黑色/L'] }
   ];
 
+  // Desktop add-product demo data for the SKU-row contract. Product-level catalog data remains unchanged.
+  var SKU_ROW_DEMOS = {
+    p1: {
+      defaultSkuImage: './lib/assets/image/clothing/clothing_2/clothing_2_1.jpg.jpg',
+      inactiveLinePrice: 109,
+      myAlbum: true,
+      isDisplayStock: true,
+      distributionAgentMark: false,
+      negativeStock: false,
+      skus: {
+        '白色/S': { img: './lib/assets/image/clothing/clothing_2/clothing_2_1.jpg.jpg', price: 89, finallyPrice: 79, maxPrice: 99, stock: 2 },
+        '白色/M': { price: 89, finallyPrice: 79, maxPrice: 99, stock: 23 },
+        '白色/L': { img: './lib/assets/image/clothing/clothing_9/1663740558495_35610.jpg', price: 99, finallyPrice: 0, maxPrice: 109, stock: 30 },
+        '白色/XL': { price: 99, finallyPrice: 0, maxPrice: 109, stock: 37 },
+        '黑色/S': { img: './lib/assets/image/clothing/clothing_11/1663741015636_38129.jpg', price: 89, finallyPrice: 79, maxPrice: 99, stock: 16 },
+        '黑色/M': { price: 89, finallyPrice: 79, maxPrice: 99, stock: 24 },
+        '黑色/L': { price: 99, finallyPrice: 0, maxPrice: 109, stock: 31 },
+        '黑色/XL': { price: 99, finallyPrice: 0, maxPrice: 109, stock: 38 }
+      }
+    },
+    p2: {
+      defaultSkuImage: './lib/assets/image/clothing/clothing_4/1663741015641_38566.jpg',
+      inactiveLinePrice: null,
+      myAlbum: true,
+      isDisplayStock: true,
+      distributionAgentMark: false,
+      negativeStock: false,
+      skus: {
+        '蓝色/27': { price: 129, finallyPrice: 129, stock: 8 },
+        '蓝色/28': { price: 129, finallyPrice: 129, stock: 12 },
+        '蓝色/29': { price: 129, finallyPrice: 129, stock: 18 },
+        '蓝色/30': { price: 129, finallyPrice: 129, stock: 26 },
+        '黑色/28': { price: 129, finallyPrice: 129, stock: 11 },
+        '黑色/30': { price: 129, finallyPrice: 129, stock: 20 }
+      }
+    },
+    p3: {
+      defaultSkuImage: './lib/assets/image/clothing/clothing_5/1663741067252_48951.jpg',
+      inactiveLinePrice: null,
+      myAlbum: true,
+      isDisplayStock: true,
+      distributionAgentMark: true,
+      negativeStock: false,
+      skus: {
+        '粉色/S': { price: 259, stock: 6 }, '粉色/M': { price: 259, stock: 10 }, '粉色/L': { price: 259, stock: 15 },
+        '绿色/S': { price: 259, stock: 7 }, '绿色/M': { price: 259, stock: 11 }, '绿色/L': { price: 259, stock: 14 }
+      }
+    },
+    p4: {
+      defaultSkuImage: './lib/assets/image/clothing/clothing_7/1663741042726_75173.jpg',
+      inactiveLinePrice: null,
+      myAlbum: true,
+      isDisplayStock: true,
+      distributionAgentMark: false,
+      negativeStock: false,
+      skus: {}
+    },
+    p5: {
+      defaultSkuImage: './lib/assets/image/clothing/clothing_1/clothing_1_6.jpg',
+      inactiveLinePrice: null,
+      myAlbum: true,
+      isDisplayStock: true,
+      distributionAgentMark: false,
+      negativeStock: true,
+      skus: { '浅蓝/27': { price: 159, stock: -3 } }
+    },
+    p6: {
+      defaultSkuImage: './lib/assets/image/clothing/clothing_3/1663741004075_93363.jpg',
+      inactiveLinePrice: null,
+      myAlbum: false,
+      isDisplayStock: true,
+      distributionAgentMark: false,
+      negativeStock: true,
+      skus: { '牛仔蓝/S': { price: 179, stock: -2 } }
+    }
+  };
+
   var PHONE_PRODUCTS = [
     { id: 'm1', code: 'APL-IP16P-OB-8-256', name: 'Apple iPhone 16 Pro 曜石黑 8GB+256GB', category: 'Apple', tags: ['Apple'], source: '采购入库', listPrice: 4299, stock: 1, isPinned: true, image: './scenes/bcg/开单/assets/phones/phone-black.png', specs: ['标准规格'] },
     { id: 'm2', code: 'HW-M70-GB-12-256', name: 'HUAWEI Mate 70 冰川蓝 12GB+256GB', category: 'HUAWEI', tags: ['HUAWEI'], source: '采购入库', listPrice: 3699, stock: 1, image: './scenes/bcg/开单/assets/phones/phone-blue.png', specs: ['标准规格'] },
@@ -573,6 +650,89 @@
     }) || '';
   }
 
+  function skuRowConfig(product) {
+    return SKU_ROW_DEMOS[product && product.id] || {
+      defaultSkuImage: product && product.image || '',
+      inactiveLinePrice: null,
+      myAlbum: true,
+      isDisplayStock: true,
+      distributionAgentMark: false,
+      negativeStock: false,
+      skus: {}
+    };
+  }
+
+  function skuRowDetail(product, spec) {
+    var config = skuRowConfig(product);
+    var stored = config.skus && config.skus[spec] || {};
+    var hasStoredStock = Object.prototype.hasOwnProperty.call(stored, 'stock');
+    var productStock = product.inventory != null ? product.inventory : product.stock;
+    return {
+      skuId: spec,
+      skuName: splitSpec(spec).size,
+      img: stored.img || '',
+      price: stored.price == null ? Number(product.listPrice || 0) : Number(stored.price),
+      finallyPrice: stored.finallyPrice == null ? null : Number(stored.finallyPrice),
+      maxPrice: stored.maxPrice == null ? null : Number(stored.maxPrice),
+      stock: hasStoredStock ? (stored.stock == null ? null : Number(stored.stock)) : (productStock == null ? null : Number(productStock))
+    };
+  }
+
+  function skuRowDetails(product) {
+    return product.specs.map(function (spec) { return skuRowDetail(product, spec); });
+  }
+
+  function skuRowDisplayPrice(sku) {
+    return sku.finallyPrice ? sku.finallyPrice : sku.price;
+  }
+
+  function skuRowFinalPrices(product) {
+    return skuRowDetails(product).reduce(function (prices, sku) {
+      var price = skuRowDisplayPrice(sku);
+      if (prices.indexOf(price) < 0) prices.push(price);
+      return prices;
+    }, []);
+  }
+
+  function resolveSkuRowState(product, spec, quantity, confirmedOverstock) {
+    var config = skuRowConfig(product);
+    var sku = skuRowDetail(product, spec);
+    var allSkus = skuRowDetails(product);
+    var showSkuImage = allSkus.some(function (item) { return Boolean(item.img); });
+    var showSkuPrice = skuRowFinalPrices(product).length > 1;
+    var showOriginalPrice = Boolean(sku.finallyPrice) && sku.finallyPrice !== sku.price;
+    var showMaxPrice = showSkuPrice
+      && !showOriginalPrice
+      && Boolean(config.inactiveLinePrice)
+      && sku.maxPrice != null
+      && Number(sku.maxPrice) > 0
+      && Number(sku.price) !== Number(sku.maxPrice);
+    var hasStockValue = sku.stock !== null && sku.stock !== undefined;
+    var showStock = hasStockValue
+      && !config.distributionAgentMark
+      && (config.myAlbum || config.isDisplayStock);
+    var displayStock = config.myAlbum ? sku.stock : (sku.stock < 0 ? 0 : sku.stock);
+    var isOverStock = Boolean(confirmedOverstock)
+      && !config.negativeStock
+      && hasStockValue
+      && Number(quantity) > Number(sku.stock);
+    return {
+      sku: sku,
+      showSkuImage: showSkuImage,
+      skuImageUrl: sku.img || config.defaultSkuImage,
+      showSkuPrice: showSkuPrice,
+      displayPrice: skuRowDisplayPrice(sku),
+      showOriginalPrice: showOriginalPrice,
+      showMaxPrice: showMaxPrice,
+      showStock: showStock,
+      displayStock: displayStock,
+      hasStockValue: hasStockValue,
+      stock: sku.stock,
+      isOverStock: isOverStock,
+      negativeStock: config.negativeStock
+    };
+  }
+
   function specStock(product, spec) {
     var index = product.specs.indexOf(spec);
     if (index < 0) return 0;
@@ -584,6 +744,8 @@
   }
 
   function singleQuantityLimit(product, spec) {
+    var sku = skuRowDetail(product, spec);
+    if (sku.stock !== null && sku.stock !== undefined) return Math.max(0, Number(sku.stock));
     return productTracksInventory(product) ? specStock(product, spec) : 9999;
   }
 
@@ -625,6 +787,16 @@
     if (!input) return;
     input.focus({ preventScroll: true });
     input.select();
+  }
+
+  function focusSingleSkuInput(spec) {
+    if (!activeContext || !activeContext.root || !spec) return;
+    window.requestAnimationFrame(function () {
+      var input = activeContext.root.querySelector('[data-single-qty-input][data-single-spec="' + CSS.escape(encodeURIComponent(spec)) + '"]');
+      if (!input) return;
+      input.focus({ preventScroll: true });
+      input.select();
+    });
   }
 
   function addDraftTotal(draft) {
@@ -678,7 +850,8 @@
       skuQty: copyAddSkuQty(draft.product, draft.skuQty),
       selectedColor: draft.selectedColor,
       selectedSize: draft.selectedSize,
-      pendingSizeQty: Object.assign({}, draft.pendingSizeQty || {})
+      pendingSizeQty: Object.assign({}, draft.pendingSizeQty || {}),
+      confirmedOverstock: Object.assign({}, draft.confirmedOverstock || {})
     };
   }
 
@@ -688,6 +861,7 @@
       draft.selectedColor = draft.singleRecord ? draft.singleRecord.selectedColor : '';
       draft.selectedSize = draft.singleRecord ? draft.singleRecord.selectedSize : '';
       draft.pendingSizeQty = Object.assign({}, draft.singleRecord && draft.singleRecord.pendingSizeQty || {});
+      draft.confirmedOverstock = Object.assign({}, draft.singleRecord && draft.singleRecord.confirmedOverstock || {});
       return;
     }
     if (draft.batchRecord) {
@@ -856,14 +1030,16 @@
     state.customer.lastPickupContact = state.pickupContact ? Object.assign({}, state.pickupContact) : null;
   }
 
-  function markDirty(ctx) {
+  function markDirty(ctx, preserveCatalogScroll) {
     state.saveStatus = '保存中…';
-    renderActive();
+    if (preserveCatalogScroll) renderCatalogPreservingScroll(activeContext && activeContext.root);
+    else renderActive();
     clearTimeout(state.saveTimer);
     state.saveTimer = setTimeout(function () {
       var now = new Date();
       state.saveStatus = '已自动保存 ' + String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-      renderActive();
+      if (preserveCatalogScroll) renderCatalogPreservingScroll(activeContext && activeContext.root);
+      else renderActive();
     }, 450);
   }
 
@@ -884,6 +1060,9 @@
     if (isRendering) return;
     if (activeContext && activeContext.root && activeContext.root.isConnected) {
       var currentImageStrip = activeContext.root.querySelector('.order-image-search-strip');
+      var currentCatalogScroller = activeContext.root.querySelector('.order-desktop__catalog-scroll');
+      var preserveAddCatalogScroll = Boolean(state.addDraft && currentCatalogScroller);
+      var addCatalogScrollTop = preserveAddCatalogScroll ? currentCatalogScroller.scrollTop : 0;
       var resetImageStripScroll = Boolean(state.imageSearch && state.imageSearch.stripScrollResetPending);
       if (currentImageStrip && state.imageSearch && !resetImageStripScroll) {
         state.imageSearch.stripScrollLeft = currentImageStrip.scrollLeft;
@@ -897,6 +1076,10 @@
       var nextImageStrip = activeContext.root.querySelector('.order-image-search-strip');
       if (nextImageStrip && state.imageSearch) {
         nextImageStrip.scrollLeft = resetImageStripScroll ? 0 : state.imageSearch.stripScrollLeft;
+      }
+      if (preserveAddCatalogScroll) {
+        var nextCatalogScroller = activeContext.root.querySelector('.order-desktop__catalog-scroll');
+        if (nextCatalogScroller) nextCatalogScroller.scrollTop = addCatalogScrollTop;
       }
       if (state.imageSearch) state.imageSearch.stripScrollResetPending = false;
     }
@@ -3906,15 +4089,23 @@
       var rowQuantity = selectedColor ? Number((rowSpec && draft.skuQty[rowSpec]) || 0) : Number((draft.pendingSizeQty && draft.pendingSizeQty[size]) || 0);
       var rowStock = selectedColor ? (rowSpec ? singleQuantityLimit(product, rowSpec) : 0) : pendingSizeStock(product, size);
       var rowUnavailable = Boolean(selectedColor) && !rowSpec;
-      var counterDisabled = rowUnavailable || rowStock <= 0;
+      var rowState = rowSpec ? resolveSkuRowState(product, rowSpec, rowQuantity, draft.confirmedOverstock && draft.confirmedOverstock[rowSpec]) : null;
+      var counterDisabled = rowUnavailable;
+      var rowPriceOriginal = rowState && (rowState.showOriginalPrice ? rowState.sku.price : (rowState.showMaxPrice ? rowState.sku.maxPrice : null));
       return '<div class="order-add-spec-counter-row' + (rowUnavailable ? ' is-disabled' : '') + '">'
-        + '<span class="order-add-spec-counter-row__label">' + escapeHtml(size) + '</span>'
-        + '<div class="counter' + (counterDisabled ? ' is-disabled' : '') + '" data-component-slug="counter">'
+        + (rowState && rowState.showSkuImage ? '<span class="wg-image wg-image--md wg-image--rounded-md order-add-spec-counter-row__image" data-component="image" data-component-slug="image" data-variant-name="Image_40_Rounded"><img class="wg-image__src is-loaded" src="' + escapeHtml(rowState.skuImageUrl) + '" alt=""></span>' : '')
+        + '<div class="order-add-spec-counter-row__info"><span class="order-add-spec-counter-row__label">' + escapeHtml(size) + '</span>'
+        + (rowState && rowState.showSkuPrice ? '<small class="order-add-sku-price"><span>¥' + compactAmount(rowState.displayPrice) + '</span>' + (rowPriceOriginal != null ? '<del class="order-add-sku-original-price">¥' + compactAmount(rowPriceOriginal) + '</del>' : '') + '</small>' : '')
+        + '</div>'
+        + '<div class="order-add-sku-operation">'
+        + '<div class="counter' + (counterDisabled ? ' is-disabled' : '') + (rowState && rowState.isOverStock ? ' is-error' : '') + '" data-component="counter" data-component-slug="counter" data-variant-name="Counter_32">'
         +   '<div class="counter__body">'
         +     '<button type="button" class="counter__btn counter__btn--minus" data-single-qty-delta="-1" data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="减少' + escapeHtml(size) + '数量" ' + (counterDisabled || rowQuantity <= 0 ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
-        +     '<input class="counter__value" type="text" inputmode="numeric" maxlength="5" value="' + rowQuantity + '" data-single-qty-input data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="' + escapeHtml(size) + '数量" ' + (counterDisabled ? 'disabled' : '') + '>'
+        +     '<input class="counter__value" type="text" inputmode="numeric" maxlength="5" value="' + rowQuantity + '" data-single-qty-input data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="' + escapeHtml(size) + '数量" ' + (rowState && rowState.isOverStock ? 'aria-invalid="true" ' : '') + (counterDisabled ? 'disabled' : '') + '>'
         +     '<button type="button" class="counter__btn counter__btn--plus" data-single-qty-delta="1" data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="增加' + escapeHtml(size) + '数量" ' + (counterDisabled || rowQuantity >= rowStock ? 'disabled' : '') + '><i class="counter__icon icon-jia16"></i></button>'
         +   '</div><div class="counter__message counter__hint"></div><div class="counter__message counter__error"></div>'
+        + '</div>'
+        + (rowState && rowState.showStock ? '<small class="order-add-sku-stock' + (rowState.isOverStock ? ' is-error' : '') + '">库存：' + rowState.displayStock + '</small>' : '')
         + '</div>'
         + '</div>';
     }).join('');
@@ -4009,6 +4200,7 @@
                   : '<textarea id="product-note" placeholder="例如：单独打包、缺码先联系" data-add-note>' + escapeHtml(draft.note) + '</textarea>') + '</div>'
               : '<button type="button" class="link link--14" data-component-slug="link" data-toggle-add-note>' + (draft.note ? '备注：' + escapeHtml(draft.note) + '<i class="wego-iconfont-s icon-bianji" aria-hidden="true"></i>' : '添加备注') + '</button>')
       +   '</div>' : '')
+      +   '<div class="order-add-content-divider" aria-hidden="true"></div>'
       + '</div>'
       + '<div class="order-add-footer"><span>' + (desktop ? '<strong data-add-total-amount>' + addProductPrice(total * unitPrice) + '</strong><small>共 <b data-add-total-qty>' + total + '</b> 件</small>' : '合计：<b data-add-total-qty>' + total + '</b> 件 <strong data-add-total-amount>' + money(total * unitPrice) + '</strong>') + '</span><div class="order-add-footer__actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button('添加', 'strong', 'md', 'data-confirm-add') + '</div></div>';
   }
@@ -4381,6 +4573,24 @@
       + '</div>';
   }
 
+  function addStockWarningDialog() {
+    if (!state.addDraft || !state.addDraft.stockWarning) return '';
+    return ''
+      + '<div class="dialog dialog--text order-add-stock-dialog" role="dialog" aria-modal="true" aria-labelledby="order-add-stock-title" aria-describedby="order-add-stock-content" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_2" data-variant-cn="按钮数量=2">'
+      +   '<div class="dialog__card">'
+      +     '<div class="dialog__body">'
+      +       '<div class="dialog__header"><h3 class="dialog__title" id="order-add-stock-title">库存不足</h3></div>'
+      +       '<div class="dialog__content" id="order-add-stock-content">已设置库存不足，允许超卖开单 <button type="button" class="link link--inline" data-component="link" data-component-slug="link" data-variant-name="Link_Inline" data-stock-warning-settings>去修改设置</button></div>'
+      +     '</div>'
+      +     '<div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual">'
+      +       '<button type="button" class="dialog__btn dialog__btn--dismiss" data-stock-warning-cancel>取消</button>'
+      +       '<span class="dialog__divider" aria-hidden="true"></span>'
+      +       '<button type="button" class="dialog__btn dialog__btn--confirm" data-stock-warning-confirm>仍要添加</button>'
+      +     '</div></div>'
+      +   '</div>'
+      + '</div>';
+  }
+
   function draftDeleteConfirm() {
     if (!state.draftDeleteConfirmId) return '';
     return ''
@@ -4449,7 +4659,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + imageSearchPermissionDialog() + imageSearchDropOverlay() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + freightEditModal() + totalEditModal() + productImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
@@ -4649,6 +4859,7 @@
     if (!product) return;
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
     var skuQty = {};
+    var firstColor = isDesktopWorkbench() ? (addProductMatrix(product).colors[0] || '') : '';
     product.specs.forEach(function (spec) { skuQty[spec] = 0; });
     state.addDraft = {
       product: product,
@@ -4662,14 +4873,17 @@
       pendingSizeQty: {},
       singleRecord: {
         skuQty: copyAddSkuQty(product, skuQty),
-        selectedColor: '',
+        selectedColor: firstColor,
         selectedSize: '',
-        pendingSizeQty: {}
+        pendingSizeQty: {},
+        confirmedOverstock: {}
       },
       batchRecord: null,
       batchRecordTouched: false,
-      selectedColor: '',
+      selectedColor: firstColor,
       selectedSize: '',
+      confirmedOverstock: {},
+      stockWarning: null,
       note: '',
       noteOpen: false,
       batchSelection: null,
@@ -4679,7 +4893,7 @@
       }
     };
     state.panel = 'add';
-    renderActive();
+    renderCatalogPreservingScroll(activeContext && activeContext.root);
   }
 
   function addSingleSpecProduct(productId, ctx) {
@@ -6027,6 +6241,21 @@
     if (target.matches('[data-continue-draft-demo]')) {
       return;
     }
+    if (target.matches('[data-stock-warning-settings]') && state.addDraft && state.addDraft.stockWarning) {
+      ctx.toast('库存设置入口已保留');
+      return;
+    }
+    if (target.matches('[data-stock-warning-cancel], [data-stock-warning-confirm]') && state.addDraft && state.addDraft.stockWarning) {
+      var warning = state.addDraft.stockWarning;
+      if (target.matches('[data-stock-warning-confirm]')) {
+        state.addDraft.skuQty[warning.spec] = warning.proposedQuantity;
+        state.addDraft.confirmedOverstock[warning.spec] = true;
+      }
+      state.addDraft.stockWarning = null;
+      renderActive();
+      focusSingleSkuInput(warning.spec);
+      return;
+    }
     if (target.matches('[data-close-panel]')) {
       if ((state.panel === 'checkout' || state.panel === 'payment') && state.paymentStatus === 'processing') {
         ctx.toast('正在确认收款结果，请稍候');
@@ -6055,7 +6284,6 @@
       var closingDelivery = state.panel === 'delivery';
       var closingProductId = closingProductEdit && state.productEditDraft ? state.productEditDraft.productId : '';
       if (closingAddPanel) {
-        state.desktopProductKeyword = '';
         state.addDraft = null;
       }
       var productEditReturnPanel = closingProductEdit ? state.productEditReturnPanel : null;
@@ -6073,8 +6301,8 @@
         state.deliveryScrollSpacer = 0;
       }
       state.panel = productEditReturnPanel || null;
-      renderActive();
-      if (closingAddPanel) focusDesktopProductSearch();
+      if (closingAddPanel) renderCatalogPreservingScroll(root);
+      else renderActive();
       if (closingProductEdit && !productEditReturnPanel) restoreProductEditFocus(closingProductId);
       if (closingProductCreate) focusCatalogCreateTrigger();
       if (closingFanProfile) {
@@ -6550,6 +6778,7 @@
       var carriedSizeQuantities = desktopColorSelection ? singleSizeQuantities(state.addDraft) : null;
       if (desktopColorSelection) {
         Object.keys(state.addDraft.skuQty).forEach(function (key) { state.addDraft.skuQty[key] = 0; });
+        state.addDraft.confirmedOverstock = {};
       }
       state.addDraft.selectedColor = decodeURIComponent(target.dataset.addColor);
       if (desktopColorSelection) {
@@ -6592,12 +6821,17 @@
         return;
       }
       var singleStock = singleQuantityLimit(draftNow.product, singleSpec);
-      if (!desktopSpecCounter && Number(target.dataset.singleQtyDelta) > 0) {
+      var singleDelta = Number(target.dataset.singleQtyDelta);
+      if (!desktopSpecCounter && singleDelta > 0) {
         Object.keys(draftNow.skuQty).forEach(function (key) {
           if (key !== singleSpec) draftNow.skuQty[key] = 0;
         });
       }
-      draftNow.skuQty[singleSpec] = Math.max(0, Math.min(singleStock, Number(draftNow.skuQty[singleSpec] || 0) + Number(target.dataset.singleQtyDelta)));
+      var currentSingleQuantity = Number(draftNow.skuQty[singleSpec] || 0);
+      var nextSingleQuantity = Math.max(0, currentSingleQuantity + singleDelta);
+      if (singleDelta > 0) nextSingleQuantity = Math.min(singleStock, nextSingleQuantity);
+      draftNow.skuQty[singleSpec] = nextSingleQuantity;
+      if (draftNow.confirmedOverstock && nextSingleQuantity <= singleStock) delete draftNow.confirmedOverstock[singleSpec];
       renderActive();
       return;
     }
@@ -6717,6 +6951,7 @@
     }
     if (target.matches('[data-confirm-add]')) {
       var draft = state.addDraft;
+      if (draft && draft.stockWarning) return;
       var qty = addDraftTotal(draft);
       if (!qty) {
         ctx.toast('请至少选择一件商品');
@@ -6733,10 +6968,7 @@
       mergeProductIntoOrder(draft.product, draft.skuQty, draft.mode, draft.note, { priceMode: draft.priceMode, unitPrice: draft.unitPrice, searchMeta: draft.searchMeta });
       state.panel = null;
       state.addDraft = null;
-      state.desktopProductKeyword = '';
-      markDirty(ctx);
-      focusDesktopProductSearch();
-      setTimeout(focusDesktopProductSearch, 500);
+      markDirty(ctx, true);
       ctx.toast('商品已加入订单');
       return;
     }
@@ -7391,17 +7623,32 @@
         return;
       }
       var singleInputStock = singleQuantityLimit(singleDraft.product, singleInputSpec);
-      singleParsed = Math.max(desktopSpecInput ? 0 : -9999, Math.min(singleInputStock, singleParsed));
-      target.value = singleParsed;
-      if (!desktopSpecInput) {
-        Object.keys(singleDraft.skuQty).forEach(function (key) {
-          if (key !== singleInputSpec) singleDraft.skuQty[key] = 0;
-        });
+      if (desktopSpecInput) {
+        singleParsed = Math.max(0, Math.min(9999, singleParsed));
+        target.value = singleParsed;
+        var desktopSkuState = resolveSkuRowState(singleDraft.product, singleInputSpec, singleParsed, false);
+        if (desktopSkuState.hasStockValue && !desktopSkuState.negativeStock && singleParsed > Math.max(0, Number(desktopSkuState.stock))) return;
+        singleDraft.skuQty[singleInputSpec] = singleParsed;
+        if (singleDraft.confirmedOverstock && singleParsed <= singleInputStock) delete singleDraft.confirmedOverstock[singleInputSpec];
+        updateAddDraftTotals(root);
+        if (event.type === 'change') {
+          var desktopSinglePickerNode = target.closest('.order-add-spec-counter-row');
+          var desktopSingleMinus = desktopSinglePickerNode && desktopSinglePickerNode.querySelector('[data-single-qty-delta="-1"]');
+          var desktopSinglePlus = desktopSinglePickerNode && desktopSinglePickerNode.querySelector('[data-single-qty-delta="1"]');
+          if (desktopSingleMinus) desktopSingleMinus.disabled = singleParsed <= 0;
+          if (desktopSinglePlus) desktopSinglePlus.disabled = singleParsed >= singleInputStock;
+        }
+        return;
       }
+      singleParsed = Math.max(-9999, Math.min(singleInputStock, singleParsed));
+      target.value = singleParsed;
+      Object.keys(singleDraft.skuQty).forEach(function (key) {
+        if (key !== singleInputSpec) singleDraft.skuQty[key] = 0;
+      });
       singleDraft.skuQty[singleInputSpec] = singleParsed;
       updateAddDraftTotals(root);
       if (event.type === 'change') {
-        var singlePickerNode = desktopSpecInput ? target.closest('.order-add-spec-counter-row') : target.closest('.order-single-picker');
+        var singlePickerNode = target.closest('.order-single-picker');
         if (singlePickerNode) {
           var singleMinusNode = singlePickerNode.querySelector('[data-single-qty-delta="-1"]');
           var singlePlusNode = singlePickerNode.querySelector('[data-single-qty-delta="1"]');
@@ -7755,6 +8002,35 @@
       }
     });
     root.addEventListener('blur', function (event) {
+      if (event.target.matches('[data-single-qty-input]') && event.target.closest('.order-add-spec-counter-row') && state.addDraft) {
+        var blurredSpec = decodeURIComponent(event.target.dataset.singleSpec || '');
+        if (!blurredSpec) return;
+        var blurredRaw = String(event.target.value || '').replace(/[^\d]/g, '').slice(0, 4);
+        var proposedQuantity = Math.max(0, Math.min(9999, Number(blurredRaw || 0)));
+        var committedQuantity = Number(state.addDraft.skuQty[blurredSpec] || 0);
+        var wasErrorCounter = Boolean(event.target.closest('.counter.is-error'));
+        var blurredSkuState = resolveSkuRowState(state.addDraft.product, blurredSpec, proposedQuantity, false);
+        var stockLimit = Math.max(0, Number(blurredSkuState.stock || 0));
+        if (blurredSkuState.hasStockValue && !blurredSkuState.negativeStock && proposedQuantity > stockLimit) {
+          var alreadyConfirmed = Boolean(state.addDraft.confirmedOverstock && state.addDraft.confirmedOverstock[blurredSpec]);
+          if (proposedQuantity !== committedQuantity || !alreadyConfirmed) {
+            state.addDraft.stockWarning = {
+              spec: blurredSpec,
+              proposedQuantity: proposedQuantity,
+              previousQuantity: committedQuantity,
+              stock: blurredSkuState.stock
+            };
+            renderActive();
+            window.requestAnimationFrame(function () {
+              var cancelStockWarning = activeContext.root.querySelector('[data-stock-warning-cancel]');
+              if (cancelStockWarning) cancelStockWarning.focus({ preventScroll: true });
+            });
+            return;
+          }
+        }
+        if (wasErrorCounter && state.addDraft.confirmedOverstock && !state.addDraft.confirmedOverstock[blurredSpec]) renderActive();
+        return;
+      }
       if (event.target.matches('[data-clipboard-address-field="phone"]') && state.panel === 'clipboard-address') {
         state.clipboardAddressPhoneWarning = Boolean(event.target.value.trim()) && !recipientPhoneValid(event.target.value);
         if (state.clipboardAddressPhoneWarning) renderActive();
