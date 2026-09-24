@@ -5201,6 +5201,7 @@ button.order-payment-method-card {
 
   .order-catalog-hidden-bar {
     position: relative;
+    isolation: isolate;
     display: flex;
     min-height: var(--size-40);
     align-items: center;
@@ -5249,6 +5250,7 @@ button.order-payment-method-card {
     position: absolute;
     top: 0;
     right: 0;
+    z-index: 1;
     display: inline-flex;
     height: var(--size-24);
     align-items: center;
@@ -5257,7 +5259,7 @@ button.order-payment-method-card {
     color: var(--text-secondary);
     font-size: var(--body-xs-font-size);
     line-height: var(--body-xs-line-height);
-    background: var(--bg-overlay-l1);
+    background: var(--palette-neutral-200);
     border: 0;
     border-radius: 0 0 0 var(--radius-4);
     cursor: pointer;
@@ -8604,10 +8606,19 @@ button.order-payment-method-card {
     display: none;
   }
 
+  .order-catalog-category-rail {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    background: var(--bg-surface);
+  }
+
   .order-catalog-category-tabs {
     --layout-scroll-row-gap: var(--spacer-8);
     gap: var(--spacer-8);
-    padding: var(--spacer-8) var(--spacer-12);
+    min-height: var(--size-64);
+    padding: var(--spacer-16) calc(var(--size-64) + var(--spacer-20)) var(--spacer-16) var(--spacer-12);
   }
 
   .order-catalog-category-tabs .tag {
@@ -8615,6 +8626,36 @@ button.order-payment-method-card {
     height: var(--size-32);
     min-height: var(--size-32);
     padding: 0 var(--spacer-12);
+  }
+
+  .order-catalog-category-more {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+    display: inline-flex;
+    height: var(--size-64);
+    align-items: center;
+    gap: var(--spacer-4);
+    padding: 0 var(--spacer-8) 0 var(--spacer-12);
+    color: var(--text-secondary);
+    font-size: var(--body-md-font-size);
+    font-weight: var(--font-weight-medium);
+    line-height: var(--body-md-line-height);
+    white-space: nowrap;
+    background: var(--bg-surface);
+    border: 0;
+    box-shadow: calc(-1 * var(--spacer-16)) 0 var(--spacer-6) rgba(255, 255, 255, 0.86);
+    cursor: pointer;
+  }
+
+  .order-catalog-category-more > i {
+    color: var(--icon-secondary);
+    font-size: var(--size-16);
+  }
+
+  .order-catalog-category-more:hover {
+    color: var(--text-default);
   }
 
   .order-desktop__catalog-list--grid {
@@ -8989,6 +9030,57 @@ button.order-payment-method-card {
   .order-filter-frame__actions .btn {
     width: 100%;
     max-width: none;
+  }
+
+  .order-category-panel__scroll {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacer-8);
+    background: var(--bg-subtle);
+  }
+
+  .order-category-panel__search-wrap {
+    flex: 0 0 auto;
+    padding: var(--spacer-12) var(--spacer-16);
+    background: var(--bg-surface);
+  }
+
+  .order-category-panel__search {
+    width: 100%;
+  }
+
+  .order-category-panel__content {
+    flex: 1 0 auto;
+    min-height: calc(var(--size-48) * 3);
+    padding: var(--spacer-16);
+    background: var(--bg-surface);
+  }
+
+  .order-category-panel__tags {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--spacer-12);
+  }
+
+  .order-category-panel__tags .tag {
+    width: 100%;
+    min-width: 0;
+    color: var(--text-default);
+    background: var(--bg-overlay-l1);
+  }
+
+  .order-category-panel__tags .tag--selected {
+    color: var(--text-brand);
+    background: var(--bg-brand-surface-l1);
+  }
+
+  .order-category-panel__tags .tag--selected .tag__label {
+    color: var(--text-brand);
+  }
+
+  .order-category-panel__empty {
+    grid-column: 1 / -1;
+    align-self: stretch;
   }
 
   .order-catalog-filter-anchor--search > .btn.is-filtered {
@@ -9934,7 +10026,8 @@ button.order-payment-method-card {
   }
 }
 
-.order-desktop__catalog--filter.order-catalog-filter--static {
+.order-desktop__catalog--filter.order-catalog-filter--static,
+.order-desktop__catalog--category.order-catalog-category-panel--static {
   animation: none !important;
 }
 

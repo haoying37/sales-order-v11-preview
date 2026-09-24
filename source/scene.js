@@ -414,6 +414,10 @@
     catalogResizePointerId: null,
     catalogViewMode: storedCatalogViewMode(),
     catalogCategory: '全部',
+    catalogCategoryPanelOpen: false,
+    catalogCategoryDraft: '全部',
+    catalogCategoryKeyword: '',
+    catalogCategoryMotion: false,
     catalogHiddenTypes: storedCatalogHiddenTypes(),
     catalogHiddenBarVisible: true,
     catalogHiddenBarClosing: false,
@@ -1544,13 +1548,16 @@
     }).filter(Boolean).filter(catalogProductMatchesHiddenSettings);
   }
 
+  function catalogCategories() {
+    return state.industry === 'phone' ? ['全部', 'Apple', 'HUAWEI', 'HONOR', 'Xiaomi', 'OPPO', 'vivo'] : CATALOG_CATEGORIES;
+  }
+
   function catalogCategoryTabs() {
-    var categories = state.industry === 'phone' ? ['全部', 'Apple', 'HUAWEI', 'HONOR', 'Xiaomi', 'OPPO', 'vivo'] : CATALOG_CATEGORIES;
-    return '<div class="order-catalog-category-tabs layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="none" data-peek="none" aria-label="商品标签分类">' + categories.map(function (category) {
+    return '<div class="order-catalog-category-rail"><div class="order-catalog-category-tabs layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="none" data-peek="none" aria-label="商品标签分类">' + catalogCategories().map(function (category) {
       var selected = state.catalogCategory === category;
       var variantName = selected ? 'Tag_28_Gray_Selected' : 'Tag_28_Gray_Normal';
       return '<button type="button" class="tag tag--28 ' + (selected ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-variant-name="' + variantName + '" aria-pressed="' + selected + '" data-catalog-category="' + escapeHtml(category) + '"><span class="tag__label">' + escapeHtml(category) + '</span></button>';
-    }).join('') + '</div>';
+    }).join('') + '</div><button type="button" class="order-catalog-category-more" data-open-catalog-category aria-haspopup="dialog" aria-expanded="' + state.catalogCategoryPanelOpen + '"><span>更多</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button></div>';
   }
 
   function catalogHiddenCheckbox(type, label) {
@@ -2211,8 +2218,50 @@
       + '</aside>';
   }
 
+  function desktopCatalogCategoryPanel(inDrawer) {
+    var drawerClass = inDrawer ? (isTabletPortrait() ? ' order-tablet-drawer' : ' order-landscape-scanner-drawer') : '';
+    var drawerStyle = inDrawer && !isTabletPortrait()
+      ? ' style="width:' + Math.max(320, Math.min(560, state.catalogWidth != null ? state.catalogWidth : 379)) + 'px"'
+      : '';
+    var motionClass = state.catalogCategoryMotion ? '' : ' order-catalog-category-panel--static';
+    var keyword = String(state.catalogCategoryKeyword || '').trim().toLowerCase();
+    var categories = catalogCategories().filter(function (category) {
+      return !keyword || category.toLowerCase().indexOf(keyword) >= 0;
+    });
+    var clearSearch = state.catalogCategoryKeyword
+      ? '<button type="button" class="searchbox__action searchbox__clear" data-clear-catalog-category-search aria-label="清空分类搜索"><i class="wego-iconfont-s icon-yuancha-mian" aria-hidden="true"></i></button>'
+      : '';
+    var categoryOptions = categories.length
+      ? categories.map(function (category) {
+        var selected = state.catalogCategoryDraft === category;
+        var variantName = selected ? 'Tag_32_Gray_Selected' : 'Tag_32_Gray_Normal';
+        return '<button type="button" class="tag tag--32 ' + (selected ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-variant-name="' + variantName + '" aria-pressed="' + selected + '" data-catalog-category-option="' + escapeHtml(category) + '"><span class="tag__label">' + escapeHtml(category) + '</span></button>';
+      }).join('')
+      : '<div class="result-40 order-category-panel__empty" data-component="result" data-component-slug="result" data-variant-name="Result_40" data-variant-cn="局部结果" data-action-mode="none"><div class="result result--in-page" role="group" aria-label="没有匹配的结果"><div class="result__copy"><h2 class="result__title">没有匹配的结果</h2></div></div></div>';
+    return ''
+      + '<aside class="order-desktop__catalog order-desktop__catalog--filter order-desktop__catalog--category' + drawerClass + motionClass + '"' + (inDrawer ? ' role="dialog" aria-modal="true"' : ' role="region"') + drawerStyle + ' aria-label="商品分类">'
+      +   '<div class="order-filter-frame order-category-panel">'
+      +     '<header class="order-filter-frame__header" data-scene-extension="category-titlebar">'
+      +       '<h2>商品分类</h2>'
+      +       '<button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-catalog-category aria-label="关闭商品分类">'
+      +         '<i class="btn__icon icon-cha16" aria-hidden="true"></i>'
+      +       '</button>'
+      +     '</header>'
+      +     '<div class="order-filter-frame__scroll order-category-panel__scroll">'
+      +       '<div class="order-category-panel__search-wrap"><div class="searchbox searchbox--sm searchbox--gray order-category-panel__search" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input"><input class="searchbox__field" type="search" value="' + escapeHtml(state.catalogCategoryKeyword) + '" placeholder="搜索分类" autocomplete="off" data-catalog-category-search></div><div class="searchbox__actions">' + clearSearch + '</div></div></div>'
+      +       '<section class="order-category-panel__content" aria-label="全部分类"><div class="order-category-panel__tags">' + categoryOptions + '</div></section>'
+      +     '</div>'
+      +     '<footer class="order-filter-frame__actions" data-runtime-subcomponent="FilterFrame.FixedFooter">'
+      +       '<button type="button" class="button btn btn--weak btn--lg" data-component="button" data-component-slug="button" data-variant-name="Button_48_Gray_Normal" data-reset-catalog-category>重置</button>'
+      +       '<button type="button" class="button btn btn--strong btn--lg" data-component="button" data-component-slug="button" data-variant-name="Button_48_Green_Normal" data-confirm-catalog-category>确定</button>'
+      +     '</footer>'
+      +   '</div>'
+      + '</aside>';
+  }
+
   function openCatalogFilter() {
     if (state.scannerOpen) closeBarcodeScanner(false);
+    state.catalogCategoryPanelOpen = false;
     state.catalogFilterDraft = cloneCatalogFilters(state.catalogFilters);
     state.catalogFilterTagExpanded = false;
     state.catalogFilterMotion = true;
@@ -2251,6 +2300,47 @@
     ].join(', '));
   }
 
+  function openCatalogCategoryPanel() {
+    if (state.scannerOpen) closeBarcodeScanner(false);
+    state.catalogFilterPanelOpen = false;
+    state.catalogCategoryDraft = state.catalogCategory;
+    state.catalogCategoryKeyword = '';
+    state.catalogCategoryMotion = true;
+    state.catalogCategoryPanelOpen = true;
+    if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = false;
+    renderActive();
+    window.requestAnimationFrame(function () {
+      var firstControl = activeContext && activeContext.root && activeContext.root.querySelector('[data-close-catalog-category]');
+      if (firstControl) firstControl.focus({ preventScroll: true });
+    });
+  }
+
+  function closeCatalogCategoryPanel(restoreFocus) {
+    if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
+    state.catalogCategoryPanelOpen = false;
+    state.catalogCategoryKeyword = '';
+    state.catalogCategoryMotion = false;
+    renderActive();
+    if (restoreFocus !== false) {
+      window.requestAnimationFrame(function () {
+        var triggers = activeContext && activeContext.root ? Array.from(activeContext.root.querySelectorAll('[data-open-catalog-category]')) : [];
+        var trigger = triggers.find(function (item) { return item.offsetParent !== null; }) || triggers[0];
+        if (trigger) trigger.focus({ preventScroll: true });
+      });
+    }
+  }
+
+  function isCatalogCategoryInteraction(target) {
+    return target.matches([
+      '[data-open-catalog-category]',
+      '[data-close-catalog-category]',
+      '[data-clear-catalog-category-search]',
+      '[data-catalog-category-option]',
+      '[data-reset-catalog-category]',
+      '[data-confirm-catalog-category]'
+    ].join(', '));
+  }
+
   function isBarcodeScannerInteraction(target) {
     return target.matches([
       '[data-scan]',
@@ -2260,6 +2350,12 @@
   }
 
   function desktopCatalog() {
+    if (state.catalogCategoryPanelOpen) {
+      var categoryUsesDrawer = isTabletPortrait() || effectiveCatalogCollapsed();
+      return categoryUsesDrawer
+        ? '<div class="order-tablet-drawer-mask order-scanner-drawer-mask" data-clickable data-close-catalog-category aria-hidden="true"></div>' + desktopCatalogCategoryPanel(true)
+        : desktopCatalogCategoryPanel(false);
+    }
     if (state.catalogFilterPanelOpen) {
       var filterUsesDrawer = isTabletPortrait() || effectiveCatalogCollapsed();
       return filterUsesDrawer
@@ -5250,6 +5346,10 @@
     if (!target || !root.contains(target)) return;
 
     if (target.matches('[data-back]')) {
+      if (state.catalogCategoryPanelOpen) {
+        closeCatalogCategoryPanel(true);
+        return;
+      }
       if (state.catalogFilterPanelOpen) {
         closeCatalogFilter(true);
         return;
@@ -5261,6 +5361,9 @@
     }
     if (state.catalogFilterPanelOpen && !isCatalogFilterInteraction(target)) {
       closeCatalogFilter(false);
+    }
+    if (state.catalogCategoryPanelOpen && !isCatalogCategoryInteraction(target)) {
+      closeCatalogCategoryPanel(false);
     }
     if ((state.scannerOpen || state.scannerRequesting) && !isBarcodeScannerInteraction(target)) {
       closeBarcodeScanner(true);
@@ -5289,6 +5392,9 @@
         state.selectedRow = null;
         state.catalogViewMode = nextIndustry === 'phone' ? 'list' : 'grid';
         state.catalogCategory = '全部';
+        state.catalogCategoryDraft = '全部';
+        state.catalogCategoryKeyword = '';
+        state.catalogCategoryPanelOpen = false;
         state.catalogFilters = emptyCatalogFilters();
         state.catalogFilterDraft = emptyCatalogFilters();
         state.panel = null;
@@ -5437,6 +5543,47 @@
       openCatalogFilter();
       return;
     }
+    if (target.matches('[data-open-catalog-category]')) {
+      openCatalogCategoryPanel();
+      return;
+    }
+    if (target.matches('[data-close-catalog-category]')) {
+      closeCatalogCategoryPanel(true);
+      return;
+    }
+    if (target.matches('[data-clear-catalog-category-search]')) {
+      state.catalogCategoryKeyword = '';
+      state.catalogCategoryMotion = false;
+      renderActive();
+      window.requestAnimationFrame(function () {
+        var categorySearch = activeContext && activeContext.root && activeContext.root.querySelector('[data-catalog-category-search]');
+        if (categorySearch) categorySearch.focus({ preventScroll: true });
+      });
+      return;
+    }
+    if (target.matches('[data-catalog-category-option]')) {
+      state.catalogCategoryDraft = target.dataset.catalogCategoryOption || '全部';
+      state.catalogCategoryMotion = false;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-reset-catalog-category]')) {
+      state.catalogCategoryDraft = '全部';
+      state.catalogCategoryKeyword = '';
+      state.catalogCategoryMotion = false;
+      renderActive();
+      return;
+    }
+    if (target.matches('[data-confirm-catalog-category]')) {
+      state.catalogCategory = state.catalogCategoryDraft || '全部';
+      resetDesktopProductSearch();
+      closeCatalogCategoryPanel(false);
+      window.requestAnimationFrame(function () {
+        var selectedCategory = activeContext && activeContext.root && activeContext.root.querySelector('.order-catalog-category-tabs .tag[aria-pressed="true"]');
+        if (selectedCategory) selectedCategory.scrollIntoView({ block: 'nearest', inline: 'center' });
+      });
+      return;
+    }
     if (target.matches('[data-close-catalog-filter]')) {
       closeCatalogFilter(true);
       return;
@@ -5548,6 +5695,7 @@
     }
     if (target.matches('[data-scan]')) {
       state.catalogFilterPanelOpen = false;
+      state.catalogCategoryPanelOpen = false;
       openBarcodeScanner(ctx);
       return;
     }
@@ -6150,6 +6298,9 @@
       rememberCreatedProducts();
       if (createDraft.type !== 'temporary') {
         state.catalogCategory = '全部';
+        state.catalogCategoryDraft = '全部';
+        state.catalogCategoryKeyword = '';
+        state.catalogCategoryPanelOpen = false;
         state.catalogFilters = emptyCatalogFilters();
         state.catalogFilterDraft = emptyCatalogFilters();
         state.catalogFilterPanelOpen = false;
@@ -6965,6 +7116,19 @@
 
   function handleInput(event, root, ctx) {
     var target = event.target;
+    if (state.catalogCategoryPanelOpen && target.matches('[data-catalog-category-search]')) {
+      state.catalogCategoryKeyword = target.value;
+      state.catalogCategoryMotion = false;
+      renderActive();
+      window.requestAnimationFrame(function () {
+        var categorySearch = activeContext && activeContext.root && activeContext.root.querySelector('[data-catalog-category-search]');
+        if (!categorySearch) return;
+        categorySearch.focus({ preventScroll: true });
+        var categorySearchLength = categorySearch.value.length;
+        categorySearch.setSelectionRange(categorySearchLength, categorySearchLength);
+      });
+      return;
+    }
     if (state.catalogFilterPanelOpen && target.matches('[data-catalog-filter-date-index]')) {
       var dateIndex = Number(target.dataset.catalogFilterDateIndex);
       var nextRange = (state.catalogFilterDraft.dateRange || []).slice(0, 2);
@@ -7674,6 +7838,10 @@
       }
       if (event.key === 'Escape' && state.catalogFilterPanelOpen) {
         closeCatalogFilter(true);
+        return;
+      }
+      if (event.key === 'Escape' && state.catalogCategoryPanelOpen) {
+        closeCatalogCategoryPanel(true);
         return;
       }
       var createMenuItem = event.target.closest && event.target.closest('.order-catalog-create-menu [role="option"]');
