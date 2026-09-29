@@ -10763,13 +10763,16 @@ button.order-payment-method-card {
   border-bottom: var(--stroke-hairline) solid var(--border-neutral-l1);
 }
 
-.order-payment-note-modal__close {
+.order-payment-note-modal .order-payment-note-modal__close.btn--sm.btn--icon-only {
+  flex: 0 0 var(--size-24);
   width: var(--size-24);
   min-width: var(--size-24);
+  max-width: var(--size-24);
   height: var(--size-24);
   min-height: var(--size-24);
+  max-height: var(--size-24);
   padding: 0;
-  color: var(--text-secondary);
+  color: var(--text-default);
   background: var(--bg-subtle);
   border-radius: var(--radius-full);
 }
@@ -10777,7 +10780,7 @@ button.order-payment-method-card {
 .order-payment-note-modal__close .btn__icon {
   width: var(--size-16);
   height: var(--size-16);
-  color: var(--text-secondary);
+  color: var(--text-default);
   font-size: var(--size-16);
 }
 
@@ -11239,6 +11242,24 @@ button.order-payment-method-card {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--spacer-8);
   margin: 0;
+}
+
+.order-reference-payment__online-method > i.order-payment-method-icon--cash,
+.order-reference-payment__combo-label > i.order-payment-method-icon--cash,
+.order-payment-method-card i.order-payment-method-icon--cash {
+  color: var(--status-promotion-default);
+}
+
+.order-reference-payment__online-method > i.order-payment-method-icon--bankcard,
+.order-reference-payment__combo-label > i.order-payment-method-icon--bankcard,
+.order-payment-method-card i.order-payment-method-icon--bankcard {
+  color: var(--status-warning-default);
+}
+
+.order-reference-payment__online-method > i.order-payment-method-icon--other,
+.order-reference-payment__combo-label > i.order-payment-method-icon--other,
+.order-payment-method-card i.order-payment-method-icon--other {
+  color: var(--text-secondary);
 }
 
 .order-reference-payment__debt {

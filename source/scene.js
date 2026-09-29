@@ -255,11 +255,11 @@
   var PAYMENT_METHODS = [
     { id: 'qrpay', label: '出示收款码', icon: 'icon-erweima', category: 'online' },
     { id: 'scanpay', label: '扫客户付款码', icon: 'icon-saoyisao', category: 'online' },
-    { id: 'wechat', label: '微信', icon: 'icon-weixin-mian', category: 'private' },
+    { id: 'wechat', label: '微信', icon: 'icon-weixinzhifu1', category: 'private' },
     { id: 'alipay', label: '支付宝', icon: 'icon-zhifubao', category: 'private' },
-    { id: 'bankcard', label: '银行卡', icon: 'icon-yinhangka-mian', category: 'private' },
-    { id: 'cash', label: '现金', icon: 'icon-qian', category: 'private' },
-    { id: 'other', label: '其他', icon: 'icon-sandian16', category: 'private' }
+    { id: 'bankcard', label: '银行卡', icon: 'icon-yinhangka-mian', iconTone: 'bankcard', category: 'private' },
+    { id: 'cash', label: '现金', icon: 'icon-qian-mian', iconTone: 'cash', category: 'private' },
+    { id: 'other', label: '其他', icon: 'icon-yuansandian-mian', iconTone: 'other', category: 'private' }
   ];
 
   function storedDisplayMode() {
@@ -533,6 +533,7 @@
     realNameInfo: null,
     deliveryRealNameAttention: false,
     deliveryScrollSpacer: 0,
+    paymentScrollSpacer: 0,
     senderMode: 'default',
     senderInfo: { name: '何小小', phone: '13690809124' },
     orderNoteMerchant: '',
@@ -1335,8 +1336,18 @@
       : '.order-v2-modal--checkout .order-reference-payment__sheet';
     var currentBody = root && root.querySelector ? root.querySelector(selector) : null;
     var scrollTop = currentBody ? currentBody.scrollTop : 0;
+    state.paymentScrollSpacer = 0;
     renderActive();
     var nextBody = root && root.querySelector ? root.querySelector(selector) : null;
+    if (!nextBody) return;
+    for (var pass = 0; pass < 3; pass += 1) {
+      var heightCompensation = Math.max(0, scrollTop - (nextBody.scrollHeight - nextBody.clientHeight));
+      if (heightCompensation <= 0.5) break;
+      state.paymentScrollSpacer += Math.ceil(heightCompensation);
+      renderActive();
+      nextBody = root.querySelector(selector);
+      if (!nextBody) return;
+    }
     if (nextBody) nextBody.scrollTop = scrollTop;
     window.requestAnimationFrame(function () {
       if (nextBody && nextBody.isConnected) nextBody.scrollTop = scrollTop;
@@ -3263,6 +3274,7 @@
       +     '<div class="order-reference-payment__remaining"><span>还需收款</span>' + paymentAmountMetric(targetCents / 100, 24, 'black') + '</div>'
       +     collectionContent
       +     paymentNoteEntry(draft)
+      +     (state.paymentScrollSpacer ? '<div class="order-payment-scroll-spacer" style="height:' + state.paymentScrollSpacer + 'px" aria-hidden="true"></div>' : '')
       +   '</section>'
       +   '<footer class="order-reference-payment__footer">'
       +     '<div class="order-payment-options">'
@@ -3283,7 +3295,7 @@
     var methodContent = draft.refundStatus === 'private'
       ? '<section class="order-reference-payment__methods order-refund-payment__methods"><header><strong>退款方式</strong></header><div class="order-reference-payment__private-methods">' + privateMethods.map(function (method) {
         var active = refundMethod && refundMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component="stack" data-component-slug="stack" data-variant-name="selection" data-select-refund-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong></span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component="stack" data-component-slug="stack" data-variant-name="selection" data-select-refund-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong></span>' + (active ? paymentSelectionCheck() : '') + '</button>';
       }).join('') + '</div></section>'
       : '';
     var inventoryContent = hasReturns
@@ -3304,6 +3316,7 @@
       +     methodContent
       +     inventoryContent
       +     '<section class="order-refund-payment__remark" aria-label="退款备注">' + paymentNoteEntry(draft, true) + '</section>'
+      +     (state.paymentScrollSpacer ? '<div class="order-payment-scroll-spacer" style="height:' + state.paymentScrollSpacer + 'px" aria-hidden="true"></div>' : '')
       +   '</section>'
       +   '<footer class="order-reference-payment__footer">'
       +     '<div class="order-payment-options">'
@@ -3423,12 +3436,12 @@
     } else if (draft.kind === 'online') {
       content = '<div class="order-reference-payment__online-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
       }).join('') + '</div>';
     } else {
       content = '<div class="order-reference-payment__private-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
       }).join('') + '</div>';
     }
     return '<section class="order-reference-payment__methods"><header><strong>支付方式</strong><button type="button" class="order-reference-payment__mode-switch" role="switch" aria-checked="' + (draft.mode === 'combo') + '" data-payment-mode="' + (draft.mode === 'combo' ? 'single' : 'combo') + '"><span>组合支付</span><i class="switch ' + (draft.mode === 'combo' ? 'switch--on' : 'switch--off') + '" data-component-slug="switch"><span class="switch__thumb"></span></i></button></header>' + content + '</section>';
@@ -3437,7 +3450,7 @@
   function paymentOnlineComboInput(method, draft, index) {
     var value = String(draft[method.id] || '');
     return '<div class="form-body form-body--preserve-content-align form-body--label-w120 order-reference-payment__combo-row">'
-      + '<div class="form-body__label order-reference-payment__combo-label"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
+      + '<div class="form-body__label order-reference-payment__combo-label"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
       + '<div class="form-body__action"><div class="number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(value) + '" placeholder="请输入" data-payment-amount="' + method.id + '" data-online-combo-index="' + index + '" aria-label="' + method.label + '收款金额"></div></div>'
       + '</div>';
   }
@@ -3448,7 +3461,7 @@
       ? '<div class="order-reference-payment__private-combo-action"><div class="number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft[method.id] || '')) + '" placeholder="请输入" data-payment-amount="' + method.id + '" aria-label="' + method.label + '收款金额"></div><button type="button" class="order-reference-payment__private-combo-remove" data-remove-payment-method="' + method.id + '" aria-label="移除' + method.label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
       : '<button type="button" class="link link--14 order-reference-payment__private-combo-select" data-component-slug="link" data-select-payment-method="' + method.id + '">选择</button>';
     return '<div class="form-body form-body--preserve-content-align form-body--label-w120 order-reference-payment__combo-row order-reference-payment__private-combo-row' + (selected ? ' is-selected' : '') + '">'
-      + '<div class="form-body__label order-reference-payment__combo-label"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
+      + '<div class="form-body__label order-reference-payment__combo-label"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
       + '<div class="form-body__action">' + action + '</div>'
       + '</div>';
   }
@@ -3604,6 +3617,10 @@
     return PAYMENT_METHODS.filter(function (method) { return method.category === kind; });
   }
 
+  function paymentMethodIconClass(method) {
+    return 'wego-iconfont-s ' + method.icon + (method.iconTone ? ' order-payment-method-icon--' + method.iconTone : '');
+  }
+
   function paymentMethodById(id) {
     return PAYMENT_METHODS.find(function (method) { return method.id === id; }) || null;
   }
@@ -3639,12 +3656,12 @@
   function paymentMethodCard(method, draft, selectedMethods, targetCents) {
     var selected = selectedMethods.some(function (item) { return item.id === method.id; });
     if (!selected) {
-      return '<button type="button" class="order-payment-method-card" data-component-slug="stack" data-select-payment-method="' + method.id + '"><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><span>' + method.label + '</span><small>选择</small></button>';
+      return '<button type="button" class="order-payment-method-card" data-component-slug="stack" data-select-payment-method="' + method.id + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span>' + method.label + '</span><small>选择</small></button>';
     }
     var value = draft.mode === 'single' ? draft.singleAmount : draft[method.id];
     var fillCents = Math.max(0, targetCents - paymentAllocatedCents(draft, method.id));
     return '<div class="order-payment-method-card is-active" data-component-slug="stack">'
-      + '<div class="order-payment-method-card__head"><span><i class="wego-iconfont-s ' + method.icon + '" aria-hidden="true"></i><strong>' + method.label + '</strong></span><button type="button" data-remove-payment-method="' + method.id + '" aria-label="移除' + method.label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
+      + '<div class="order-payment-method-card__head"><span><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><strong>' + method.label + '</strong></span><button type="button" data-remove-payment-method="' + method.id + '" aria-label="移除' + method.label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
       + '<div class="order-payment-method-card__amount"><span>收款金额</span><label data-component-slug="input"><b>¥</b><input type="text" inputmode="decimal" value="' + escapeHtml(value || '') + '" data-payment-amount="' + method.id + '" aria-label="' + method.label + '收款金额"></label><button type="button" class="link link--12" data-component-slug="link" data-fill-payment-remaining="' + method.id + '">填入剩余 ' + (fillCents / 100).toFixed(2) + '</button></div>'
       + '</div>';
   }
@@ -5701,6 +5718,7 @@
     if (!validateCheckout(ctx)) return;
     state.paymentDraft = createPaymentDraft();
     state.paymentStatus = 'idle';
+    state.paymentScrollSpacer = 0;
     state.panel = 'checkout';
     renderActive();
   }
@@ -5728,6 +5746,7 @@
     state.delivery = 'none';
     state.paymentDraft = createPaymentDraft();
     state.paymentStatus = 'idle';
+    state.paymentScrollSpacer = 0;
     state.panel = 'checkout';
   }
 
@@ -9053,6 +9072,7 @@
     state.orderNo = '';
     state.paymentStatus = 'idle';
     state.paymentDraft = null;
+    state.paymentScrollSpacer = 0;
     state.paymentPostActions = null;
     state.dailyTotalRecorded = false;
     state.saveStatus = '新订单';
