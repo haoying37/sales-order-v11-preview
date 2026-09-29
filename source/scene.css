@@ -708,6 +708,10 @@ body[data-order-layout="landscape"] .phone-indicator {
   padding: var(--spacer-24);
 }
 
+.order-refund-image-preview {
+  z-index: calc(var(--z-modal) + 2);
+}
+
 .order-image-preview__backdrop {
   position: absolute;
   inset: 0;
@@ -3561,6 +3565,55 @@ button.order-payment-method-card {
   line-height: var(--body-md-line-height);
 }
 
+.order-note-bar__note--with-images {
+  align-items: flex-start;
+}
+
+.order-refund-note-entry__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--spacer-8);
+  min-width: 0;
+}
+
+.order-refund-note-entry__text {
+  overflow: hidden;
+  padding: 0;
+  color: var(--text-default);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
+.order-refund-note-entry__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacer-4);
+}
+
+.order-refund-note-entry__image {
+  flex: 0 0 var(--size-40);
+  width: var(--size-40);
+  height: var(--size-40);
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+}
+
+.order-note-bar__edit[data-open-payment-note] {
+  align-self: center;
+  padding: 0;
+  pointer-events: auto;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
 .order-note-modal {
   position: absolute;
   inset: 0;
@@ -3677,6 +3730,7 @@ button.order-payment-method-card {
     flex: 1 1 auto;
     min-height: 0;
     padding: 0;
+    border-top: var(--spacer-8) solid var(--bg-page);
     background: var(--bg-surface);
   }
 
@@ -3712,6 +3766,14 @@ button.order-payment-method-card {
     min-height: var(--size-24);
     padding: 0;
     border-radius: var(--radius-full);
+  }
+
+  .order-add-stock-dialog:focus {
+    outline: none;
+  }
+
+  .order-add-stock-dialog .dialog__btn--dismiss:focus-visible {
+    outline: none;
   }
 
   .order-desktop-modal--add .order-add-product--pricing {
@@ -3830,7 +3892,6 @@ button.order-payment-method-card {
     gap: 0;
     padding: 0 var(--spacer-16);
     background: var(--bg-surface);
-    border-top: var(--spacer-8) solid var(--bg-page);
   }
 
   .order-add-selection-head {
@@ -3892,13 +3953,18 @@ button.order-payment-method-card {
     min-height: calc(var(--size-40) + var(--spacer-4));
   }
 
+  .order-add-spec-counter-head:empty {
+    display: none;
+    min-height: 0;
+  }
+
   .order-add-spec-counter-head small {
     color: var(--text-default);
     font-size: var(--body-lg-font-size);
     font-weight: var(--font-weight-medium);
   }
 
-  .order-add-spec-counter-head span {
+  .order-add-spec-counter-head > span {
     color: var(--text-secondary);
     font-size: var(--body-sm-font-size);
   }
@@ -3996,8 +4062,8 @@ button.order-payment-method-card {
     color: var(--status-danger-default);
   }
 
-  .order-add-spec-counter-row .counter.is-error .counter__body {
-    box-shadow: inset 0 0 0 var(--stroke-1) var(--status-danger-default);
+  .order-add-spec-counter-row .counter__value.is-overstock-value {
+    color: var(--status-danger-default);
   }
 
   .order-add-spec-counter-empty {
@@ -7039,23 +7105,34 @@ button.order-payment-method-card {
   }
 
   .order-desktop-product-row--grouped {
-    align-items: stretch;
-    padding-top: 0;
-    padding-bottom: 0;
-  }
-
-  .order-desktop-product-row--grouped > .order-desktop-product-name,
-  .order-desktop-product-row--grouped > .order-product-image-button,
-  .order-desktop-product-row--grouped > .order-desktop-product-total,
-  .order-desktop-product-row--grouped > .order-desktop-product-note {
-    align-self: stretch;
-    height: 100%;
-    justify-content: center;
-  }
-
-  .order-desktop-product-row--grouped > .order-product-image-button {
-    display: flex;
     align-items: center;
+    padding-top: var(--spacer-4);
+    padding-bottom: var(--spacer-4);
+  }
+
+  .order-desktop-product-row--multi-sku {
+    align-items: stretch;
+    padding-top: var(--spacer-8);
+    padding-bottom: var(--spacer-8);
+  }
+
+  .order-desktop-product-row--multi-sku > .order-desktop-product-name,
+  .order-desktop-product-row--multi-sku > .order-product-image-button,
+  .order-desktop-product-row--multi-sku > .order-desktop-product-total,
+  .order-desktop-product-row--multi-sku > .order-desktop-product-note {
+    align-self: start;
+    height: auto;
+    justify-content: flex-start;
+  }
+
+  .order-desktop-product-row--multi-sku > .order-product-image-button {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .order-desktop-product-row--multi-sku > .order-desktop-row-delete {
+    top: var(--spacer-8);
+    transform: none;
   }
 
   .order-desktop-row-delete {
@@ -7094,7 +7171,7 @@ button.order-payment-method-card {
     display: flex;
     align-items: center;
     min-width: 0;
-    min-height: var(--size-56);
+    min-height: var(--size-64);
     border-bottom: var(--stroke-hairline) solid var(--border-neutral-l2);
   }
 
@@ -7210,19 +7287,33 @@ button.order-payment-method-card {
     text-align: right;
   }
 
-  .order-desktop-product-total--grouped small {
+  .order-desktop-product-total--grouped .order-desktop-product-quantity-summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--spacer-8);
+    min-height: var(--body-md-line-height);
     color: var(--text-default);
     font-family: var(--body-md-font-family);
     font-size: var(--body-md-font-size);
     font-weight: var(--font-weight-regular);
   }
 
-  .order-desktop-product-total--grouped small > span {
+  .order-desktop-product-quantity-sale {
     color: var(--text-default);
-    font-family: var(--number-lg-font-family);
-    font-size: var(--number-lg-font-size);
-    font-weight: var(--font-weight-semibold);
-    line-height: var(--number-lg-line-height);
+  }
+
+  .order-desktop-product-quantity-return,
+  .order-desktop-product-total__value.is-negative {
+    color: var(--status-danger-default);
+  }
+
+  .order-desktop-product-quantity-divider {
+    display: inline-block;
+    flex: 0 0 1px;
+    width: 1px;
+    height: var(--size-12);
+    background: var(--bg-overlay-l1);
   }
 
   .order-desktop-product-note {
@@ -7348,11 +7439,18 @@ button.order-payment-method-card {
   }
 
   .order-summary-row__value .order-summary-row__meta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacer-4);
     color: var(--text-tertiary);
     font-family: var(--body-sm-font-family);
     font-size: var(--body-sm-font-size);
     font-style: normal;
     font-weight: var(--font-weight-regular);
+  }
+
+  .order-summary-row__meta .order-desktop-product-quantity-sale {
+    color: inherit;
   }
 
   .order-summary-row--deduction .order-summary-row__value,
@@ -7399,6 +7497,10 @@ button.order-payment-method-card {
     color: var(--text-brand);
     font-size: var(--heading-lg-font-size);
     font-weight: var(--font-weight-semibold);
+  }
+
+  .order-summary-row--total .order-summary-row__value strong.is-negative {
+    color: var(--status-danger-default);
   }
 
   .order-desktop__quick-ops {
@@ -10474,6 +10576,327 @@ button.order-payment-method-card {
   gap: 0;
 }
 
+.order-reference-payment__metric.metric--danger {
+  color: var(--status-danger-default);
+}
+
+.order-refund-payment__sheet {
+  padding-bottom: var(--spacer-8);
+}
+
+.order-refund-payment__field {
+  padding: var(--spacer-12) var(--spacer-16);
+  border-bottom: var(--stroke-hairline) solid var(--border-neutral-l1);
+}
+
+.order-refund-payment__field > header,
+.order-refund-payment__methods > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--size-32);
+  margin-bottom: var(--spacer-8);
+}
+
+.order-refund-payment__field > header > strong,
+.order-refund-payment__methods > header > strong {
+  font-size: var(--body-lg-font-size);
+  line-height: var(--body-lg-line-height);
+  font-weight: var(--font-weight-medium);
+}
+
+.order-refund-payment__option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacer-8);
+}
+
+.order-refund-payment__option-grid--inventory {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.order-refund-payment__option-grid.is-single {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.order-refund-payment__option {
+  position: relative;
+  width: 100%;
+}
+
+.order-refund-payment__option--specified {
+  min-width: 0;
+}
+
+.order-refund-payment__option--specified > span {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+}
+
+.order-refund-payment__option--specified > span > strong {
+  width: 100%;
+  font-size: var(--body-sm-font-size);
+}
+
+.order-refund-payment__option--specified > span > small {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--body-xs-font-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-refund-payment__option--specified > span > small > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.order-refund-payment__warehouse-arrow {
+  display: inline-flex;
+  flex: 0 0 var(--size-12);
+  align-items: center;
+  justify-content: center;
+  width: var(--size-12);
+  height: var(--size-12);
+  font-size: var(--size-12);
+}
+
+.order-refund-payment__option--specified.is-active > span > small {
+  color: var(--text-brand);
+}
+
+.order-refund-payment__option-arrow {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: var(--size-16);
+}
+
+.order-refund-payment__option-grid--inventory .order-refund-payment__option {
+  min-height: var(--size-56);
+}
+
+.order-refund-payment__warehouse {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacer-16);
+  min-height: var(--size-48);
+  margin-top: var(--spacer-8);
+  padding: 0 var(--spacer-12);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-8);
+}
+
+.order-refund-payment__warehouse > span:first-child {
+  flex: 0 0 auto;
+  font-size: var(--body-md-font-size);
+}
+
+.order-refund-payment__warehouse-control {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.order-refund-payment__warehouse-control select {
+  width: 100%;
+  min-height: var(--size-40);
+  padding: 0 var(--size-32) 0 var(--spacer-12);
+  color: var(--text-default);
+  font: inherit;
+  text-align: right;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.order-refund-payment__warehouse-control > i {
+  position: absolute;
+  right: 0;
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+
+.order-refund-payment__methods {
+  padding-top: var(--spacer-12);
+  padding-bottom: var(--spacer-12);
+  border-bottom: var(--stroke-hairline) solid var(--border-neutral-l1);
+}
+
+.order-refund-payment__remark {
+  padding-bottom: var(--spacer-8);
+}
+
+.order-refund-payment__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacer-8);
+  padding: 0 var(--spacer-16) var(--spacer-8);
+}
+
+.order-payment-note-modal .order-refund-payment__images {
+  padding: 0;
+}
+
+.order-payment-note-modal .order-note-modal__panel {
+  gap: 0;
+  padding: 0;
+}
+
+.order-payment-note-modal .order-note-modal__head {
+  display: flex;
+  flex: 0 0 var(--size-56);
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--spacer-16);
+  background: var(--bg-page);
+  border-bottom: var(--stroke-hairline) solid var(--border-neutral-l1);
+}
+
+.order-payment-note-modal__close {
+  width: var(--size-24);
+  min-width: var(--size-24);
+  height: var(--size-24);
+  min-height: var(--size-24);
+  padding: 0;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-full);
+}
+
+.order-payment-note-modal__close .btn__icon {
+  width: var(--size-16);
+  height: var(--size-16);
+  color: var(--text-secondary);
+  font-size: var(--size-16);
+}
+
+.order-payment-note-modal .order-note-modal__body {
+  gap: var(--spacer-12);
+  padding: var(--spacer-16);
+}
+
+.order-payment-note-modal .order-note-modal__actions {
+  box-sizing: border-box;
+  flex: 0 0 calc(var(--size-64) + var(--safe-area-bottom));
+  min-height: calc(var(--size-64) + var(--safe-area-bottom));
+  padding: var(--spacer-12) var(--spacer-16) calc(var(--spacer-12) + var(--safe-area-bottom));
+  background: var(--bg-surface);
+  border-top: var(--stroke-hairline) solid var(--border-neutral-l1);
+}
+
+.order-payment-note-modal .order-note-modal__actions .btn {
+  width: calc(var(--size-72) + var(--spacer-4));
+  min-width: calc(var(--size-72) + var(--spacer-4));
+  height: var(--size-40);
+  min-height: var(--size-40);
+  font-size: var(--body-lg-font-size);
+  border-radius: var(--radius-8);
+}
+
+.order-payment-note-modal__input {
+  width: 100%;
+  max-width: none;
+}
+
+.order-payment-note-modal__input .field-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.order-payment-note-modal__input textarea {
+  min-height: var(--size-96);
+  resize: none;
+  background: var(--bg-subtle);
+}
+
+.order-refund-warehouse-popmenu {
+  position: fixed !important;
+  z-index: calc(var(--z-modal) + 1);
+}
+
+.order-refund-warehouse-popmenu[data-positioned="false"] {
+  visibility: hidden;
+}
+
+.order-refund-payment__images figure,
+.order-refund-payment__image-add {
+  position: relative;
+  flex: 0 0 var(--size-64);
+  width: var(--size-64);
+  height: var(--size-64);
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg-subtle);
+  border: var(--stroke-hairline) solid var(--border-neutral-l2);
+  border-radius: var(--radius-8);
+}
+
+.order-refund-payment__images figure > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.order-refund-payment__images figure > button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-24);
+  height: var(--size-24);
+  padding: 0;
+  color: var(--text-inverse);
+  background: var(--bg-mask-strong);
+  border: 0;
+}
+
+.order-refund-payment__image-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacer-4);
+  color: var(--text-secondary);
+  font-size: var(--body-xs-font-size);
+}
+
+.order-refund-payment__image-add > i {
+  font-size: var(--size-20);
+}
+
+.order-refund-balance-guide {
+  z-index: calc(var(--z-modal) + 2);
+}
+
+@media (max-width: 479px) {
+  .order-refund-payment__option-grid--inventory {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-refund-payment__option-grid.is-single {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .order-reference-payment__balance {
   min-height: var(--size-48);
   margin: 0;
@@ -10627,15 +11050,25 @@ button.order-payment-method-card {
 .order-reference-payment__selection-check {
   top: calc(var(--stroke-hairline) * -1);
   right: calc(var(--stroke-hairline) * -1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: var(--size-20);
   height: var(--size-20);
+  padding: 0;
+  line-height: 1;
   border-radius: 0 var(--radius-8) 0 var(--radius-8);
 }
 
 .order-reference-payment__selection-check img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
   display: block;
-  width: 11px;
-  height: 8px;
+  width: 13px;
+  height: 10px;
+  margin: 0;
+  transform: translate(-50%, -50%);
 }
 
 .order-reference-payment__methods {
@@ -11132,7 +11565,7 @@ button.order-payment-method-card {
 }
 
 @media (min-width: 768px) and (min-height: 760px) {
-  .order-desktop-modal--checkout .order-reference-payment__sheet {
+  .order-desktop-modal--checkout .order-reference-payment:not(.order-reference-payment--refund) .order-reference-payment__sheet {
     overflow-y: hidden;
   }
 }
@@ -11484,6 +11917,10 @@ button.order-payment-method-card {
     align-self: center;
     justify-self: end;
     transform: none;
+  }
+
+  .order-desktop__table.is-product-note-hidden .order-desktop-product-row--multi-sku > .order-desktop-row-delete {
+    align-self: start;
   }
 }
 
