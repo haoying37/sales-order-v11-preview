@@ -893,16 +893,57 @@
     return Object.keys(draft.skuQty).reduce(function (sum, key) { return sum + Number(draft.skuQty[key] || 0); }, 0);
   }
 
-  function singleSizeQuantities(draft) {
-    var quantities = {};
-    var matrix = addProductMatrix(draft.product);
-    matrix.sizes.forEach(function (size) {
-      var selectedSpec = draft.selectedColor ? specKey(draft.product, draft.selectedColor, size) : '';
-      quantities[size] = draft.selectedColor
-        ? Number((selectedSpec && draft.skuQty[selectedSpec]) || 0)
-        : Number((draft.pendingSizeQty && draft.pendingSizeQty[size]) || 0);
+  // 单买允许同一 SKU 多件；只有有效非零数量才替换其他 SKU，超库存待确认值不提前替换。
+  function setSingleSkuQuantity(draft, spec, quantity) {
+    if (quantity !== 0) {
+      if (!draft.listBulkActive) Object.keys(draft.skuQty).forEach(function (key) {
+        if (key !== spec) {
+          draft.skuQty[key] = 0;
+          delete draft.confirmedOverstock[key];
+        }
+      });
+      var pair = splitSpec(spec);
+      draft.selectedColor = pair.color;
+      draft.selectedSize = pair.size;
+      draft.pendingSizeQty = {};
+    }
+    draft.skuQty[spec] = quantity;
+  }
+
+  function syncSingleSkuRows(root, draft) {
+    root.querySelectorAll('.order-add-spec-counter-row [data-single-qty-input]').forEach(function (input) {
+      var spec = decodeURIComponent(input.dataset.singleSpec || '');
+      if (!spec) return;
+      var quantity = Number(draft.skuQty[spec] || 0);
+      var row = input.closest('.order-add-spec-counter-row');
+      var sku = resolveSkuRowState(draft.product, spec, quantity, draft.confirmedOverstock[spec]);
+      input.value = quantity;
+      input.classList.toggle('is-overstock-value', sku.isOverStock);
+      if (sku.isOverStock) input.setAttribute('aria-invalid', 'true');
+      else input.removeAttribute('aria-invalid');
+      var stock = row.querySelector('.order-add-sku-stock');
+      if (stock) stock.classList.toggle('is-error', sku.isOverStock);
+      row.querySelector('[data-single-qty-delta="-1"]').disabled = quantity <= -9999;
+      row.querySelector('[data-single-qty-delta="1"]').disabled = quantity >= singleQuantityLimit(draft.product, spec);
     });
-    return quantities;
+    syncAddColorTotals(root, draft);
+  }
+
+  function addColorQuantity(draft, color) {
+    return draft.product.specs.reduce(function (sum, spec) {
+      return sum + (splitSpec(spec).color === color ? Number(draft.skuQty[spec] || 0) : 0);
+    }, 0);
+  }
+
+  function syncAddColorTotals(root, draft) {
+    root.querySelectorAll('[data-add-color] [data-add-color-count]').forEach(function (badge) {
+      var color = decodeURIComponent(badge.parentElement.dataset.addColor || '');
+      var hasQuantity = draft.product.specs.some(function (spec) {
+        return splitSpec(spec).color === color && Number(draft.skuQty[spec] || 0) !== 0;
+      });
+      badge.hidden = !hasQuantity;
+      badge.textContent = hasQuantity ? String(addColorQuantity(draft, color)) : '';
+    });
   }
 
   function pendingSizeStock(product, size) {
@@ -911,13 +952,6 @@
       var candidateSpec = specKey(product, color, size);
       return Math.max(maxStock, candidateSpec ? specStock(product, candidateSpec) : 0);
     }, 0);
-  }
-
-  function colorSupportsQuantities(draft, color) {
-    var quantities = singleSizeQuantities(draft);
-    return Object.keys(quantities).every(function (size) {
-      return quantities[size] <= 0 || Boolean(specKey(draft.product, color, size));
-    });
   }
 
   function copyAddSkuQty(product, source) {
@@ -933,6 +967,8 @@
     }
     draft.singleRecord = {
       skuQty: copyAddSkuQty(draft.product, draft.skuQty),
+      listBulkActive: Boolean(draft.listBulkActive),
+      listBulkValues: Object.assign({}, draft.listBulkValues || {}),
       selectedColor: draft.selectedColor,
       selectedSize: draft.selectedSize,
       pendingSizeQty: Object.assign({}, draft.pendingSizeQty || {}),
@@ -942,6 +978,8 @@
 
   function restoreAddModeRecord(draft, nextMode) {
     if (nextMode === 'single') {
+      draft.listBulkActive = Boolean(draft.singleRecord && draft.singleRecord.listBulkActive);
+      draft.listBulkValues = Object.assign({}, draft.singleRecord && draft.singleRecord.listBulkValues || {});
       draft.skuQty = copyAddSkuQty(draft.product, draft.singleRecord && draft.singleRecord.skuQty);
       draft.selectedColor = draft.singleRecord ? draft.singleRecord.selectedColor : '';
       draft.selectedSize = draft.singleRecord ? draft.singleRecord.selectedSize : '';
@@ -953,17 +991,9 @@
       draft.skuQty = copyAddSkuQty(draft.product, draft.batchRecord);
       draft.batchRecordTouched = true;
     } else {
-      draft.skuQty = copyAddSkuQty(draft.product, null);
-      var singleRecord = draft.singleRecord;
-      var singleSpec = singleRecord ? specKey(draft.product, singleRecord.selectedColor, singleRecord.selectedSize) : '';
-      var singleQuantity = singleSpec ? Number(singleRecord.skuQty[singleSpec] || 0) : 0;
-      if (singleSpec && singleQuantity !== 0) {
-        draft.skuQty[singleSpec] = singleQuantity;
-        draft.batchRecord = copyAddSkuQty(draft.product, draft.skuQty);
-        draft.batchRecordTouched = true;
-      } else {
-        draft.batchRecordTouched = false;
-      }
+      draft.skuQty = copyAddSkuQty(draft.product, draft.singleRecord && draft.singleRecord.skuQty);
+      draft.batchRecordTouched = draft.product.specs.some(function (spec) { return draft.skuQty[spec] !== 0; });
+      if (draft.batchRecordTouched) draft.batchRecord = copyAddSkuQty(draft.product, draft.skuQty);
     }
     draft.selectedColor = '';
     draft.selectedSize = '';
@@ -997,12 +1027,12 @@
   function totals() {
     var quantitySummary = quantityBreakdown(state.products);
     var productAmount = state.products.reduce(function (sum, item) {
-      return sum + item.price * item.qty;
+      return sum + itemAmount(item);
     }, 0);
     var effectiveMemberRate = Number(state.memberDiscount || 100) / 100;
     var memberDiscountAmount = 0;
     var memberAmount = state.products.reduce(function (sum, item) {
-      if (item.manualPrice) return sum + item.price * item.qty;
+      if (item.manualPrice) return sum + itemAmount(item);
       memberDiscountAmount += (item.listPrice - item.listPrice * effectiveMemberRate) * item.qty;
       return sum + item.listPrice * effectiveMemberRate * item.qty;
     }, 0);
@@ -1087,6 +1117,34 @@
 
   function addDraftUnitPrice(draft) {
     return Number(draft && draft.unitPrice != null ? draft.unitPrice : customerPrice(draft.product));
+  }
+
+  function addDraftSkuBasePrice(draft, spec) {
+    if (!draft.useSkuPrices || draft.priceMode !== 'retail' || !spec) return addDraftUnitPrice(draft);
+    return skuRowDisplayPrice(skuRowDetail(draft.product, spec));
+  }
+
+  function addDraftSkuPrice(draft, spec) {
+    var overridden = draft.skuPriceOverrides && draft.skuPriceOverrides[spec];
+    return overridden == null ? addDraftSkuBasePrice(draft, spec) : Number(overridden);
+  }
+
+  function addDraftAmount(draft) {
+    if (draft.mode !== 'batch' && !draft.selectedColor) return addDraftTotal(draft) * addDraftUnitPrice(draft);
+    return Math.round(Object.keys(draft.skuQty).reduce(function (sum, spec) {
+      return sum + Number(draft.skuQty[spec] || 0) * addDraftSkuPrice(draft, spec);
+    }, 0) * 100) / 100;
+  }
+
+  function itemSkuPrice(item, spec) {
+    return item.skuPrices && item.skuPrices[spec] != null ? Number(item.skuPrices[spec]) : Number(item.price);
+  }
+
+  function itemAmount(item) {
+    if (!item.skuPrices || !isSkuMode(item.mode)) return item.price * item.qty;
+    return Math.round(Object.keys(item.skuQty || {}).reduce(function (sum, spec) {
+      return sum + Number(item.skuQty[spec] || 0) * itemSkuPrice(item, spec);
+    }, 0) * 100) / 100;
   }
 
   function recalculateCustomerPrices() {
@@ -1230,6 +1288,9 @@
     '.order-desktop__table',
     '.order-desktop__catalog-scroll',
     '.order-add-scroll',
+    '.order-batch-matrix-wrap',
+    '.order-catalog-category-tabs',
+    '.order-catalog-history__list',
     '.order-desktop-modal--checkout .order-desktop-modal__body',
     '.order-v2-modal .order-v2-modal__body',
     '.order-reference-payment__sheet',
@@ -1268,6 +1329,31 @@
     if (isRendering) return;
     if (activeContext && activeContext.root && activeContext.root.isConnected) {
       var renderScrollPositions = captureRenderScrollPositions(activeContext.root);
+      // Pad 选品会暂时收起商品库；容器卸载期间仍保留浏览位置，重新展开时恢复。
+      var catalogScrollSelectors = ['.order-desktop__catalog-scroll', '.order-catalog-category-tabs', '.order-catalog-history__list'];
+      state.catalogScrollPositions = state.catalogScrollPositions || {};
+      renderScrollPositions.forEach(function (snapshot) {
+        if (catalogScrollSelectors.indexOf(snapshot.selector) !== -1) state.catalogScrollPositions[snapshot.selector] = snapshot;
+      });
+      catalogScrollSelectors.forEach(function (selector) {
+        if (!renderScrollPositions.some(function (snapshot) { return snapshot.selector === selector; }) && state.catalogScrollPositions[selector]) {
+          renderScrollPositions.push(state.catalogScrollPositions[selector]);
+        }
+      });
+      // Editing temporarily unmounts the picker; keep offsets in this draft until it closes.
+      if (state.addDraft) {
+        var addScrollSelectors = ['.order-add-scroll', '.order-batch-matrix-wrap'];
+        state.addDraft.scrollPositions = state.addDraft.scrollPositions || {};
+        renderScrollPositions.forEach(function (snapshot) {
+          if (addScrollSelectors.indexOf(snapshot.selector) !== -1) state.addDraft.scrollPositions[snapshot.selector + ":" + snapshot.index] = snapshot;
+        });
+        Object.keys(state.addDraft.scrollPositions).forEach(function (key) {
+          var saved = state.addDraft.scrollPositions[key];
+          if (!renderScrollPositions.some(function (snapshot) { return snapshot.selector === saved.selector && snapshot.index === saved.index; })) {
+            renderScrollPositions.push(saved);
+          }
+        });
+      }
       var currentImageStrip = activeContext.root.querySelector('.order-image-search-strip');
       var currentCatalogScroller = activeContext.root.querySelector('.order-desktop__catalog-scroll');
       var currentAddScroller = state.addDraft ? activeContext.root.querySelector('.order-add-scroll') : null;
@@ -1330,28 +1416,78 @@
     });
   }
 
-  function renderPaymentPreservingScroll(root) {
+  function paymentFocusSelector(root) {
+    var active = document.activeElement;
+    if (!active || !root || !root.contains(active)) return '';
+    var attributes = ['data-payment-kind', 'data-select-payment-method', 'data-payment-amount', 'data-remove-payment-method'];
+    for (var i = 0; i < attributes.length; i += 1) {
+      if (active.hasAttribute(attributes[i])) return '[' + attributes[i] + '=' + JSON.stringify(active.getAttribute(attributes[i])) + ']';
+    }
+    var controls = ['data-payment-mode', 'data-toggle-payment-balance', 'data-auto-print-receipt', 'data-auto-dispatch', 'data-open-payment-note'];
+    for (var j = 0; j < controls.length; j += 1) {
+      if (active.hasAttribute(controls[j])) return '[' + controls[j] + ']';
+    }
+    return '';
+  }
+
+  function renderPaymentPreservingScroll(root, returnFocusSelector) {
+    var focusSelector = returnFocusSelector || paymentFocusSelector(root);
     var selector = isDesktopWorkbench()
       ? '.order-desktop-modal--checkout .order-reference-payment__sheet'
       : '.order-v2-modal--checkout .order-reference-payment__sheet';
     var currentBody = root && root.querySelector ? root.querySelector(selector) : null;
     var scrollTop = currentBody ? currentBody.scrollTop : 0;
+    var scrollLeft = currentBody ? currentBody.scrollLeft : 0;
     state.paymentScrollSpacer = 0;
     renderActive();
     var nextBody = root && root.querySelector ? root.querySelector(selector) : null;
     if (!nextBody) return;
+    // A shorter refund state can fit entirely in the fixed panel. Do not create
+    // a spacer solely to preserve an offset that no longer has content to scroll.
+    if (totals().payable < 0 && nextBody.scrollHeight <= nextBody.clientHeight + 1) scrollTop = 0;
     for (var pass = 0; pass < 3; pass += 1) {
-      var heightCompensation = Math.max(0, scrollTop - (nextBody.scrollHeight - nextBody.clientHeight));
+      var availableScroll = Math.max(0, nextBody.scrollHeight - nextBody.clientHeight);
+      var heightCompensation = Math.max(0, scrollTop - availableScroll);
       if (heightCompensation <= 0.5) break;
       state.paymentScrollSpacer += Math.ceil(heightCompensation);
       renderActive();
       nextBody = root.querySelector(selector);
       if (!nextBody) return;
     }
-    if (nextBody) nextBody.scrollTop = scrollTop;
+    if (nextBody) { nextBody.scrollTop = scrollTop; nextBody.scrollLeft = scrollLeft; }
+    var focusTarget = focusSelector ? root.querySelector(focusSelector) : null;
+    if (focusTarget) focusTarget.focus({ preventScroll: true });
     window.requestAnimationFrame(function () {
-      if (nextBody && nextBody.isConnected) nextBody.scrollTop = scrollTop;
+      if (nextBody && nextBody.isConnected) { nextBody.scrollTop = scrollTop; nextBody.scrollLeft = scrollLeft; }
     });
+  }
+
+  function fillOnlinePaymentRemainder(target, root) {
+    var draft = state.paymentDraft;
+    if (!draft || draft.mode !== 'combo' || draft.kind !== 'online') return;
+    var methodId = target.dataset.paymentAmount;
+    if (draft.onlineAmountTouched[methodId] || String(draft[methodId] || '') !== '') return;
+    var filled = selectedPaymentMethods(draft).some(function (method) {
+      return method.id !== methodId && paymentAmountCents(draft, method.id) > 0;
+    });
+    if (!filled) return;
+    var targetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(draft, totals().payable));
+    var remainingCents = Math.max(0, targetCents - paymentAllocatedCents(draft, methodId));
+    if (remainingCents <= 0) return;
+    draft[methodId] = compactAmount(remainingCents / 100);
+    draft.onlineAmountTouched[methodId] = true;
+    if (draft.selectedMethods.indexOf(methodId) < 0) draft.selectedMethods.push(methodId);
+    draft.shortageHandling = null;
+    target.value = draft[methodId];
+    refreshPaymentAmountsInPlace(root);
+  }
+
+  function handlePaymentControlKeydown(event) {
+    var control = event.target.closest && event.target.closest('[data-auto-print-receipt], [data-auto-dispatch], [data-open-payment-note][role="button"]');
+    if (!control || (event.key !== 'Enter' && event.key !== ' ') || control.tagName === 'BUTTON') return false;
+    event.preventDefault();
+    if (!event.repeat) control.click();
+    return true;
   }
 
   function refreshPaymentAmountsInPlace(root) {
@@ -1453,21 +1589,78 @@
     if (editButton) editButton.focus({ preventScroll: true });
   }
 
+  function normalizeGongfengComponentContracts(scope) {
+    if (!scope) return;
+    var componentNodes = [];
+    if (scope.matches && scope.matches('[data-component-slug]')) componentNodes.push(scope);
+    scope.querySelectorAll('[data-component-slug]').forEach(function (node) { componentNodes.push(node); });
+    componentNodes.forEach(function (node) { node.dataset.component = node.dataset.componentSlug; });
+
+    var buttonNodes = [];
+    if (scope.matches && scope.matches('.btn[data-component="button"]')) buttonNodes.push(scope);
+    scope.querySelectorAll('.btn[data-component="button"]').forEach(function (node) { buttonNodes.push(node); });
+    buttonNodes.forEach(function (node) {
+      node.classList.add('button');
+      if (node.dataset.variantName || node.classList.contains('btn--icon-only') || node.classList.contains('btn--danger')) return;
+      var size = node.classList.contains('btn--lg') ? '48' : (node.classList.contains('btn--md') ? '40' : (node.classList.contains('btn--sm') ? '32' : ''));
+      var color = node.classList.contains('btn--strong') ? 'Green' : (node.classList.contains('btn--medium') ? 'GrayGreen' : (node.classList.contains('btn--weak') ? 'Gray' : ''));
+      if (!size || !color) return;
+      var disabled = node.disabled || node.getAttribute('aria-disabled') === 'true' || node.classList.contains('btn--disabled');
+      node.dataset.variantName = 'Button_' + size + '_' + color + '_' + (disabled ? 'Disabled' : 'Normal');
+      node.dataset.variantCn = (color === 'Green' ? '绿' : (color === 'GrayGreen' ? '灰绿' : '灰')) + '/' + (disabled ? '禁用' : '普通');
+    });
+
+    scope.querySelectorAll('.avatar[data-component="avatar"]').forEach(function (node) {
+      if (node.dataset.variantName) return;
+      var size = node.classList.contains('avatar--56') ? '56' : (node.classList.contains('avatar--40') ? '40' : (node.classList.contains('avatar--24') ? '24' : ''));
+      if (!size) return;
+      var type = node.classList.contains('avatar--initial') || node.classList.contains('avatar--initials') ? 'Initial' : 'Default';
+      node.dataset.variantName = 'Avatar_' + size + '_' + type;
+      node.dataset.variantCn = type === 'Initial' ? '名称首字' : '默认';
+    });
+
+    scope.querySelectorAll('.wg-image[data-component="image"]').forEach(function (node) {
+      node.classList.add('image');
+    });
+
+    scope.querySelectorAll('.link[data-component="link"]').forEach(function (node) {
+      if (node.classList.contains('link--inline')) {
+        node.dataset.variantMode = 'inline';
+        if (node.dataset.variantName === 'Link_Inline') delete node.dataset.variantName;
+        return;
+      }
+      if (!node.dataset.variantName) node.dataset.variantName = node.classList.contains('link--12') ? 'Link_12' : 'Link_14';
+      if (!node.dataset.variantCn) node.dataset.variantCn = '链接按钮';
+    });
+
+    scope.querySelectorAll('.tag[data-component="tag"]').forEach(function (node) {
+      if (node.dataset.variantName) return;
+      var size = node.classList.contains('tag--32') ? '32' : (node.classList.contains('tag--28') ? '28' : '');
+      if (!size) return;
+      var theme = node.classList.contains('tag--white') ? 'White' : 'Gray';
+      var state = node.classList.contains('tag--selected') || node.classList.contains('tag--brand') ? 'Selected' : 'Normal';
+      node.dataset.variantName = 'Tag_' + size + '_' + theme + '_' + state;
+    });
+  }
+
   function button(label, emphasis, size, attrs) {
-    return '<button type="button" class="btn btn--' + emphasis + ' btn--' + size + '" data-component-slug="button" ' + (attrs || '') + '>' + label + '</button>';
+    var sizeName = size === 'lg' ? '48' : (size === 'md' ? '40' : '32');
+    var colorName = emphasis === 'strong' ? 'Green' : (emphasis === 'medium' ? 'GrayGreen' : 'Gray');
+    var colorCn = emphasis === 'strong' ? '绿' : (emphasis === 'medium' ? '灰绿' : '灰');
+    return '<button type="button" class="button btn btn--' + emphasis + ' btn--' + size + '" data-component="button" data-component-slug="button" data-variant-name="Button_' + sizeName + '_' + colorName + '_Normal" data-variant-cn="' + colorCn + '/普通" ' + (attrs || '') + '>' + label + '</button>';
   }
 
   function image(product, className) {
-    return '<span class="wg-image wg-image--rounded-md ' + (className || '') + '" data-component-slug="image"><img class="wg-image__src is-loaded" src="' + product.image + '" alt="' + escapeHtml(product.name) + '"></span>';
+    return '<span class="wg-image wg-image--rounded-md ' + (className || '') + ' image" data-component-slug="image" data-component="image"><img class="wg-image__src is-loaded" src="' + product.image + '" alt="' + escapeHtml(product.name) + '"></span>';
   }
 
   function clickableImage(product, className, attrs) {
-    return '<button type="button" class="order-product-image-button" ' + (attrs || '') + ' aria-label="查看' + escapeHtml(product.name) + '大图"><span class="wg-image wg-image--rounded-md wg-image--clickable ' + (className || '') + '" data-component-slug="image"><img class="wg-image__src is-loaded" src="' + product.image + '" alt="' + escapeHtml(product.name) + '"><span class="wg-image__overlay"></span></span></button>';
+    return '<button type="button" class="order-product-image-button" ' + (attrs || '') + ' aria-label="查看' + escapeHtml(product.name) + '大图"><span class="wg-image wg-image--rounded-md wg-image--clickable ' + (className || '') + ' image" data-component-slug="image" data-component="image"><img class="wg-image__src is-loaded" src="' + product.image + '" alt="' + escapeHtml(product.name) + '"><span class="wg-image__overlay"></span></span></button>';
   }
 
   function navbar() {
     return ''
-      + '<nav class="navbar order-v2__navbar" data-component-slug="navbar">'
+      + '<nav class="navbar order-v2__navbar" data-component="navbar" data-component-slug="navbar" data-variant-name="NavBar_3_BackTitleIcon">'
       +   '<div class="navbar__body">'
       +     '<div class="navbar__left"><button type="button" class="navbar__left-btn" data-back aria-label="返回"><i class="wego-iconfont-s icon-fanhui" aria-hidden="true"></i></button></div>'
       +     '<div class="navbar__center"><span class="navbar__title">开销售单</span></div>'
@@ -1605,7 +1798,7 @@
         + '</div>';
     }
     return ''
-      + '<button type="button" class="cell cell--single cell--bg-white cell--clickable" data-component-slug="cell" data-open-panel="delivery" title="' + escapeHtml(deliverySummaryText()) + '">'
+      + '<button type="button" class="cell cell--single cell--bg-white cell--clickable" data-component="cell" data-component-slug="cell" data-variant-name="Cell" data-open-panel="delivery" title="' + escapeHtml(deliverySummaryText()) + '">'
       +   '<div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">发货信息</span></div></div><div class="cell__action"><span class="cell__action-text">' + escapeHtml(deliverySummaryText()) + '</span><i class="cell__arrow wego-iconfont-s icon-youjiantou16"></i></div></div>'
       + '</button>';
   }
@@ -1613,8 +1806,8 @@
   function contextSection() {
     var customerCell = state.customer
       ? ''
-        + '<div class="cell cell--double cell--divider-right-edge cell--bg-white order-v2__selected-customer" data-component-slug="cell">'
-        +   '<div class="cell__avatar"><div class="avatar avatar--40 avatar--image"><img src="' + state.customer.avatar + '" alt=""></div></div>'
+        + '<div class="cell cell--double cell--divider-right-edge cell--bg-white order-v2__selected-customer" data-component="cell" data-component-slug="cell" data-variant-name="Cell_Avatar">'
+        +   '<div class="cell__avatar"><div class="avatar avatar--40 avatar--image" data-component="avatar" data-variant-name="Avatar_40_Default"><img src="' + state.customer.avatar + '" alt=""></div></div>'
         +   '<div class="cell__body">'
         +     '<div class="cell__content" data-clickable data-open-panel="customer" role="button" tabindex="0" aria-label="更换客户">'
         +       '<div class="cell__title-row"><span class="cell__title">' + escapeHtml(state.customer.name) + '</span><em class="order-customer-vip order-customer-vip--' + state.customer.level.toLowerCase() + '"><b>' + escapeHtml(state.customer.level) + '</b><span>' + escapeHtml(state.customer.priceType) + '</span></em></div>'
@@ -1623,14 +1816,14 @@
         +   '</div>'
         + '</div>'
       : ''
-        + '<button type="button" class="cell cell--single cell--divider-right-edge cell--bg-white cell--clickable" data-component-slug="cell" data-open-panel="customer">'
+        + '<button type="button" class="cell cell--single cell--divider-right-edge cell--bg-white cell--clickable" data-component="cell" data-component-slug="cell" data-variant-name="Cell" data-open-panel="customer">'
         +   '<div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">客户</span></div></div><div class="cell__action"><span class="cell__action-text">选择或新建客户</span></div></div>'
         + '</button>';
     return ''
       + '<section class="cell-group order-v2__context">'
       +   '<div class="cell-group__content">'
       +   customerCell
-      +   (featureEnabled('warehouseSwitch') ? '<button type="button" class="cell cell--single cell--divider-right-edge cell--bg-white cell--clickable" data-component-slug="cell" data-open-panel="warehouse">'
+      +   (featureEnabled('warehouseSwitch') ? '<button type="button" class="cell cell--single cell--divider-right-edge cell--bg-white cell--clickable" data-component="cell" data-component-slug="cell" data-variant-name="Cell" data-open-panel="warehouse">'
       +     '<div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">仓库</span></div></div><div class="cell__action"><span class="cell__action-text">' + escapeHtml(state.warehouse.name) + '</span><i class="cell__arrow wego-iconfont-s icon-youjiantou16"></i></div></div>'
       +   '</button>' : '')
       +   mobileDeliveryControl()
@@ -1675,7 +1868,7 @@
       +     '<div class="order-line-title"><strong>' + escapeHtml(item.name) + '</strong><span>' + escapeHtml(item.code) + '</span></div>'
       +     '<small>' + escapeHtml(lineMeta(item)) + '</small>'
       +     (featureEnabled('productNoteColumn') && item.note ? '<em>备注：' + escapeHtml(item.note) + '</em>' : '')
-      +     '<div class="order-line-price"><button type="button" class="link link--14" data-component-slug="link" data-edit-price="' + index + '">' + money(item.price) + '</button><span>× ' + item.qty + '</span><b>' + money(item.price * item.qty) + '</b></div>'
+      +     '<div class="order-line-price">' + (item.skuPrices ? '<span>按SKU计价</span>' : '<button type="button" class="link link--14" data-component-slug="link" data-edit-price="' + index + '">' + money(item.price) + '</button>') + '<span>× ' + item.qty + '</span><b>' + money(itemAmount(item)) + '</b></div>'
       +   '</div>'
       +   '<div class="order-line-actions">'
       +     '<div class="counter" data-component-slug="counter"><div class="counter__body">'
@@ -1736,8 +1929,8 @@
       var groupedSpecs = specs.map(function (entry) {
         return '<span class="order-desktop-grouped-sku-line" title="' + escapeHtml(entry.spec) + '">' + escapeHtml(entry.spec) + '</span>';
       }).join('');
-      var groupedPrices = specs.map(function () {
-        return '<span class="order-desktop-grouped-sku-line"><button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-price="' + itemIndex + '">' + money(item.price) + '</button></span>';
+      var groupedPrices = specs.map(function (entry) {
+        return '<span class="order-desktop-grouped-sku-line"><button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-price="' + itemIndex + '">' + money(itemSkuPrice(item, entry.spec)) + '</button></span>';
       }).join('');
       var groupedQuantities = specs.map(function (entry) {
         return '<span class="order-desktop-grouped-sku-line">' + desktopQuantityCounter(itemIndex, entry.qty, entry.spec, '库存' + entry.stock) + '</span>';
@@ -1749,7 +1942,7 @@
         +   '<div class="order-desktop-grouped-sku-stack order-desktop-grouped-sku-stack--spec">' + groupedSpecs + '</div>'
         +   '<div class="order-desktop-grouped-sku-stack order-desktop-grouped-sku-stack--price">' + groupedPrices + '</div>'
         +   '<div class="order-desktop-grouped-sku-stack order-desktop-grouped-sku-stack--qty">' + groupedQuantities + '</div>'
-        +   '<strong class="order-desktop-product-total order-desktop-product-total--grouped"><small class="order-desktop-product-quantity-summary" data-product-quantity-summary>' + groupedQuantitySummary(item) + '</small><span class="order-desktop-product-total__value' + (item.price * item.qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(item.price * item.qty) + '</span></strong>'
+        +   '<strong class="order-desktop-product-total order-desktop-product-total--grouped"><small class="order-desktop-product-quantity-summary" data-product-quantity-summary>' + groupedQuantitySummary(item) + '</small><span class="order-desktop-product-total__value' + (itemAmount(item) < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(itemAmount(item)) + '</span></strong>'
         +   desktopProductNote(item, itemIndex)
         +   '<button type="button" class="order-desktop-row-delete" data-delete-row="' + itemIndex + '" aria-label="删除' + escapeHtml(item.name) + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
         + '</article>';
@@ -1765,9 +1958,9 @@
       +   desktopProductName(item)
       +   clickableImage(item, 'order-desktop-product-image', 'data-preview-image="' + itemIndex + '"')
       +   '<span class="order-desktop-product-spec" title="' + escapeHtml(specText) + '">' + escapeHtml(specText) + '</span>'
-      +   '<button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-price="' + itemIndex + '">' + money(item.price) + '</button>'
+      +   '<button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-price="' + itemIndex + '">' + money(itemSkuPrice(item, specKey)) + '</button>'
       +   '<div class="order-desktop-product-qty">' + desktopQuantityCounter(itemIndex, qty, specKey, hint) + '</div>'
-      +   '<strong class="order-desktop-product-total"><span class="order-desktop-product-total__value' + (item.price * qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(item.price * qty) + '</span></strong>'
+      +   '<strong class="order-desktop-product-total"><span class="order-desktop-product-total__value' + (itemSkuPrice(item, specKey) * qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(itemSkuPrice(item, specKey) * qty) + '</span></strong>'
       +   desktopProductNote(item, itemIndex)
       +   '<button type="button" class="order-desktop-row-delete" data-delete-row="' + itemIndex + '" data-delete-row-spec="' + encodeURIComponent(specKey) + '" aria-label="删除' + escapeHtml(item.name) + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
       + '</article>';
@@ -1897,8 +2090,8 @@
       +   '<div class="order-note-modal__panel">'
       +     '<div class="order-note-modal__head"><strong>' + (hasNote ? '编辑备注' : '添加备注') + '</strong></div>'
       +     '<div class="order-note-modal__body">'
-      +       '<div class="input-group input-group--surface-white" data-component-slug="input"><label class="field-label" for="order-note-merchant">商家备注</label><textarea id="order-note-merchant" placeholder="请输入文字，商家备注仅你可见" data-order-note-merchant>' + escapeHtml(state.orderNoteMerchant) + '</textarea></div>'
-      +       '<div class="input-group input-group--surface-white" data-component-slug="input"><label class="field-label" for="order-note-buyer">买家备注</label><textarea id="order-note-buyer" placeholder="请输入文字，买家备注双方可见" data-order-note-buyer>' + escapeHtml(state.orderNoteBuyer) + '</textarea></div>'
+      +       '<div class="input input-group input-group--surface-white" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框"><label class="field-label" for="order-note-merchant">商家备注</label><textarea id="order-note-merchant" placeholder="请输入文字，商家备注仅你可见" data-order-note-merchant>' + escapeHtml(state.orderNoteMerchant) + '</textarea></div>'
+      +       '<div class="input input-group input-group--surface-white" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框"><label class="field-label" for="order-note-buyer">买家备注</label><textarea id="order-note-buyer" placeholder="请输入文字，买家备注双方可见" data-order-note-buyer>' + escapeHtml(state.orderNoteBuyer) + '</textarea></div>'
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-note-cancel')
@@ -1915,7 +2108,7 @@
       +   '<div class="order-note-modal__panel">'
       +     '<div class="order-note-modal__head"><strong>设置运费</strong></div>'
       +     '<div class="order-note-modal__body">'
-      +       '<div class="input-group input-group--surface-white" data-component-slug="input"><label class="field-label" for="freight-edit-value">运费</label><div class="number-input" data-component-slug="input"><input class="number-input__field" id="freight-edit-value" type="text" inputmode="decimal" value="' + escapeHtml(String(state.freight || '')) + '" placeholder="请输入运费金额" data-freight-edit-value><span class="number-input__suffix">元</span></div></div>'
+      +       '<div class="input-group input-group--surface-white"><label class="field-label" for="freight-edit-value">运费</label><div class="input number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)"><input class="number-input__field" id="freight-edit-value" type="text" inputmode="decimal" value="' + escapeHtml(String(state.freight || '')) + '" placeholder="请输入运费金额" data-freight-edit-value><span class="number-input__suffix">元</span></div></div>'
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-freight-edit-cancel')
@@ -1932,7 +2125,7 @@
       +   '<div class="order-note-modal__panel">'
       +     '<div class="order-note-modal__head"><strong>修改订单总价</strong></div>'
       +     '<div class="order-note-modal__body">'
-      +       '<div class="input-group input-group--surface-white" data-component-slug="input"><label class="field-label" for="total-edit-value">订单总价</label><div class="number-input" data-component-slug="input"><input class="number-input__field" id="total-edit-value" type="text" inputmode="decimal" value="' + totals().payable.toFixed(2) + '" placeholder="请输入订单总价" data-total-edit-value><span class="number-input__suffix">元</span></div></div>'
+      +       '<div class="input-group input-group--surface-white"><label class="field-label" for="total-edit-value">订单总价</label><div class="input number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)"><input class="number-input__field" id="total-edit-value" type="text" inputmode="decimal" value="' + totals().payable.toFixed(2) + '" placeholder="请输入订单总价" data-total-edit-value><span class="number-input__suffix">元</span></div></div>'
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-total-edit-cancel')
@@ -1988,7 +2181,7 @@
   }
 
   function catalogCategoryTabs() {
-    return '<div class="order-catalog-category-rail"><div class="order-catalog-category-tabs layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="none" data-peek="none" aria-label="商品标签分类">' + catalogCategories().map(function (category) {
+    return '<div class="order-catalog-category-rail"><div class="order-catalog-category-tabs layout-scroll-row" data-component="layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="none" data-peek="none" aria-label="商品标签分类">' + catalogCategories().map(function (category) {
       var selected = state.catalogCategory === category;
       var variantName = selected ? 'Tag_28_Gray_Selected' : 'Tag_28_Gray_Normal';
       return '<button type="button" class="tag tag--28 ' + (selected ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-variant-name="' + variantName + '" aria-pressed="' + selected + '" data-catalog-category="' + escapeHtml(category) + '"><span class="tag__label">' + escapeHtml(category) + '</span></button>';
@@ -2437,8 +2630,9 @@
       : '';
     var filterActiveClass = hasActiveCatalogFilters(state.catalogFilters) ? ' is-filtered' : '';
     var filterAriaLabel = hasActiveCatalogFilters(state.catalogFilters) ? '筛选（已应用）' : '筛选';
-    var sidebarFilterButton = '<div class="order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only' + filterActiveClass + '" data-component-slug="button" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
-    var collapsedFilterButton = '<div class="order-desktop-search-filter order-catalog-filter-anchor order-catalog-filter-anchor--search"><button type="button" class="btn btn--weak btn--sm btn--icon-only' + filterActiveClass + '" data-component-slug="button" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="btn__icon icon-shaixuan" aria-hidden="true"></i></button></div>';
+    var filterButton = '<button type="button" class="search-toolbar__action' + filterActiveClass + '" data-open-catalog-filter aria-label="' + filterAriaLabel + '" title="' + filterAriaLabel + '" aria-haspopup="dialog" aria-expanded="' + state.catalogFilterPanelOpen + '"><i class="search-toolbar__action-icon wego-iconfont-s icon-shaixuan" aria-hidden="true"></i><span>筛选</span></button>';
+    var sidebarFilterButton = '<div class="order-catalog-filter-anchor order-catalog-filter-anchor--search">' + filterButton + '</div>';
+    var collapsedFilterButton = '<div class="order-desktop-search-filter order-catalog-filter-anchor order-catalog-filter-anchor--search">' + filterButton + '</div>';
     var summaryImage = state.imageSearch.images[0] || null;
     var imageToken = summaryImage
       ? '<span class="searchbox__image-token ' + (state.imageSearch.images.length > 1 ? 'searchbox__image-token--multi' : 'searchbox__image-token--single') + '" aria-label="本次图搜共 ' + state.imageSearch.images.length + ' 张"><img class="searchbox__image-thumb" src="' + escapeHtml(summaryImage.url) + '" alt="">' + (state.imageSearch.images.length > 1 ? '<span class="searchbox__image-count">共 ' + state.imageSearch.images.length + ' 张</span>' : '') + '</span>'
@@ -2450,7 +2644,7 @@
     return ''
       + '<div class="order-desktop-product-search ' + (inCatalog ? 'order-desktop-product-search--catalog' : 'order-desktop-product-search--collapsed') + listSearchResultClass + '">'
       +   '<div class="order-desktop-product-search__row">'
-      +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-context-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="搜索商品" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
+      +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-context-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="搜索商品" aria-label="搜索商品名称或货号" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
       +     '<input type="file" accept="image/jpeg,image/png,image/jpg,image/bmp,image/webp,video/mp4" multiple data-header-image-input hidden>'
       +     (inCatalog ? '' : '<button type="button" class="btn btn--medium btn--sm order-desktop-product-search__submit" data-component-slug="button" data-submit-header-search ' + (state.desktopProductKeyword.trim() ? '' : 'hidden') + '>搜索</button>')
       +     (inCatalog ? sidebarFilterButton : collapsedFilterButton)
@@ -2850,13 +3044,13 @@
     } else if (!allProducts.length) {
       productBody = catalogEmptyResult();
     } else {
-      productBody = '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + '</div>';
+      productBody = '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component="layout-grid" data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + '</div>';
     }
     return ''
       +   '<header class="order-catalog-header"><div class="order-catalog-header__title"><strong>商品库</strong><div class="order-catalog-view-switch" aria-label="商品库显示模式"><button type="button" class="' + (state.catalogViewMode === 'grid' ? 'is-active' : '') + '" data-catalog-view="grid">大图</button><button type="button" class="' + (state.catalogViewMode === 'list' ? 'is-active' : '') + '" data-catalog-view="list">列表</button></div></div><div class="order-catalog-create-anchor"><button type="button" class="btn btn--weak btn--sm order-catalog-publish" data-component-slug="button" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="btn__icon icon-yuanjia" aria-hidden="true"></i>创建</button></div></header>'
       +   desktopProductSearch(true)
       +   '<div class="order-desktop__catalog-scroll">'
-      +   (!showingResultMode && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
+      +   (!showingResultMode && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component="layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
       +   '<div class="order-catalog-sticky-stack">'
       +     catalogHiddenControls()
       +     (showingResultMode ? '' : '<div class="order-catalog-toolbar">' + catalogCategoryTabs() + '</div>')
@@ -2879,7 +3073,7 @@
       +   '</div>'
       +   '<section class="order-desktop__list-card" aria-labelledby="order-desktop-list-title">'
       +     '<div class="order-desktop__table' + (state.desktopShowProductImages ? ' is-showing-images' : '') + (!featureEnabled('productNoteColumn') ? ' is-product-note-hidden' : '') + '">'
-      +       '<div class="order-desktop__table-title"><div class="order-desktop__table-title-main"><strong id="order-desktop-list-title">已添加</strong><span>显示商品图</span><button type="button" class="switch ' + (state.desktopShowProductImages ? 'switch--on' : 'switch--off') + '" role="switch" aria-checked="' + state.desktopShowProductImages + '" aria-label="显示商品图" data-component-slug="switch" data-toggle-product-images><span class="switch__thumb"></span></button></div><div class="order-desktop__table-actions">' + (state.products.length ? '<button type="button" class="btn btn--weak btn--sm order-desktop-clear-order" data-component-slug="button" data-clear-order><i class="btn__icon icon-shanchu" aria-hidden="true"></i>清空整单</button>' : '') + '<button type="button" class="btn btn--weak btn--sm order-desktop-fullscreen" data-component-slug="button" data-toggle-order-fullscreen><i class="btn__icon ' + (state.desktopOrderFullscreen ? 'icon-feiquanping16' : 'icon-quanping16') + '" aria-hidden="true"></i>' + (state.desktopOrderFullscreen ? '退出全屏' : '全屏') + '</button></div></div>'
+      +       '<div class="order-desktop__table-title"><div class="order-desktop__table-title-main"><strong id="order-desktop-list-title">已添加</strong><span>显示商品图</span><button type="button" class="switch ' + (state.desktopShowProductImages ? 'switch--on' : 'switch--off') + '" role="switch" aria-checked="' + state.desktopShowProductImages + '" aria-label="显示商品图" data-component="switch" data-variant-name="Switch" data-component-slug="switch" data-toggle-product-images><span class="switch__thumb"></span></button></div><div class="order-desktop__table-actions">' + (state.products.length ? '<button type="button" class="btn btn--weak btn--sm order-desktop-clear-order" data-component-slug="button" data-clear-order><i class="btn__icon icon-shanchu" aria-hidden="true"></i>清空整单</button>' : '') + '<button type="button" class="btn btn--weak btn--sm order-desktop-fullscreen" data-component-slug="button" data-toggle-order-fullscreen><i class="btn__icon ' + (state.desktopOrderFullscreen ? 'icon-feiquanping16' : 'icon-quanping16') + '" aria-hidden="true"></i>' + (state.desktopOrderFullscreen ? '退出全屏' : '全屏') + '</button></div></div>'
       +       '<div class="order-desktop__table-head"><span class="order-desktop__name-head"><button type="button" class="order-display-dropdown-trigger" data-toggle-display-menu aria-haspopup="listbox" aria-expanded="' + state.displayModeMenuOpen + '">货号／名称 (<span class="order-display-dropdown-trigger__value" data-display-mode-anchor>' + (state.displayMode === 'grouped' ? '按商品' : '按规格') + '</span>)<i class="wego-iconfont-s ' + (state.displayModeMenuOpen ? 'icon-shangjiantou-mian16' : 'icon-xiajiantou-mian16') + '" aria-hidden="true"></i></button></span><span>商品图</span><span>颜色／规格</span><span>单价</span><span>数量</span><span>合计</span><span' + (featureEnabled('productNoteColumn') ? '' : ' hidden aria-hidden="true"') + '>备注</span><span aria-hidden="true"></span></div>'
       +       '<div class="order-desktop__lines">' + (state.products.length ? desktopProductRows() : '<div class="order-empty"><strong>当前订单暂无商品</strong><span>从右侧商品库添加商品</span></div>') + orderNoteEntry() + '</div>'
       +     '</div>'
@@ -2949,7 +3143,7 @@
       +       '<span class="order-summary-discount__detail" data-summary-discount-detail' + (discountText ? '' : ' hidden') + '>' + escapeHtml(discountText) + '</span>'
       +     '</span>'
       +   '</div>'
-      +   (showFreight ? summaryDetailRow('运费', '<strong data-summary-freight>' + money(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-component-slug="button" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>') : '')
+      +   (showFreight ? summaryDetailRow('运费', '<strong data-summary-freight>' + money(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>') : '')
       +   summaryDetailRow('订单总价', '<strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong><button type="button" class="order-summary-row__edit" data-edit-total aria-label="修改订单总价"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>', 'order-summary-row--total')
       + '</div>';
   }
@@ -2982,7 +3176,7 @@
     if (!state.customer) {
       return ''
         + '<div class="order-desktop-customer-empty">'
-        +   '<button type="button" class="order-desktop-customer-select" data-open-panel="customer" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'customer' && !state.customerPopoverClosing) + '" aria-controls="order-desktop-customer-popover"><span class="avatar avatar--40 avatar--image" data-component-slug="avatar"><img src="./lib/assets/image/avatar-defult.png" alt="默认头像"></span><span class="order-desktop-customer-entry"><strong>选择客户</strong><i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></span></button>'
+        +   '<button type="button" class="order-desktop-customer-select" data-open-panel="customer" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'customer' && !state.customerPopoverClosing) + '" aria-controls="order-desktop-customer-popover"><span class="avatar avatar--40 avatar--image"><img src="./lib/assets/image/avatar-defult.png" alt="默认头像"></span><span class="order-desktop-customer-entry"><strong>选择客户</strong><i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></span></button>'
         +   '<button type="button" class="link order-desktop-customer-add" data-component-slug="link" data-open-panel="customer-create" aria-label="新建客户"><i class="wego-iconfont-s icon-yuanjia" aria-hidden="true"></i><span>新建客户</span></button>'
         + '</div>';
     }
@@ -2990,7 +3184,7 @@
     return ''
       + '<div class="order-desktop-customer-summary">'
       +   '<div class="order-desktop-customer-summary__main">'
-      +     '<span class="order-desktop-customer-avatar"><span class="avatar avatar--40 avatar--image" data-component-slug="avatar"><img src="' + state.customer.avatar + '" alt="' + escapeHtml(state.customer.name) + '"></span><span class="order-desktop-customer-number">' + escapeHtml(state.customer.number) + '</span></span>'
+      +     '<span class="order-desktop-customer-avatar"><span class="avatar avatar--40 avatar--image" data-component="avatar" data-variant-name="Avatar_40_Default"><img src="' + state.customer.avatar + '" alt="' + escapeHtml(state.customer.name) + '"></span><span class="order-desktop-customer-number">' + escapeHtml(state.customer.number) + '</span></span>'
       +     '<span class="order-desktop-customer-summary__content"><span class="order-desktop-customer-summary__top"><button type="button" class="order-desktop-customer-profile-trigger" data-open-fan-profile aria-haspopup="dialog"><strong>' + escapeHtml(state.customer.name) + '</strong></button><button type="button" class="order-desktop-customer-selector-trigger" data-open-panel="customer" aria-label="切换客户" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'customer' && !state.customerPopoverClosing) + '" aria-controls="order-desktop-customer-popover"><em class="order-customer-vip order-customer-vip--' + state.customer.level.toLowerCase() + '"><b>' + escapeHtml(state.customer.level) + '</b><span>' + escapeHtml(state.customer.priceType) + '</span></em><span class="order-desktop-customer-tags">' + escapeHtml(customerTags) + '</span></button></span><span class="order-desktop-customer-summary__bottom"><span class="order-desktop-customer-balance">余额：' + money(state.customer.balance) + '</span><button type="button" class="link" data-component-slug="link" data-recharge>充值</button><span class="order-desktop-customer-divider" aria-hidden="true"></span><span class="order-desktop-customer-points">积分：' + Number(state.customer.points || 0) + '</span></span></span>'
       +   '</div>'
       +   '<button type="button" class="btn btn--weak btn--sm btn--icon-only order-desktop-customer-clear" data-component-slug="button" data-clear-customer aria-label="移除已选客户"><i class="btn__icon icon-yuancha-mian" aria-hidden="true"></i></button>'
@@ -3295,7 +3489,8 @@
     var methodContent = draft.refundStatus === 'private'
       ? '<section class="order-reference-payment__methods order-refund-payment__methods"><header><strong>退款方式</strong></header><div class="order-reference-payment__private-methods">' + privateMethods.map(function (method) {
         var active = refundMethod && refundMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component="stack" data-component-slug="stack" data-variant-name="selection" data-select-refund-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong></span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+        return refundStackOption('', 'data-select-refund-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"',
+          '<i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span class="stack__label"><strong>' + method.label + '</strong></span>', Boolean(active));
       }).join('') + '</div></section>'
       : '';
     var inventoryContent = hasReturns
@@ -3327,16 +3522,25 @@
       + '</div>';
   }
 
+  // Stack anatomy with scene-sized tiles; selection remains owned by the refund state machine.
+  function refundStackOption(classes, attributes, content, selected) {
+    var corner = '<span class="stack__check-corner order-delivery-option__check order-reference-payment__selection-check" aria-hidden="true"><img class="stack__check-icon" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>';
+    return '<button type="button" class="stack order-refund-stack' + (selected ? ' stack--selected' : '') + '" data-component="stack" data-component-slug="stack" data-state="' + (selected ? 'selected' : 'unselected') + '" ' + attributes + '>'
+      + '<span class="stack__bg order-reference-payment__online-method ' + classes + (selected ? ' is-active' : '') + '">' + content + corner + '</span></button>';
+  }
+
   function refundRadioOption(group, value, label, selected, warehouseId) {
     var content = '<strong>' + label + '</strong>';
-    var trailing = '';
+    var classes = 'order-refund-payment__option';
+    var attributes = 'role="radio" aria-checked="' + selected + '" data-refund-' + group + '="' + value + '"';
     if (group === 'inventory' && value === 'specified') {
       var selectedWarehouse = WAREHOUSES.filter(function (warehouse) { return warehouse.id === warehouseId; })[0];
-      content += selectedWarehouse ? '<small><span>' + escapeHtml(selectedWarehouse.name) + '</span><i class="wego-iconfont-s icon-youjiantou16 order-refund-payment__warehouse-arrow" aria-hidden="true"></i></small>' : '';
-      trailing = selectedWarehouse ? paymentSelectionCheck() : '<i class="wego-iconfont-s icon-youjiantou16 order-refund-payment__option-arrow" aria-hidden="true"></i>';
-      return '<button type="button" class="order-reference-payment__online-method order-refund-payment__option order-refund-payment__option--specified' + (selected ? ' is-active' : '') + '" role="radio" aria-checked="' + selected + '" data-component="stack" data-component-slug="stack" data-variant-name="selection" data-refund-' + group + '="' + value + '" aria-label="' + label + (selectedWarehouse ? '，' + escapeHtml(selectedWarehouse.name) : '') + '"><span>' + content + '</span>' + trailing + '</button>';
+      var displayLabel = selectedWarehouse ? '退回' + selectedWarehouse.name : label;
+      content = '<strong title="' + escapeHtml(displayLabel) + '">' + escapeHtml(displayLabel) + '</strong><i class="wego-iconfont-s icon-youjiantou16 order-refund-payment__warehouse-arrow" aria-hidden="true"></i>';
+      classes += ' order-refund-payment__option--specified';
+      attributes += ' aria-label="' + escapeHtml(displayLabel) + '"';
     }
-    return '<button type="button" class="order-reference-payment__online-method order-refund-payment__option' + (selected ? ' is-active' : '') + '" role="radio" aria-checked="' + selected + '" data-component="stack" data-component-slug="stack" data-variant-name="selection" data-refund-' + group + '="' + value + '"><span>' + content + '</span>' + (selected ? paymentSelectionCheck() : '') + '</button>';
+    return refundStackOption(classes, attributes, '<span class="stack__label">' + content + '</span>', selected);
   }
 
   function refundWarehousePopmenu() {
@@ -3384,9 +3588,9 @@
   }
 
   function paymentRefundImages(draft) {
-    var images = Array.isArray(draft && draft.refundImages) ? draft.refundImages : [];
+    var images = Array.isArray(draft && draft.refundImagesEditor) ? draft.refundImagesEditor : [];
     return '<div class="order-refund-payment__images" aria-label="退款图片">' + images.map(function (item, index) {
-      return '<figure data-component="image" data-component-slug="image"><img src="' + escapeHtml(item.url) + '" alt="退款图片 ' + (index + 1) + '"><button type="button" data-remove-refund-image="' + index + '" aria-label="删除退款图片"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></figure>';
+      return '<figure data-business-component="RefundImageUploadItem"><img src="' + escapeHtml(item.url) + '" alt="退款图片 ' + (index + 1) + '"><button type="button" data-remove-refund-image="' + index + '" aria-label="删除退款图片"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></figure>';
     }).join('') + '<button type="button" class="order-refund-payment__image-add" data-trigger-refund-image aria-label="添加退款图片"><i class="wego-iconfont-s icon-xiangji" aria-hidden="true"></i><span>添加图片</span></button><input type="file" accept="image/*" multiple data-refund-image-input hidden></div>';
   }
 
@@ -3416,7 +3620,7 @@
     var deduction = paymentBalanceCents(draft, payable) / 100;
     return '<div class="order-reference-payment__balance">'
       + '<div><strong>余额抵扣</strong><small>（当前可用余额：' + money(available) + '）</small><button type="button" class="link link--12" data-component-slug="link" data-reference-recharge>充值</button></div>'
-      + '<button type="button" class="checkbox-field order-reference-payment__balance-toggle' + (draft.useBalance ? ' is-active' : '') + '" role="checkbox" aria-checked="' + draft.useBalance + '" data-toggle-payment-balance>' + (draft.useBalance ? paymentAmountMetric(deduction, 16, 'black', true) : '') + paymentSmallCheckbox(draft.useBalance) + '</button>'
+      + '<button type="button" class="checkbox-field order-reference-payment__balance-toggle' + (draft.useBalance ? ' is-active' : '') + '" role="checkbox" aria-checked="' + draft.useBalance + '" aria-label="余额抵扣" data-toggle-payment-balance>' + (draft.useBalance ? paymentAmountMetric(deduction, 16, 'black', true) : '') + paymentSmallCheckbox(draft.useBalance) + '</button>'
       + '</div>';
   }
 
@@ -3436,12 +3640,12 @@
     } else if (draft.kind === 'online') {
       content = '<div class="order-reference-payment__online-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
       }).join('') + '</div>';
     } else {
       content = '<div class="order-reference-payment__private-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || targetCents / 100), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
       }).join('') + '</div>';
     }
     return '<section class="order-reference-payment__methods"><header><strong>支付方式</strong><button type="button" class="order-reference-payment__mode-switch" role="switch" aria-checked="' + (draft.mode === 'combo') + '" data-payment-mode="' + (draft.mode === 'combo' ? 'single' : 'combo') + '"><span>组合支付</span><i class="switch ' + (draft.mode === 'combo' ? 'switch--on' : 'switch--off') + '" data-component-slug="switch"><span class="switch__thumb"></span></i></button></header>' + content + '</section>';
@@ -3451,14 +3655,14 @@
     var value = String(draft[method.id] || '');
     return '<div class="form-body form-body--preserve-content-align form-body--label-w120 order-reference-payment__combo-row">'
       + '<div class="form-body__label order-reference-payment__combo-label"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
-      + '<div class="form-body__action"><div class="number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(value) + '" placeholder="请输入" data-payment-amount="' + method.id + '" data-online-combo-index="' + index + '" aria-label="' + method.label + '收款金额"></div></div>'
+      + '<div class="form-body__action"><div class="input number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(value) + '" placeholder="请输入" data-payment-amount="' + method.id + '" data-online-combo-index="' + index + '" aria-label="' + method.label + '收款金额"></div></div>'
       + '</div>';
   }
 
   function paymentPrivateComboInput(method, draft, selectedMethods) {
     var selected = selectedMethods.some(function (item) { return item.id === method.id; });
     var action = selected
-      ? '<div class="order-reference-payment__private-combo-action"><div class="number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft[method.id] || '')) + '" placeholder="请输入" data-payment-amount="' + method.id + '" aria-label="' + method.label + '收款金额"></div><button type="button" class="order-reference-payment__private-combo-remove" data-remove-payment-method="' + method.id + '" aria-label="移除' + method.label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
+      ? '<div class="order-reference-payment__private-combo-action"><div class="input number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input><span class="number-input__suffix" aria-hidden="true">¥</span><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft[method.id] || '')) + '" placeholder="请输入" data-payment-amount="' + method.id + '" aria-label="' + method.label + '收款金额"></div><button type="button" class="order-reference-payment__private-combo-remove" data-remove-payment-method="' + method.id + '" aria-label="移除' + method.label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
       : '<button type="button" class="link link--14 order-reference-payment__private-combo-select" data-component-slug="link" data-select-payment-method="' + method.id + '">选择</button>';
     return '<div class="form-body form-body--preserve-content-align form-body--label-w120 order-reference-payment__combo-row order-reference-payment__private-combo-row' + (selected ? ' is-selected' : '') + '">'
       + '<div class="form-body__label order-reference-payment__combo-label"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><strong>' + method.label + '</strong></div>'
@@ -3469,7 +3673,7 @@
   function paymentCheckoutOption(checked, attr, label, detail) {
     return '<label class="checkbox-field order-reference-payment__post-option" role="checkbox" tabindex="0" aria-checked="' + (checked ? 'true' : 'false') + '" data-clickable data-' + attr + '>'
       + paymentSmallCheckbox(checked)
-      + '<strong class="order-reference-payment__post-title">' + label + '</strong><small class="order-reference-payment__post-detail">' + detail + '</small><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></label>';
+      + '<strong class="checkbox-field__text order-reference-payment__post-title">' + label + '</strong><small class="order-reference-payment__post-detail">' + detail + '</small><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></label>';
   }
 
   function paymentNoteEntry(draft, isRefund) {
@@ -3516,12 +3720,11 @@
     var noteLabel = isRefund ? '退款备注' : '收款备注';
     var noteEditorValue = typeof draft.noteEditorValue === 'string' ? draft.noteEditorValue : (draft.note || '');
     return ''
-      + '<div class="order-note-modal order-payment-note-modal" role="dialog" aria-modal="true" aria-labelledby="order-payment-note-title" data-state="open">'
+      + '<div class="order-note-modal order-payment-note-modal' + (isRefund ? ' order-payment-note-modal--refund' : '') + '" role="dialog" aria-modal="true" aria-labelledby="order-payment-note-title" data-state="open">'
       +   '<div class="order-note-modal__panel">'
       +     '<div class="order-note-modal__head"><strong id="order-payment-note-title">' + (draft.note ? '编辑' : '添加') + noteLabel + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only order-payment-note-modal__close" data-component="button" data-component-slug="button" data-payment-note-cancel aria-label="关闭"><i class="btn__icon wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
       +     '<div class="order-note-modal__body">'
-      +       '<div class="input-group order-payment-note-modal__input" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框（多行文本）" data-field-type="textarea"><label class="field-label" for="order-payment-note-value">' + noteLabel + '</label><textarea id="order-payment-note-value" rows="4" aria-label="' + noteLabel + '" placeholder="请输入' + noteLabel + '" maxlength="200" data-payment-note-editor>' + escapeHtml(noteEditorValue) + '</textarea></div>'
-      +       (isRefund ? paymentRefundImages(draft) : '')
+      +       '<div class="input input-group order-payment-note-modal__input" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框（多行文本）" data-field-type="textarea"><label class="field-label" for="order-payment-note-value">' + noteLabel + '</label><textarea id="order-payment-note-value" rows="4" aria-label="' + noteLabel + '" placeholder="请输入' + noteLabel + '" maxlength="200" data-payment-note-editor>' + escapeHtml(noteEditorValue) + '</textarea>' + (isRefund ? paymentRefundImages(draft) : '') + '</div>'
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-payment-note-cancel')
@@ -3956,11 +4159,11 @@
     if (customer && customer.name) {
       return '<span class="avatar avatar--24 avatar--initial" data-component="avatar" data-variant-name="Avatar_24_Initial" aria-label="' + escapeHtml(customer.name) + '文字头像">' + escapeHtml(customer.initial || customer.name.slice(0, 1)) + '</span>';
     }
-    return '<span class="avatar avatar--24 avatar--default" data-component="avatar" data-variant-name="Avatar_24_Default"><img src="./lib/assets/image/avatar-defult.png" alt="默认头像"></span>';
+    return '<span class="avatar avatar--24 avatar--default"><img src="./lib/assets/image/avatar-defult.png" alt="默认头像"></span>';
   }
 
   function draftProductImage(product) {
-    return '<span class="wg-image wg-image--rounded-md order-draft-card__image" data-component="image"><img class="wg-image__src is-loaded" src="' + product.image + '" alt="' + escapeHtml(product.name || '草稿商品') + '"></span>';
+    return '<span class="image wg-image wg-image--xl wg-image--rounded-md order-draft-card__image" data-component="image" data-variant-name="fit=cover,size=xl,radius=rounded-md,state=loaded,interaction=static"><img class="wg-image__src is-loaded" src="' + product.image + '" alt="' + escapeHtml(product.name || '草稿商品') + '"></span>';
   }
 
   function draftProducts(draft) {
@@ -4009,7 +4212,7 @@
     return ''
       + '<div class="order-draft-panel">'
       +   '<div class="order-draft-panel__head"><strong>草稿箱</strong><button type="button" class="link link--14" data-component="link" data-variant-name="Link_14" data-close-panel>关闭</button></div>'
-      +   '<div class="layout-scroll order-draft-panel__list" data-component="layout-scroll">' + DRAFT_DEMOS.filter(function (draft) { return state.deletedDraftIds.indexOf(draft.id) < 0; }).map(draftCard).join('') + '</div>'
+      +   '<div class="layout-scroll order-draft-panel__list">' + DRAFT_DEMOS.filter(function (draft) { return state.deletedDraftIds.indexOf(draft.id) < 0; }).map(draftCard).join('') + '</div>'
       + '</div>';
   }
 
@@ -4342,7 +4545,7 @@
     var region = recipientRegionLabel(draft);
     var validation = state.clipboardAddressValidation;
     return ''
-      + '<div class="order-desktop-modal order-desktop-modal--delivery order-clipboard-address-modal" role="dialog" aria-modal="true" aria-labelledby="order-clipboard-address-title" data-state="open" data-component="modal">'
+      + '<div class="order-desktop-modal order-desktop-modal--delivery order-clipboard-address-modal" role="dialog" aria-modal="true" aria-labelledby="order-clipboard-address-title" data-state="open">'
       +   '<div class="order-desktop-modal__panel">'
       +     '<div class="order-desktop-modal__head order-clipboard-address-head"><div class="order-clipboard-address-title"><i class="wego-iconfont-s icon-yuangou-mian" aria-hidden="true"></i><div><strong id="order-clipboard-address-title">识别到收货信息</strong><p>如识别有误，请点击修改</p></div></div><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-cancel-clipboard-address aria-label="关闭"><i class="btn__icon wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
       +     '<div class="order-clipboard-address-body">'
@@ -4488,6 +4691,37 @@
       + '<div class="order-side-actions">' + button('保存地址', 'strong', 'md', 'data-save-delivery') + '</div></div>';
   }
 
+  // seg_32 HUG scene adapter: content width + 6px each side, per browser review; no registered H5 canonical component yet.
+  function addViewSelector(draft) {
+    var matrix = addProductMatrix(draft.product);
+    if (!matrix.hasColor && !matrix.hasSize) return '';
+    return '<div class="order-add-selection-head order-add-view-head"><small>选择规格</small>'
+      + '<div class="order-add-view-seg" role="group" aria-label="规格展示方式" data-scenario-component="seg_32" data-kuikly-component="SegmentControl" data-layout="hug">'
+      + ['single', 'batch'].map(function (mode, index) {
+        return '<button type="button" class="' + (draft.mode === mode ? 'is-active' : '') + '" data-add-mode="' + mode + '" aria-pressed="' + (draft.mode === mode) + '">' + (index ? '表格' : '列表') + '</button>';
+      }).join('') + '</div>'
+      + '<button type="button" class="link link--14 order-add-spec-link" data-component="link" data-component-slug="link" data-variant-name="Link_14" data-add-spec>添加规格</button></div>';
+  }
+
+  function listBulkState(draft) {
+    var color = draft.selectedColor;
+    var specs = draft.product.specs.filter(function (spec) { return splitSpec(spec).color === color; });
+    var values = draft.listBulkValues || {};
+    var value = Number(values[color] || 0);
+    // A common stock ceiling preserves a single value across every valid SKU.
+    var limit = specs.reduce(function (min, spec) { return Math.min(min, singleQuantityLimit(draft.product, spec)); }, 9999);
+    return { color: color, specs: specs, value: value, limit: limit };
+  }
+
+  function addListBulkCounter(draft) {
+    var bulk = listBulkState(draft);
+    return '<div class="counter" data-component="counter" data-component-slug="counter" data-variant-name="Counter_32"><div class="counter__body">'
+      + '<button type="button" class="counter__btn counter__btn--minus" data-list-bulk-delta="-1" aria-label="减少批量数量" ' + (!bulk.specs.length || bulk.value <= -9999 ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
+      + '<input class="counter__value" aria-label="批量设定数量" value="' + bulk.value + '" readonly>'
+      + '<button type="button" class="counter__btn counter__btn--plus" data-list-bulk-delta="1" aria-label="增加批量数量" ' + (!bulk.specs.length || bulk.value >= bulk.limit ? 'disabled' : '') + '><i class="counter__icon icon-jia16"></i></button>'
+      + '</div></div>';
+  }
+
   function addSinglePicker(draft, desktop) {
     var product = draft.product;
     var matrix = addProductMatrix(product);
@@ -4499,7 +4733,7 @@
     var spec = effectiveColor && effectiveSize ? specKey(product, effectiveColor, effectiveSize) : '';
     var quantity = spec ? Number(draft.skuQty[spec] || 0) : 0;
     var stock = spec ? singleQuantityLimit(product, spec) : 0;
-    var batchModeSwitch = '<label class="order-add-batch-switch-label"><span>一次买多件</span><button type="button" class="switch switch--off" role="switch" aria-checked="false" aria-label="一次买多件" data-component-slug="switch" data-add-mode="batch"><span class="switch__thumb"></span></button></label>';
+
     var desktopSpecRows = availableSizes.map(function (size) {
       var rowSpec = selectedColor ? specKey(product, selectedColor, size) : '';
       var rowQuantity = selectedColor ? Number((rowSpec && draft.skuQty[rowSpec]) || 0) : Number((draft.pendingSizeQty && draft.pendingSizeQty[size]) || 0);
@@ -4507,11 +4741,13 @@
       var rowUnavailable = Boolean(selectedColor) && !rowSpec;
       var rowState = rowSpec ? resolveSkuRowState(product, rowSpec, rowQuantity, draft.confirmedOverstock && draft.confirmedOverstock[rowSpec]) : null;
       var counterDisabled = rowUnavailable;
-      var rowPriceOriginal = rowState && (rowState.showOriginalPrice ? rowState.sku.price : (rowState.showMaxPrice ? rowState.sku.maxPrice : null));
-      return '<div class="order-add-spec-counter-row' + (rowUnavailable ? ' is-disabled' : '') + '">'
+      var rowPriceOriginal = rowState && (draft.skuPriceOverrides && draft.skuPriceOverrides[rowSpec] != null
+        ? addDraftSkuBasePrice(draft, rowSpec)
+        : (rowState.showOriginalPrice ? rowState.sku.price : (rowState.showMaxPrice ? rowState.sku.maxPrice : null)));
+      return '<div class="order-add-spec-counter-row' + (rowState && rowState.showSkuImage ? ' has-sku-image' : ' has-no-sku-image') + (rowState && rowState.showStock ? ' has-sku-stock' : ' has-no-sku-stock') + (rowUnavailable ? ' is-disabled' : '') + '">'
         + (rowState && rowState.showSkuImage ? '<span class="wg-image wg-image--md wg-image--rounded-md order-add-spec-counter-row__image" data-component="image" data-component-slug="image" data-variant-name="Image_40_Rounded"><img class="wg-image__src is-loaded" src="' + escapeHtml(rowState.skuImageUrl) + '" alt=""></span>' : '')
         + '<div class="order-add-spec-counter-row__info"><span class="order-add-spec-counter-row__label">' + escapeHtml(size) + '</span>'
-        + (rowState && rowState.showSkuPrice ? '<small class="order-add-sku-price"><span>¥' + compactAmount(rowState.displayPrice) + '</span>' + (rowPriceOriginal != null ? '<del class="order-add-sku-original-price">¥' + compactAmount(rowPriceOriginal) + '</del>' : '') + '</small>' : '')
+        + (rowState && (rowState.showSkuPrice || draft.useSkuPrices) ? '<div class="order-add-sku-price"><span>¥' + compactAmount(addDraftSkuPrice(draft, rowSpec)) + '</span>' + (rowPriceOriginal != null && rowPriceOriginal !== addDraftSkuPrice(draft, rowSpec) ? '<del class="order-add-sku-original-price">¥' + compactAmount(rowPriceOriginal) + '</del>' : '') + '<button type="button" class="order-add-sku-price__edit" data-edit-sku-price="' + encodeURIComponent(rowSpec) + '" aria-label="编辑' + escapeHtml(rowSpec) + '价格"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button></div>' : '')
         + '</div>'
         + '<div class="order-add-sku-operation">'
         + '<div class="counter' + (counterDisabled ? ' is-disabled' : '') + '" data-component="counter" data-component-slug="counter" data-variant-name="Counter_32">'
@@ -4527,12 +4763,14 @@
     }).join('');
     return ''
       + '<div class="order-single-picker">'
-      +   (matrix.hasColor ? '<section>' + (desktop ? '<div class="order-add-selection-head"><small>颜色</small>' + batchModeSwitch + '</div>' : '<small>颜色</small>') + '<div class="order-add-choice-list order-add-choice-list--colors">' + matrix.colors.map(function (color) {
-            var colorUnavailable = desktop ? !colorSupportsQuantities(draft, color) : (Boolean(selectedSize) && !specKey(product, color, selectedSize));
-            return '<button type="button" class="btn btn--weak btn--sm ' + (selectedColor === color ? 'is-selected' : '') + '" data-component-slug="button" data-add-color="' + encodeURIComponent(color) + '" ' + (colorUnavailable ? 'disabled' : '') + '>' + escapeHtml(color) + '</button>';
+      + (desktop ? addViewSelector(draft) : '')
+      +   (matrix.hasColor ? '<section>' + (desktop ? '' : '<small>颜色</small>') + '<div class="order-add-choice-list order-add-choice-list--colors">' + matrix.colors.map(function (color) {
+            var colorUnavailable = desktop ? false : (Boolean(selectedSize) && !specKey(product, color, selectedSize));
+            var hasColorQuantity = product.specs.some(function (spec) { return splitSpec(spec).color === color && Number(draft.skuQty[spec] || 0) !== 0; });
+            return '<button type="button" class="btn btn--weak btn--sm ' + (selectedColor === color ? 'is-selected' : '') + '" data-component-slug="button" data-add-color="' + encodeURIComponent(color) + '" ' + (colorUnavailable ? 'disabled' : '') + '>' + escapeHtml(color) + '<span class="order-add-color-count" data-add-color-count' + (hasColorQuantity ? '' : ' hidden') + '>' + (hasColorQuantity ? addColorQuantity(draft, color) : '') + '</span></button>';
           }).join('') + '</div></section>' : '')
       +   (desktop
-        ? '<section class="order-add-spec-counter-section"><div class="order-add-spec-counter-head">' + (matrix.hasColor || matrix.hasSize ? '<small>规格</small>' : '') + (matrix.hasSize && !matrix.hasColor ? batchModeSwitch : '') + '</div><div class="order-add-spec-counter-list">' + (desktopSpecRows || '<div class="order-add-spec-counter-empty">暂无可售规格</div>') + '</div></section>'
+        ? '<section class="order-add-spec-counter-section"><div class="order-add-spec-counter-head">' + (matrix.hasColor || matrix.hasSize ? '<small>批量</small>' + addListBulkCounter(draft) : '') + '</div><div class="order-add-spec-counter-list">' + (desktopSpecRows || '<div class="order-add-spec-counter-empty">暂无可售规格</div>') + '</div></section>'
         : (matrix.hasSize ? '<section><small>规格</small><div class="order-add-choice-list">' + availableSizes.map(function (size) {
             var sizeUnavailable = Boolean(effectiveColor) && !specKey(product, effectiveColor, size);
             return '<button type="button" class="btn btn--weak btn--sm ' + (selectedSize === size ? 'is-selected' : '') + '" data-component-slug="button" data-add-size="' + encodeURIComponent(size) + '" ' + (sizeUnavailable ? 'disabled' : '') + '>' + escapeHtml(size) + '</button>';
@@ -4561,7 +4799,7 @@
       + '</div>';
     return ''
       + '<div class="order-batch-picker' + (showInventory ? ' order-batch-picker--with-inventory' : '') + '">'
-      +   (desktop ? '<div class="order-add-selection-head">' + quickTools + '<label class="order-add-batch-switch-label"><span>一次买多件</span><button type="button" class="switch switch--on" role="switch" aria-checked="true" aria-label="一次买多件" data-component-slug="switch" data-add-mode="single"><span class="switch__thumb"></span></button></label></div>' : quickTools)
+      +   (desktop ? addViewSelector(draft) : '') + quickTools
       +   '<div class="order-batch-matrix-wrap"><table class="order-batch-matrix"><thead><tr><th class="order-batch-corner"><button type="button" data-batch-select-all aria-label="选择全部规格"><span class="order-batch-corner-mark" aria-hidden="true"></span></button></th>' + matrix.colors.map(function (color) {
             var colorSelected = selection && (selection.type === 'all' || selection.type === 'row' || (selection.type === 'column' && selection.value === color) || (selection.type === 'cell' && selection.color === color));
             return '<th class="' + (colorSelected ? 'is-selected' : '') + '"><button type="button" data-batch-select-column="' + encodeURIComponent(color) + '">' + escapeHtml(matrix.hasColor ? color : '默认颜色') + '</button></th>';
@@ -4618,7 +4856,64 @@
     return ''
       + (desktop ? '<div class="order-add-product-fixed">' + productSummary + priceModes + '</div><div class="order-add-scroll">' + selectorContent + '</div>'
         : '<div class="order-add-scroll"><div class="order-side-panel__head"><strong>添加商品</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>' + productSummary + priceModes + selectorContent + '</div>')
-      + '<div class="order-add-footer"><span>' + (desktop ? '<strong data-add-total-amount>' + addProductPrice(total * unitPrice) + '</strong><small>共 <b data-add-total-qty>' + total + '</b> 件</small>' : '合计：<b data-add-total-qty>' + total + '</b> 件 <strong data-add-total-amount>' + money(total * unitPrice) + '</strong>') + '</span><div class="order-add-footer__actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button('添加', 'strong', 'md', 'data-confirm-add') + '</div></div>';
+      + '<div class="order-add-footer"><span>' + (desktop ? '<strong data-add-total-amount>' + addProductPrice(addDraftAmount(draft)) + '</strong><small>共 <b data-add-total-qty>' + total + '</b> 件</small>' : '合计：<b data-add-total-qty>' + total + '</b> 件 <strong data-add-total-amount>' + money(addDraftAmount(draft)) + '</strong>') + '</span><div class="order-add-footer__actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button('添加', 'strong', 'md', 'data-confirm-add') + '</div></div>';
+  }
+
+  function skuPricePreview(edit) {
+    var raw = String(edit.input || '').trim();
+    var value = Number(raw);
+    var valid = raw === '' || (/^\d+(?:\.\d{0,2})?$/.test(raw) && Number.isFinite(value)
+      && (edit.mode !== 'discount' || value <= 100));
+    var hasInput = raw !== '';
+    var after = edit.original;
+    if (valid && hasInput) {
+      if (edit.mode === 'fixed') after = value;
+      else if (edit.mode === 'discount') after = edit.original * value / 100;
+      else after = Math.max(0, edit.original - value);
+    }
+    after = Math.round(after * 100) / 100;
+    return { valid: valid, hasInput: hasInput, after: after, change: Math.round((after - edit.original) * 100) / 100 };
+  }
+
+  function skuPriceChangeText(value) {
+    return (value < 0 ? '-' : value > 0 ? '+' : '') + money(Math.abs(value));
+  }
+
+  function syncSkuPricePreview(root) {
+    var edit = state.skuPriceDraft;
+    if (!edit) return;
+    var preview = skuPricePreview(edit);
+    var change = root.querySelector('[data-sku-price-change]');
+    var after = root.querySelector('[data-sku-price-after]');
+    var error = root.querySelector('[data-sku-price-error]');
+    if (change) {
+      change.textContent = skuPriceChangeText(preview.change);
+      change.classList.toggle('is-negative', preview.change < 0);
+    }
+    if (after) after.textContent = money(preview.after);
+    if (error) error.textContent = edit.input && !preview.valid ? (edit.mode === 'discount' ? '请输入 0–100 的百分比' : '请输入有效金额，最多两位小数') : '';
+  }
+
+  function skuPriceModal() {
+    var edit = state.skuPriceDraft;
+    if (!edit || !state.addDraft) return '';
+    var preview = skuPricePreview(edit);
+    var modeNames = { fixed: '一口价', discount: '折扣', amount: '优惠' };
+    var unit = edit.mode === 'discount' ? '%' : '元';
+    return '<div class="order-sku-price-modal" role="dialog" aria-modal="true" aria-labelledby="order-sku-price-title" data-state="open">'
+      + '<div class="order-sku-price-modal__panel">'
+      +   '<header class="order-sku-price-modal__head"><strong id="order-sku-price-title">优惠改价</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-close-sku-price aria-label="关闭优惠改价"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +   '<div class="order-sku-price-modal__body">'
+      +     '<div class="order-sku-price-method-row"><span class="order-sku-price-method-label" id="order-sku-price-method-label">改价方式</span><div class="order-sku-price-modes" role="radiogroup" aria-labelledby="order-sku-price-method-label" data-scenario-component="CommodityChangePrice">' + Object.keys(modeNames).map(function (mode) {
+              var selected = edit.mode === mode;
+              return '<button type="button" class="stack order-sku-price-mode' + (selected ? ' stack--selected' : '') + '" data-component="stack" data-variant-name="' + (selected ? 'selected' : 'unselected') + '" role="radio" aria-checked="' + selected + '" data-sku-price-mode="' + mode + '"><span class="stack__bg"><span class="stack__label">' + modeNames[mode] + '</span><span class="stack__check-corner" aria-hidden="true"><i class="wego-iconfont-s icon-gou16 stack__check-icon"></i></span></span></button>';
+            }).join('') + '</div></div>'
+      +     '<label class="order-sku-price-field"><span>' + (edit.mode === 'discount' ? '折扣比例' : edit.mode === 'amount' ? '优惠金额' : '一口价') + '</span><span class="input number-input order-sku-price-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input data-scenario-component="InputPrice"><input class="number-input__field" type="text" inputmode="decimal" autocomplete="off" value="' + escapeHtml(edit.input) + '" placeholder="请输入" data-sku-price-input aria-label="' + (edit.mode === 'discount' ? '折扣百分比' : '改价金额') + '"><span class="number-input__suffix">' + unit + '</span></span></label>'
+      +     '<small class="order-sku-price-error" data-sku-price-error>' + (edit.input && !preview.valid ? '请输入有效金额' : '') + '</small>'
+      +     '<div class="order-sku-price-preview" data-scenario-component="PriceNew"><div><span>原价</span><strong>' + money(edit.original) + '</strong></div><div><span>改价金额</span><strong data-sku-price-change class="' + (preview.change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(preview.change) + '</strong></div><div class="order-sku-price-preview__after"><span>改后价格</span><strong data-sku-price-after>' + money(preview.after) + '</strong></div></div>'
+      +   '</div>'
+      +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-sku-price') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-sku-price>确认改价</button></footer>'
+      + '</div></div>';
   }
 
   function pricePanel() {
@@ -4628,7 +4923,7 @@
     return ''
       + '<div class="order-side-panel__head"><strong>修改单价</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>'
       + '<div class="order-add-product">' + image(item, 'order-add-product__image') + '<span><strong>' + item.name + '</strong><small>当前价格可直接修改</small></span></div>'
-      + '<div class="number-input order-price-input" data-component-slug="input"><input class="number-input__field" type="text" inputmode="decimal" value="' + item.price + '" data-price-value aria-label="商品单价"><span class="number-input__suffix">元</span></div>'
+      + '<div class="input number-input order-price-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)"><input class="number-input__field" type="text" inputmode="decimal" value="' + item.price + '" data-price-value aria-label="商品单价"><span class="number-input__suffix">元</span></div>'
       + '<div class="order-side-actions">' + button('保存价格', 'strong', 'md', 'data-save-price') + '</div>';
   }
 
@@ -4681,7 +4976,7 @@
   function desktopCustomerSearchRow(item, keyword) {
     return ''
       + '<button type="button" class="order-desktop-customer-result" data-customer-id="' + item.id + '">'
-      +   '<span class="avatar avatar--40 avatar--image"><img src="' + item.avatar + '" alt=""></span>'
+      +   '<span class="avatar avatar--40 avatar--image" data-component="avatar" data-variant-name="Avatar_40_Default"><img src="' + item.avatar + '" alt=""></span>'
       +   '<span><strong>' + highlightCustomerMatch(item.name, keyword) + '</strong><small>' + highlightCustomerMatch(item.mobile, keyword) + '　' + highlightCustomerMatch(item.address, keyword) + '</small></span>'
       + '</button>';
   }
@@ -4906,14 +5201,14 @@
       +         '<div class="order-fan-profile-contact" aria-label="联系粉丝"><button type="button" data-fan-profile-action="更多" aria-label="更多操作"><span aria-hidden="true">•••</span></button><button type="button" data-fan-profile-action="拨打电话" aria-label="拨打电话"><i class="wego-iconfont-s icon-dianhua" aria-hidden="true"></i></button><button type="button" data-fan-profile-action="发微信" aria-label="发微信"><i class="wego-iconfont-s icon-weixin" aria-hidden="true"></i></button></div>'
       +       '</section>'
       +       '<section class="order-fan-profile-group" aria-label="业务信息">'
-      +         '<div class="order-fan-profile-info-row" data-component="cell" data-component-slug="cell"><span>会员等级</span><strong>' + escapeHtml(customer.level || '非会员') + '</strong></div>'
-      +         '<div class="order-fan-profile-info-row" data-component="cell" data-component-slug="cell"><span>下单记录</span><strong class="order-fan-profile-status">老客</strong></div>'
-      +         '<button type="button" class="order-fan-profile-info-row" data-component="cell" data-component-slug="cell" data-fan-profile-action="查看余额"><span>当前余额</span><strong>' + money(customer.balance) + '</strong><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
+      +         '<div class="order-fan-profile-info-row"><span>会员等级</span><strong>' + escapeHtml(customer.level || '非会员') + '</strong></div>'
+      +         '<div class="order-fan-profile-info-row"><span>下单记录</span><strong class="order-fan-profile-status">老客</strong></div>'
+      +         '<button type="button" class="order-fan-profile-info-row" data-fan-profile-action="查看余额"><span>当前余额</span><strong>' + money(customer.balance) + '</strong><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
       +       '</section>'
       +       '<section class="order-fan-profile-balance-actions" aria-label="余额操作"><button type="button" data-fan-profile-action="对账"><i class="wego-iconfont-s icon-dingdan" aria-hidden="true"></i><span>对账</span></button><button type="button" data-fan-profile-action="减余额"><i class="wego-iconfont-s icon-jian16" aria-hidden="true"></i><span>减余额</span></button><button type="button" data-fan-profile-action="加余额"><i class="wego-iconfont-s icon-jia16" aria-hidden="true"></i><span>加余额</span></button></section>'
       +       '<section class="order-fan-profile-group" aria-label="粉丝设置">'
-      +         '<button type="button" class="order-fan-profile-info-row" data-component="cell" data-component-slug="cell" data-fan-profile-action="设置备注名称和标签"><span>设置备注名称和标签</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
-      +         '<button type="button" class="order-fan-profile-info-row order-fan-profile-info-row--activity" data-component="cell" data-component-slug="cell" data-fan-profile-action="活跃数据"><span><b>活跃数据</b><small>' + escapeHtml(activity) + '</small></span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
+      +         '<button type="button" class="order-fan-profile-info-row" data-fan-profile-action="设置备注名称和标签"><span>设置备注名称和标签</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
+      +         '<button type="button" class="order-fan-profile-info-row order-fan-profile-info-row--activity" data-fan-profile-action="活跃数据"><span><b>活跃数据</b><small>' + escapeHtml(activity) + '</small></span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
       +       '</section>'
       +       '<section class="order-fan-profile-primary-actions"><button type="button" class="btn btn--strong btn--md" data-component="button" data-component-slug="button" data-fan-profile-action="进入相册"><i class="btn__icon icon-xiangcewangzhi" aria-hidden="true"></i>进入相册</button><button type="button" class="btn btn--medium btn--md" data-component="button" data-component-slug="button" data-fan-profile-action="开单">开单</button></section>'
       +       '<footer class="order-fan-profile-owner"><span>该客户于' + escapeHtml(assignedAt) + '分配给</span><span class="avatar avatar--24 avatar--image" data-component="avatar" data-component-slug="avatar" data-variant-name="Avatar_24_Default"><img src="' + customer.avatar + '" alt="' + escapeHtml(assignedTo) + '"></span><strong>' + escapeHtml(assignedTo) + '</strong><span class="order-fan-profile-owner__links"><button type="button" class="link link--12" data-component="link" data-component-slug="link" data-fan-profile-action="查看来源">查看来源</button><i aria-hidden="true"></i><button type="button" class="link link--12" data-component="link" data-component-slug="link" data-fan-profile-action="更改归属">更改归属</button></span></footer>'
@@ -4936,7 +5231,7 @@
     var modalTitle = isQuick && QUICK_OP_DEFS[state.quickOp] ? QUICK_OP_DEFS[state.quickOp].title : (isCustomerCreate ? '新建客户' : (isDelivery ? '选择发货方式' : (isNote ? '商品备注' : (isCheckout ? checkoutTitle : '添加商品'))));
     // Exception: 宿主 modal 当前只有全宽面板，无法承载 PC 中宽新建客户、发货方式与商品录入；此处仅回退承载层，内容仍消费正式组件。
     return ''
-      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
+      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
       +   '<div class="order-desktop-modal__panel">'
       +     '<div class="order-desktop-modal__head"><strong id="order-desktop-modal-title">' + modalTitle + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon ' + (isDelivery ? 'icon-cha' : 'icon-cha16') + '" aria-hidden="true"></i></button></div>'
       +     '<div class="order-desktop-modal__body">' + (isQuick ? quickOpPanel(true) : (isCustomerCreate ? desktopNewCustomerModalContent() : (isDelivery ? deliveryPanel() : (isNote ? spuNotePanel() : (isCheckout ? checkoutPanel() : addPanel(true)))))) + '</div>'
@@ -4955,7 +5250,7 @@
       var selected = state.guideDraftId === guide.id;
       var isDefault = state.defaultGuideId === guide.id;
       return ''
-        + '<button type="button" class="order-employee-option" role="radio" aria-checked="' + selected + '" data-guide-option="' + guide.id + '" data-guide-search-text="' + escapeHtml(searchable) + '"' + (hidden ? ' hidden' : '') + ' data-component="cell" data-variant-name="Cell_Avatar">'
+        + '<button type="button" class="order-employee-option" role="radio" aria-checked="' + selected + '" data-guide-option="' + guide.id + '" data-guide-search-text="' + escapeHtml(searchable) + '"' + (hidden ? ' hidden' : '') + '>'
         +   '<span class="radio' + (selected ? ' radio--checked' : '') + '" data-component="radio" data-variant-name="Radio_24" aria-hidden="true"><span class="radio__inner"></span><span class="radio__dot"></span></span>'
         +   '<span class="avatar avatar--40 avatar--image" data-component="avatar" data-variant-name="Avatar_40_Default"><img src="' + guide.avatar + '" alt=""></span>'
         +   '<span class="order-employee-option__content"><span class="order-employee-option__title">' + escapeHtml(guide.name) + (guide.remark ? '<small>(' + escapeHtml(guide.remark) + ')</small>' : '') + '</span><span class="order-employee-option__meta"><span>' + escapeHtml(guide.role) + '</span>' + (guide.customerCount ? '<span>' + escapeHtml(guide.customerCount) + '</span>' : '') + '</span></span>'
@@ -4967,7 +5262,7 @@
       +   '<div class="order-employee-modal__panel">'
       +     '<header class="order-employee-modal__head"><strong id="order-employee-modal-title">选择员工</strong><button type="button" class="order-employee-modal__close" data-close-guide-modal aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></header>'
       +     '<div class="order-employee-modal__body">'
-      +       '<div class="order-employee-modal__search" data-guide-search-shell data-clickable><div class="searchbox searchbox--sm searchbox--gray" data-component="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input"><input class="searchbox__field" type="search" value="' + escapeHtml(state.guideKeyword) + '" placeholder="按昵称或备注名搜索" autocomplete="off" data-guide-search></div></div></div>'
+      +       '<div class="order-employee-modal__search" data-guide-search-shell data-clickable><div class="searchbox searchbox--sm searchbox--gray"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input"><input class="searchbox__field" type="search" value="' + escapeHtml(state.guideKeyword) + '" placeholder="按昵称或备注名搜索" autocomplete="off" data-guide-search></div></div></div>'
       +       '<div class="order-employee-modal__list" role="radiogroup" aria-label="员工列表">' + rows + '<div class="order-employee-modal__empty"' + (visibleCount ? ' hidden' : '') + ' data-guide-empty>没有找到匹配员工</div></div>'
       +     '</div>'
       +     '<footer class="order-employee-modal__footer"><button type="button" class="btn btn--strong btn--md" data-component="button" data-variant-name="Button_40" data-confirm-guide>确定</button></footer>'
@@ -5097,7 +5392,7 @@
       ? '<div class="modal__title order-v2-modal__checkout-head"><span class="order-v2-modal__checkout-title">' + (totals().payable < 0 ? '退款处理' : '支付结算') + '</span><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></div>'
       : '<div class="modal__title modal__title--default"><nav class="navbar" data-component-slug="navbar"><div class="navbar__body"><div class="navbar__left"><button type="button" class="navbar__left-btn navbar__left-btn--circle" data-close-panel aria-label="收起"><i class="wego-iconfont-s icon-xiajiantou16"></i></button></div><div class="navbar__center"><span class="navbar__title">' + panelTitle() + '</span></div><div class="navbar__right"></div></div></nav></div>';
     return ''
-      + '<div class="modal modal--frame-x modal--has-actions order-v2-modal' + (state.panel === 'add' ? ' order-v2-modal--add' : '') + (isCheckoutModal ? ' order-v2-modal--checkout' : '') + '" role="dialog" aria-modal="true" aria-label="' + panelTitle() + '" data-state="open" data-component-slug="modal">'
+      + '<div class="modal modal--frame-x modal--has-actions order-v2-modal' + (state.panel === 'add' ? ' order-v2-modal--add' : '') + (isCheckoutModal ? ' order-v2-modal--checkout' + (totals().payable < 0 ? ' order-v2-modal--refund' : '') : '') + '" role="dialog" aria-modal="true" aria-label="' + panelTitle() + '" data-state="open" data-component-slug="modal">'
       +   '<div class="modal__panel">'
       +     defaultModalHeader
       +     '<div class="modal__body order-v2-modal__body">' + sidePanelContent() + '</div>'
@@ -5127,11 +5422,16 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + totalEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + totalEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
     root.innerHTML = rootTemplate();
+    if (state.skuPriceDraft) root.querySelectorAll('.order-desktop-modal--add, .order-v2-modal--add').forEach(function (modal) {
+      modal.setAttribute('inert', '');
+      modal.setAttribute('aria-hidden', 'true');
+    });
+    normalizeGongfengComponentContracts(root);
     var scannerVideo = root.querySelector('[data-barcode-video]');
     if (scannerVideo && scannerStream) {
       scannerVideo.srcObject = scannerStream;
@@ -5342,11 +5642,15 @@
       mode: productMatrix.hasColor || productMatrix.hasSize ? storedAddMode() : 'single',
       priceMode: 'retail',
       unitPrice: customerPrice(product),
+      useSkuPrices: isDesktopWorkbench(),
+      skuPriceOverrides: {},
       lastDiscountPrice: productLastDiscountPrice(product),
       lastDiscountTipVisible: true,
       costPriceVisible: false,
       skuQty: skuQty,
       pendingSizeQty: {},
+      listBulkActive: false,
+      listBulkValues: {},
       singleRecord: {
         skuQty: copyAddSkuQty(product, skuQty),
         selectedColor: firstColor,
@@ -5576,12 +5880,14 @@
     state.selectedRow = null;
     var priceMode = pricing && pricing.priceMode ? pricing.priceMode : 'retail';
     var unitPrice = pricing && pricing.unitPrice != null ? Number(pricing.unitPrice) : customerPrice(product);
+    var skuPrices = pricing && pricing.skuPrices ? Object.assign({}, pricing.skuPrices) : null;
     var searchMeta = pricing && pricing.searchMeta ? pricing.searchMeta : {
       used_multi_picture_search: false,
       used_picture_precise_search: false
     };
     var existing = state.products.find(function (item) {
-      return item.code === product.code && (item.priceMode || 'retail') === priceMode && Number(item.price) === unitPrice;
+      return item.code === product.code && (item.priceMode || 'retail') === priceMode && Number(item.price) === unitPrice
+        && JSON.stringify(item.skuPrices || null) === JSON.stringify(skuPrices);
     });
     if (existing) {
       if (!Array.isArray(existing.orderSpecs)) {
@@ -5605,6 +5911,7 @@
       name: product.name,
       listPrice: product.listPrice,
       price: unitPrice,
+      skuPrices: skuPrices,
       priceMode: priceMode,
       image: product.image,
       freightTemplate: product.freightTemplate ? Object.assign({}, product.freightTemplate) : { requiresRealName: false },
@@ -5613,7 +5920,7 @@
       skuQty: Object.assign({}, skuQty),
       orderSpecs: Object.keys(skuQty).filter(function (spec) { return Number(skuQty[spec] || 0) !== 0; }),
       note: note || '',
-      manualPrice: priceMode !== 'retail',
+      manualPrice: priceMode !== 'retail' || Boolean(skuPrices),
       used_multi_picture_search: Boolean(searchMeta.used_multi_picture_search),
       used_picture_precise_search: Boolean(searchMeta.used_picture_precise_search),
       createdType: product.createdType || 'product'
@@ -5628,7 +5935,7 @@
     var total = addDraftTotal(draft);
     root.querySelectorAll('[data-add-total-qty]').forEach(function (node) { node.textContent = total; });
     root.querySelectorAll('[data-add-total-amount]').forEach(function (node) {
-      var amount = total * addDraftUnitPrice(draft);
+      var amount = addDraftAmount(draft);
       if (node.querySelector('.order-add-price__major')) node.innerHTML = addProductPrice(amount);
       else node.textContent = money(amount);
     });
@@ -5689,6 +5996,8 @@
       lastSingleMethod: '',
       lastSingleAmount: '',
       selectedMethods: [],
+      lastComboMethods: null,
+      onlineAmountTouched: {},
       useBalance: Boolean(state.customer && Number(state.customer.balance || 0) > 0),
       shortageHandling: null,
       overpaymentHandling: state.customer ? 'balance' : 'change',
@@ -5700,6 +6009,8 @@
       refundStatus: state.customer ? '' : 'private',
       refundMethod: '',
       refundImages: [],
+      refundImagesEditor: null,
+      refundImageReadsPending: 0,
       inventoryReturnMode: '',
       refundWarehouseId: '',
       balanceGuideOpen: false,
@@ -6148,6 +6459,46 @@
     if (state.paymentDraft && state.paymentDraft.refundWarehouseMenuOpen && !event.target.closest('.order-refund-warehouse-popmenu')) closeRefundWarehouseMenu(root);
     var target = event.target.closest('button, [data-clickable]');
     if (!target || !root.contains(target)) return;
+    if (state.skuPriceDraft) {
+      if (!target.closest('.order-sku-price-modal')) return;
+      if (target.matches('[data-close-sku-price]')) {
+        state.skuPriceDraft = null;
+        renderActive();
+        return;
+      }
+      if (target.matches('[data-sku-price-mode]')) {
+        state.skuPriceDraft.mode = target.dataset.skuPriceMode;
+        state.skuPriceDraft.input = '';
+        renderActive();
+        var changedInput = root.querySelector('[data-sku-price-input]');
+        if (changedInput) changedInput.focus({ preventScroll: true });
+        return;
+      }
+      if (target.matches('[data-confirm-sku-price]')) {
+        var changePreview = skuPricePreview(state.skuPriceDraft);
+        if (!changePreview.valid) {
+          syncSkuPricePreview(root);
+          var invalidPriceInput = root.querySelector('[data-sku-price-input]');
+          if (invalidPriceInput) invalidPriceInput.focus({ preventScroll: true });
+          return;
+        }
+        if (changePreview.hasInput) state.addDraft.skuPriceOverrides[state.skuPriceDraft.spec] = changePreview.after;
+        state.skuPriceDraft = null;
+        renderActive();
+        if (changePreview.hasInput) ctx.toast('当前 SKU 价格已修改');
+        return;
+      }
+      return;
+    }
+    if (target.matches('[data-edit-sku-price]') && state.addDraft) {
+      var editSpec = decodeURIComponent(target.dataset.editSkuPrice || '');
+      if (!state.addDraft.product.specs.includes(editSpec)) return;
+      state.skuPriceDraft = { spec: editSpec, original: addDraftSkuPrice(state.addDraft, editSpec), mode: 'fixed', input: '' };
+      renderActive();
+      var priceInput = root.querySelector('[data-sku-price-input]');
+      if (priceInput) priceInput.focus({ preventScroll: true });
+      return;
+    }
 
     if (state.guidePickerOpen && target.matches('[data-guide-search-shell]')) {
       var guideSearchInput = root.querySelector('[data-guide-search]');
@@ -6896,7 +7247,7 @@
     if (target.matches('[data-stock-warning-cancel], [data-stock-warning-confirm]') && state.addDraft && state.addDraft.stockWarning) {
       var warning = state.addDraft.stockWarning;
       if (target.matches('[data-stock-warning-confirm]')) {
-        state.addDraft.skuQty[warning.spec] = warning.proposedQuantity;
+        setSingleSkuQuantity(state.addDraft, warning.spec, warning.proposedQuantity);
         state.addDraft.confirmedOverstock[warning.spec] = true;
       }
       state.addDraft.stockWarning = null;
@@ -6979,6 +7330,10 @@
     }
     if (target.matches('[data-edit-catalog-product]')) {
       beginProductEdit(target.dataset.editCatalogProduct);
+      return;
+    }
+    if (target.matches('[data-add-spec]') && state.addDraft) {
+      ctx.toast('打开设置规格弹窗');
       return;
     }
     if (target.matches('[data-edit-add-product]') && state.addDraft) {
@@ -7089,8 +7444,13 @@
         state.addDraft.skuQty = validSpecs;
         if (state.addDraft.singleRecord) {
           state.addDraft.singleRecord.skuQty = copyAddSkuQty(editedProduct, state.addDraft.singleRecord.skuQty);
-          if (!specKey(editedProduct, state.addDraft.singleRecord.selectedColor, state.addDraft.singleRecord.selectedSize)) {
-            state.addDraft.singleRecord.selectedColor = '';
+          var editedMatrix = addProductMatrix(editedProduct);
+          // A list can have a selected color without a selected size (including bulk entry).
+          // Validate each dimension independently so adding a size does not clear its saved color.
+          if (editedMatrix.colors.indexOf(state.addDraft.singleRecord.selectedColor) < 0) {
+            state.addDraft.singleRecord.selectedColor = editedMatrix.colors[0] || '';
+          }
+          if (editedMatrix.sizes.indexOf(state.addDraft.singleRecord.selectedSize) < 0) {
             state.addDraft.singleRecord.selectedSize = '';
           }
         }
@@ -7379,26 +7739,51 @@
       scheduleClipboardRecipientCheck();
       return;
     }
+    if (target.matches('[data-list-bulk-delta]') && state.addDraft && state.addDraft.mode === 'single') {
+      var bulkDraft = state.addDraft;
+      var bulk = listBulkState(bulkDraft);
+      if (!bulk.specs.length) return;
+      var bulkValue = Math.max(-9999, Math.min(bulk.limit, bulk.value + Number(target.dataset.listBulkDelta)));
+      bulkDraft.listBulkActive = true;
+      if (!bulkDraft.listBulkValues) bulkDraft.listBulkValues = {};
+      bulkDraft.listBulkValues[bulk.color] = bulkValue;
+      bulk.specs.forEach(function (spec) {
+        bulkDraft.skuQty[spec] = bulkValue;
+        delete bulkDraft.confirmedOverstock[spec];
+      });
+      bulkDraft.pendingSizeQty = {};
+      renderActive();
+      return;
+    }
     if (target.matches('[data-add-mode]')) {
       var activeNote = panelScope(target, root).querySelector('[data-add-note]');
       if (activeNote) state.addDraft.note = activeNote.value.trim();
       var nextAddMode = target.dataset.addMode;
       if (nextAddMode !== state.addDraft.mode) {
-        saveAddModeRecord(state.addDraft);
-        state.addDraft.mode = nextAddMode;
-        state.addDraft.batchSelection = null;
-        restoreAddModeRecord(state.addDraft, nextAddMode);
+        if (isDesktopWorkbench()) {
+          // List and table are views of the same SKU quantities. A table with
+          // multiple SKUs can return to the list without a later row edit
+          // clearing the other visible quantities.
+          if (nextAddMode === 'single' && state.addDraft.product.specs.filter(function (spec) {
+            return Number(state.addDraft.skuQty[spec] || 0) !== 0;
+          }).length > 1) state.addDraft.listBulkActive = true;
+          state.addDraft.mode = nextAddMode;
+          state.addDraft.batchSelection = null;
+        } else {
+          saveAddModeRecord(state.addDraft);
+          state.addDraft.mode = nextAddMode;
+          state.addDraft.batchSelection = null;
+          restoreAddModeRecord(state.addDraft, nextAddMode);
+        }
       }
       rememberAddMode(state.addDraft.mode);
-      target.classList.toggle('switch--on', nextAddMode === 'batch');
-      target.classList.toggle('switch--off', nextAddMode !== 'batch');
-      target.setAttribute('aria-checked', String(nextAddMode === 'batch'));
-      window.setTimeout(renderActive, 140);
+      renderActive();
       return;
     }
     if (target.matches('[data-add-price-mode]') && state.addDraft) {
       state.addDraft.priceMode = target.dataset.addPriceMode;
       state.addDraft.unitPrice = state.addDraft.priceMode === 'cost' ? productCostPrice(state.addDraft.product) : customerPrice(state.addDraft.product);
+      state.addDraft.skuPriceOverrides = {};
       renderActive();
       return;
     }
@@ -7414,29 +7799,20 @@
     if (target.matches('[data-use-last-discount]') && state.addDraft) {
       state.addDraft.priceMode = 'discount';
       state.addDraft.unitPrice = Number(state.addDraft.lastDiscountPrice || 0);
+      state.addDraft.skuPriceOverrides = {};
       state.addDraft.lastDiscountTipVisible = false;
       renderActive();
       return;
     }
     if (target.matches('[data-add-purchase-history]') && state.addDraft) {
+      // 原型能力：采购记录服务尚未接入。
+      ctx.toast('采购记录暂未接入，当前为原型演示');
       return;
     }
     if (target.matches('[data-add-color]')) {
-      var desktopColorSelection = Boolean(target.closest('.order-desktop-modal--add'));
-      var carriedSizeQuantities = desktopColorSelection ? singleSizeQuantities(state.addDraft) : null;
-      if (desktopColorSelection) {
-        Object.keys(state.addDraft.skuQty).forEach(function (key) { state.addDraft.skuQty[key] = 0; });
-        state.addDraft.confirmedOverstock = {};
-      }
       state.addDraft.selectedColor = decodeURIComponent(target.dataset.addColor);
-      if (desktopColorSelection) {
-        Object.keys(carriedSizeQuantities).forEach(function (size) {
-          var carriedSpec = specKey(state.addDraft.product, state.addDraft.selectedColor, size);
-          if (!carriedSpec) return;
-          state.addDraft.skuQty[carriedSpec] = Math.min(singleQuantityLimit(state.addDraft.product, carriedSpec), Number(carriedSizeQuantities[size] || 0));
-        });
-        state.addDraft.pendingSizeQty = Object.assign({}, carriedSizeQuantities);
-      }
+      // Desktop color chips filter the shared SKU quantities shown in list
+      // view; changing color must not transfer or clear table data.
       if (state.addDraft.selectedSize && !specKey(state.addDraft.product, state.addDraft.selectedColor, state.addDraft.selectedSize)) {
         state.addDraft.selectedSize = '';
       }
@@ -7449,6 +7825,7 @@
       return;
     }
     if (target.matches('[data-single-qty-delta]')) {
+      if (!state.addDraft || state.addDraft.mode === 'batch') return;
       var draftNow = state.addDraft;
       var draftMatrix = addProductMatrix(draftNow.product);
       var singleSpec = decodeURIComponent(target.dataset.singleSpec || '');
@@ -7473,16 +7850,11 @@
       }
       var singleStock = singleQuantityLimit(draftNow.product, singleSpec);
       var singleDelta = Number(target.dataset.singleQtyDelta);
-      if (!desktopSpecCounter && singleDelta > 0) {
-        Object.keys(draftNow.skuQty).forEach(function (key) {
-          if (key !== singleSpec) draftNow.skuQty[key] = 0;
-        });
-      }
       var currentSingleQuantity = Number(draftNow.skuQty[singleSpec] || 0);
       var nextSingleQuantity = singleDelta < 0
         ? Math.max(-9999, currentSingleQuantity + singleDelta)
         : Math.min(singleStock, currentSingleQuantity + singleDelta);
-      draftNow.skuQty[singleSpec] = nextSingleQuantity;
+      setSingleSkuQuantity(draftNow, singleSpec, nextSingleQuantity);
       if (draftNow.confirmedOverstock && nextSingleQuantity <= singleStock) delete draftNow.confirmedOverstock[singleSpec];
       renderActive();
       return;
@@ -7617,7 +7989,9 @@
       var noteInput = addScope.querySelector('[data-add-note]');
       draft.note = noteInput ? noteInput.value.trim() : draft.note;
       if (draft.mode === 'batch') rememberBatchPattern(draft);
-      mergeProductIntoOrder(draft.product, draft.skuQty, draft.mode, draft.note, { priceMode: draft.priceMode, unitPrice: draft.unitPrice, searchMeta: draft.searchMeta });
+      var draftSkuPrices = draft.useSkuPrices ? {} : null;
+      if (draftSkuPrices) draft.product.specs.forEach(function (spec) { draftSkuPrices[spec] = addDraftSkuPrice(draft, spec); });
+      mergeProductIntoOrder(draft.product, draft.skuQty, draft.mode, draft.note, { priceMode: draft.priceMode, unitPrice: draft.unitPrice, skuPrices: draftSkuPrices, searchMeta: draft.searchMeta });
       state.panel = null;
       state.addDraft = null;
       markDirty(ctx, true);
@@ -7711,6 +8085,7 @@
       }
       var priceItem = state.products[Number(state.panelPayload)];
       priceItem.price = price;
+      priceItem.skuPrices = null;
       priceItem.manualPrice = true;
       state.panel = null;
       markDirty(ctx);
@@ -7759,6 +8134,10 @@
     if (target.matches('[data-open-payment-note]')) {
       if (!state.paymentDraft) return;
       state.paymentDraft.noteEditorValue = state.paymentDraft.note || '';
+      if (totals().payable < 0) {
+        state.paymentDraft.refundImagesEditor = state.paymentDraft.refundImages.slice();
+        state.paymentDraft.refundImageReadsPending = 0;
+      }
       state.paymentDraft.noteEditorOpen = true;
       renderActive();
       var paymentNoteField = activeContext.root.querySelector('[data-payment-note-editor]');
@@ -7769,17 +8148,27 @@
       if (!state.paymentDraft) return;
       state.paymentDraft.noteEditorValue = state.paymentDraft.note || '';
       state.paymentDraft.noteEditorOpen = false;
-      renderActive();
+      state.paymentDraft.refundImagesEditor = null;
+      state.paymentDraft.refundImageReadsPending = 0;
+      renderPaymentPreservingScroll(root, '[data-open-payment-note]');
       return;
     }
     if (target.matches('[data-payment-note-confirm]')) {
       if (!state.paymentDraft) return;
+      if (state.paymentDraft.refundImageReadsPending > 0) {
+        ctx.toast('图片正在读取，请稍后再试');
+        return;
+      }
       var paymentNoteScope = target.closest('.order-payment-note-modal');
       var paymentNoteEditor = paymentNoteScope ? paymentNoteScope.querySelector('[data-payment-note-editor]') : null;
       state.paymentDraft.note = paymentNoteEditor ? paymentNoteEditor.value.trim() : state.paymentDraft.note;
+      if (Array.isArray(state.paymentDraft.refundImagesEditor)) {
+        state.paymentDraft.refundImages = state.paymentDraft.refundImagesEditor.slice();
+        state.paymentDraft.refundImagesEditor = null;
+      }
       state.paymentDraft.noteEditorValue = state.paymentDraft.note;
       state.paymentDraft.noteEditorOpen = false;
-      renderActive();
+      renderPaymentPreservingScroll(root, '[data-open-payment-note]');
       ctx.toast((totals().payable < 0 ? '退款' : '收款') + '备注已保存');
       return;
     }
@@ -7841,9 +8230,10 @@
     }
     if (target.matches('[data-remove-refund-image]')) {
       var refundImageIndex = Number(target.dataset.removeRefundImage);
+      if (!state.paymentDraft || !Array.isArray(state.paymentDraft.refundImagesEditor)) return;
       var refundNoteEditor = root.querySelector('[data-payment-note-editor]');
       if (refundNoteEditor) state.paymentDraft.noteEditorValue = refundNoteEditor.value;
-      state.paymentDraft.refundImages.splice(refundImageIndex, 1);
+      state.paymentDraft.refundImagesEditor.splice(refundImageIndex, 1);
       renderPaymentPreservingScroll(root);
       return;
     }
@@ -7867,6 +8257,7 @@
         ctx.toast('请先选择客户');
         return;
       }
+      if (state.paymentDraft.kind === target.dataset.paymentKind) return;
       state.paymentDraft.kind = target.dataset.paymentKind;
       state.paymentDraft.mode = 'single';
       state.paymentDraft.method = '';
@@ -7874,11 +8265,12 @@
       state.paymentDraft.lastSingleMethod = '';
       state.paymentDraft.lastSingleAmount = '';
       state.paymentDraft.selectedMethods = [];
+      state.paymentDraft.lastComboMethods = null;
       state.paymentDraft.flowMethodId = '';
       state.paymentDraft.showShortageDialog = false;
       state.paymentDraft.shortageHandling = null;
       state.paymentStatus = 'idle';
-      renderActive();
+      renderPaymentPreservingScroll(root);
       return;
     }
     if (target.matches('[data-payment-mode]')) {
@@ -7887,16 +8279,19 @@
       if (nextPaymentMode === 'combo') {
         state.paymentDraft.lastSingleMethod = state.paymentDraft.method || '';
         state.paymentDraft.lastSingleAmount = state.paymentDraft.singleAmount || '';
-        state.paymentDraft.selectedMethods = paymentMethodsForKind(state.paymentDraft.kind).filter(function (method) {
-          return toCents(state.paymentDraft[method.id]) > 0;
-        }).map(function (method) { return method.id; });
+        state.paymentDraft.selectedMethods = state.paymentDraft.kind === 'private' && state.paymentDraft.lastComboMethods
+          ? state.paymentDraft.lastComboMethods.slice()
+          : paymentMethodsForKind(state.paymentDraft.kind).filter(function (method) {
+            return toCents(state.paymentDraft[method.id]) > 0;
+          }).map(function (method) { return method.id; });
       } else {
+        state.paymentDraft.lastComboMethods = state.paymentDraft.selectedMethods.slice();
         state.paymentDraft.method = state.paymentDraft.lastSingleMethod || '';
         state.paymentDraft.singleAmount = state.paymentDraft.method ? String(state.paymentDraft.lastSingleAmount || '') : '';
         state.paymentDraft.selectedMethods = state.paymentDraft.method ? [state.paymentDraft.method] : [];
       }
       state.paymentDraft.mode = nextPaymentMode;
-      renderActive();
+      renderPaymentPreservingScroll(root);
       return;
     }
     if (target.matches('[data-toggle-payment-balance]')) {
@@ -7917,6 +8312,7 @@
       if (!selectedMethod || selectedMethod.category !== state.paymentDraft.kind) return;
       var payableTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
       if (state.paymentDraft.mode === 'single') {
+        if (state.paymentDraft.method === selectedMethodId) return;
         state.paymentDraft.method = selectedMethodId;
         state.paymentDraft.singleAmount = (payableTargetCents / 100).toFixed(2);
         state.paymentDraft.lastSingleMethod = selectedMethodId;
@@ -7933,7 +8329,9 @@
         state.paymentDraft[selectedMethodId] = (remainingCents / 100).toFixed(2);
       }
       state.paymentDraft.shortageHandling = null;
-      renderPaymentPreservingScroll(root);
+      renderPaymentPreservingScroll(root, state.paymentDraft.mode === 'combo'
+        ? '[data-payment-amount=' + JSON.stringify(selectedMethodId) + ']'
+        : '');
       return;
     }
     if (target.matches('[data-remove-payment-method]')) {
@@ -7945,7 +8343,7 @@
         state.paymentDraft.singleAmount = '';
       }
       state.paymentDraft.shortageHandling = null;
-      renderPaymentPreservingScroll(root);
+      renderPaymentPreservingScroll(root, '[data-select-payment-method=' + JSON.stringify(removedMethodId) + ']');
       return;
     }
     if (target.matches('[data-fill-payment-remaining]')) {
@@ -8082,6 +8480,11 @@
 
   function handleInput(event, root, ctx) {
     var target = event.target;
+    if (target.matches('[data-sku-price-input]') && state.skuPriceDraft) {
+      state.skuPriceDraft.input = target.value;
+      syncSkuPricePreview(root);
+      return;
+    }
     if (state.guidePickerOpen && target.matches('[data-guide-search]')) {
       state.guideKeyword = target.value;
       var keyword = String(target.value || '').trim().toLowerCase();
@@ -8214,6 +8617,7 @@
     }
     if (target.matches('[data-refund-image-input]') && state.paymentDraft) {
       // Prototype-only local preview; production uploads through FormImageUpload and stores server file ids.
+      if (!state.paymentDraft.noteEditorOpen || !Array.isArray(state.paymentDraft.refundImagesEditor) || !target.files || !target.files.length) return;
       var activeRefundNoteEditor = root.querySelector('[data-payment-note-editor]');
       if (activeRefundNoteEditor) state.paymentDraft.noteEditorValue = activeRefundNoteEditor.value;
       var refundImageFiles = Array.from(target.files || []).filter(function (file) { return !file.type || file.type.indexOf('image/') === 0; });
@@ -8223,14 +8627,22 @@
         return;
       }
       var refundImageDraft = state.paymentDraft;
-      refundImageFiles.slice(0, Math.max(0, 9 - refundImageDraft.refundImages.length)).forEach(function (file) {
+      var refundEditorImages = refundImageDraft.refundImagesEditor;
+      var imageSlots = Math.max(0, 9 - refundEditorImages.length - refundImageDraft.refundImageReadsPending);
+      refundImageFiles.slice(0, imageSlots).forEach(function (file) {
+        refundImageDraft.refundImageReadsPending += 1;
         var reader = new FileReader();
         reader.onload = function () {
-          if (state.paymentDraft !== refundImageDraft) return;
-          refundImageDraft.refundImages.push({ name: file.name, url: String(reader.result || '') });
+          if (state.paymentDraft !== refundImageDraft || !refundImageDraft.noteEditorOpen || refundImageDraft.refundImagesEditor !== refundEditorImages) return;
+          refundImageDraft.refundImageReadsPending -= 1;
+          refundEditorImages.push({ name: file.name, url: String(reader.result || '') });
           renderActive();
         };
-        reader.onerror = function () { ctx.toast('退款图片读取失败，请重试'); };
+        reader.onerror = function () {
+          if (state.paymentDraft !== refundImageDraft || !refundImageDraft.noteEditorOpen || refundImageDraft.refundImagesEditor !== refundEditorImages) return;
+          refundImageDraft.refundImageReadsPending -= 1;
+          ctx.toast('退款图片读取失败，请重试');
+        };
         reader.readAsDataURL(file);
       });
       target.value = '';
@@ -8287,7 +8699,9 @@
         setProductQuantity(directItemIndex, directQtySpec, Number(rawQuantity || 0));
         var directProductRow = target.closest('.order-desktop-product-row');
         var directRowTotal = directProductRow?.querySelector('[data-product-total-value]');
-        var currentAmount = directItem.price * (directProductRow.classList.contains('order-desktop-product-row--grouped') ? directItem.qty : Number(rawQuantity || 0));
+        var currentAmount = directProductRow.classList.contains('order-desktop-product-row--grouped')
+          ? itemAmount(directItem)
+          : itemSkuPrice(directItem, directQtySpec) * Number(rawQuantity || 0);
         if (directRowTotal) {
           directRowTotal.textContent = money(currentAmount);
           directRowTotal.classList.toggle('is-negative', currentAmount < 0);
@@ -8372,7 +8786,7 @@
       if (event.type === 'change') markDirty(ctx);
       return;
     }
-    if (target.matches('[data-single-qty-input]') && state.addDraft) {
+    if (target.matches('[data-single-qty-input]') && state.addDraft && state.addDraft.mode !== 'batch') {
       var singleDraft = state.addDraft;
       var desktopInputSpec = decodeURIComponent(target.dataset.singleSpec || '');
       var desktopInputSize = decodeURIComponent(target.dataset.singleSize || '');
@@ -8419,8 +8833,9 @@
         target.value = singleParsed;
         var desktopSkuState = resolveSkuRowState(singleDraft.product, singleInputSpec, singleParsed, false);
         if (desktopSkuState.hasStockValue && !desktopSkuState.negativeStock && singleParsed > Math.max(0, Number(desktopSkuState.stock))) return;
-        singleDraft.skuQty[singleInputSpec] = singleParsed;
+        setSingleSkuQuantity(singleDraft, singleInputSpec, singleParsed);
         if (singleDraft.confirmedOverstock && singleParsed <= singleInputStock) delete singleDraft.confirmedOverstock[singleInputSpec];
+        syncSingleSkuRows(root, singleDraft);
         updateAddDraftTotals(root);
         if (event.type === 'change') {
           var desktopSinglePickerNode = target.closest('.order-add-spec-counter-row');
@@ -8433,10 +8848,7 @@
       }
       singleParsed = Math.max(-9999, Math.min(singleInputStock, singleParsed));
       target.value = singleParsed;
-      Object.keys(singleDraft.skuQty).forEach(function (key) {
-        if (key !== singleInputSpec) singleDraft.skuQty[key] = 0;
-      });
-      singleDraft.skuQty[singleInputSpec] = singleParsed;
+      setSingleSkuQuantity(singleDraft, singleInputSpec, singleParsed);
       updateAddDraftTotals(root);
       if (event.type === 'change') {
         var singlePickerNode = target.closest('.order-single-picker');
@@ -8449,7 +8861,7 @@
       }
       return;
     }
-    if (target.matches('[data-batch-qty]') && state.addDraft) {
+    if (target.matches('[data-batch-qty]') && state.addDraft && state.addDraft.mode === 'batch') {
       var batchSpec = decodeURIComponent(target.dataset.batchQty);
       var batchRaw = String(target.value || '').replace(/[^\d-]/g, '');
       var batchNegative = batchRaw.charAt(0) === '-' ? '-' : '';
@@ -8461,9 +8873,19 @@
       state.addDraft.batchRecordTouched = true;
       var batchSelection = state.addDraft.batchSelection;
       var batchScope = root.querySelector(isDesktopWorkbench() ? '.order-desktop-modal--add' : '.order-v2-modal--add') || root;
+      var editedPair = splitSpec(batchSpec);
+      // 键盘进入未选单元格时只编辑该 SKU；明确选择的行/列/全表仍批量填写。
+      if (!batchSelectionMatches(batchSelection, editedPair.color, editedPair.size)) {
+        batchSelection = { type: 'cell', value: batchSpec, color: editedPair.color, size: editedPair.size };
+        state.addDraft.batchSelection = batchSelection;
+        batchScope.querySelectorAll('.order-batch-matrix th.is-selected').forEach(function (cell) { cell.classList.remove('is-selected'); });
+        batchScope.querySelectorAll('[data-batch-qty]').forEach(function (input) {
+          input.closest('td').className = input === target ? 'is-selected is-range-top is-range-bottom is-range-left is-range-right' : '';
+        });
+      }
       state.addDraft.product.specs.forEach(function (spec) {
         var pair = splitSpec(spec);
-        if (!batchSelection || spec === batchSpec || batchSelectionMatches(batchSelection, pair.color, pair.size)) {
+        if (batchSelectionMatches(batchSelection, pair.color, pair.size)) {
           var nextQuantity = Math.min(batchQuantityLimit(state.addDraft.product, spec), batchQuantity);
           state.addDraft.skuQty[spec] = nextQuantity;
           var nextInput = batchScope.querySelector('[data-batch-qty="' + CSS.escape(encodeURIComponent(spec)) + '"]');
@@ -8514,9 +8936,10 @@
       else {
         var comboAmountMethodId = target.dataset.paymentAmount;
         state.paymentDraft[comboAmountMethodId] = normalizedAmount;
+        if (state.paymentDraft.kind === 'online') state.paymentDraft.onlineAmountTouched[comboAmountMethodId] = true;
         if (toCents(normalizedAmount) > 0) {
           if (state.paymentDraft.selectedMethods.indexOf(comboAmountMethodId) < 0) state.paymentDraft.selectedMethods.push(comboAmountMethodId);
-        } else {
+        } else if (state.paymentDraft.kind === 'online') {
           state.paymentDraft.selectedMethods = state.paymentDraft.selectedMethods.filter(function (id) { return id !== comboAmountMethodId; });
         }
       }
@@ -8763,22 +9186,7 @@
     root.addEventListener('focusin', function (event) {
       var target = event.target;
       if (target.matches('[data-payment-amount][data-online-combo-index]')) {
-        if (!state.paymentDraft || state.paymentDraft.mode !== 'combo' || state.paymentDraft.kind !== 'online') return;
-        var comboMethodId = target.dataset.paymentAmount;
-        if (Number(state.paymentDraft[comboMethodId] || 0) > 0) return;
-        var onlineComboFilled = selectedPaymentMethods(state.paymentDraft).filter(function (method) {
-          return method.id !== comboMethodId && Number(state.paymentDraft[method.id] || 0) > 0;
-        });
-        if (!onlineComboFilled.length) return;
-        var onlineComboTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
-        var onlineComboRemainingCents = Math.max(0, onlineComboTargetCents - paymentAllocatedCents(state.paymentDraft, comboMethodId));
-        if (onlineComboRemainingCents <= 0) return;
-        var onlineComboValue = compactAmount(onlineComboRemainingCents / 100);
-        state.paymentDraft[comboMethodId] = onlineComboValue;
-        if (state.paymentDraft.selectedMethods.indexOf(comboMethodId) < 0) state.paymentDraft.selectedMethods.push(comboMethodId);
-        state.paymentDraft.shortageHandling = null;
-        target.value = onlineComboValue;
-        refreshPaymentAmountsInPlace(root);
+        fillOnlinePaymentRemainder(target, root);
         return;
       }
       if (!target.matches('[data-split]')) return;
@@ -8839,6 +9247,28 @@
       markDirty(ctx);
     }, true);
     root.addEventListener('keydown', function (event) {
+      if (handlePaymentControlKeydown(event)) return;
+      if (event.key === 'Tab' && state.skuPriceDraft) {
+        var priceModal = root.querySelector('.order-sku-price-modal');
+        var priceControls = priceModal ? Array.from(priceModal.querySelectorAll('button:not([disabled]), input:not([disabled])')) : [];
+        if (priceControls.length) {
+          var firstPriceControl = priceControls[0];
+          var lastPriceControl = priceControls[priceControls.length - 1];
+          if (event.shiftKey && document.activeElement === firstPriceControl) {
+            event.preventDefault();
+            lastPriceControl.focus({ preventScroll: true });
+          } else if (!event.shiftKey && document.activeElement === lastPriceControl) {
+            event.preventDefault();
+            firstPriceControl.focus({ preventScroll: true });
+          }
+        }
+        return;
+      }
+      if (event.key === 'Escape' && state.skuPriceDraft) {
+        state.skuPriceDraft = null;
+        renderActive();
+        return;
+      }
       if (event.key === 'Escape' && state.refundImagePreviewIndex != null) {
         state.refundImagePreviewIndex = null;
         renderActive();
@@ -9094,7 +9524,7 @@
     routeId: 'workspace-order-success',
     title: '开单完成',
     presentation: { type: 'full-screen-modal', transition: 'slide-up-enter, slide-down-exit', coversTabBar: true },
-    template: '<div class="modal modal--frame order-success-v2 order-success-v2-mount" data-component-slug="modal" data-state="open" role="dialog" aria-modal="true" aria-labelledby="order-success-title" data-surface-id="workspace-order-success" data-route-id="workspace-order-success" data-layout-mode="composed"></div>',
+    template: '<div class="modal modal--frame order-success-v2 order-success-v2-mount" data-state="open" role="dialog" aria-modal="true" aria-labelledby="order-success-title" data-surface-id="workspace-order-success" data-route-id="workspace-order-success" data-layout-mode="composed"></div>',
     init: function (ctx) {
       var successRoot = ctx.root.querySelector('.order-success-v2-mount') || ctx.root;
       var autoCloseTimer = 0;
@@ -9110,6 +9540,7 @@
       }
 
       successRoot.innerHTML = successTemplate();
+      normalizeGongfengComponentContracts(successRoot);
       successRoot.querySelector('[data-new-order]')?.addEventListener('click', function () {
         closeSuccess();
       });

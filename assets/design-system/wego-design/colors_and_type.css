@@ -3,10 +3,9 @@
  * Source of truth for mobile, WeChat-ecosystem, ecommerce/tool UI.
  *
  * Architecture:
- * - palette-* exposes complete 10-step base color scales.
- * - bg/text/icon/border/status tokens are the public component API.
- * - body/heading/number tokens describe typography roles directly.
- * - No legacy compatibility layer is retained.
+ * - PDF / Kuikly names are the public color and font token API.
+ * - number tokens remain separate for WegoKeyboard N9 numeric typography.
+ * - No legacy semantic color/font token layer is retained.
  */
 
 /* WegoKeyboard N9 数字字体 */
@@ -33,306 +32,120 @@
 }
 
 :root {
-  /* palette-green */
-  --palette-green-100: #e5fff2;
-  --palette-green-200: #c8f7df;
-  --palette-green-300: #9bedc4;
-  --palette-green-400: #5cdaa0;
-  --palette-green-500: #03c160;
-  --palette-green-600: #00a854;
-  --palette-green-700: #02994d;
-  --palette-green-800: #027a3e;
-  --palette-green-900: #016b36;
-  --palette-green-1000: #004d26;
 
-  /* palette-neutral */
-  --palette-neutral-100: #ffffff;
-  --palette-neutral-200: #f8f9fa;
-  --palette-neutral-300: #f2f3f6;
-  --palette-neutral-400: #e9eaef;
-  --palette-neutral-500: #ededed;
-  --palette-neutral-600: #b7bec5;
-  --palette-neutral-700: #9097a3;
-  --palette-neutral-800: #6e7382;
-  --palette-neutral-900: #3f434c;
-  --palette-neutral-1000: #1e2028;
 
-  /* palette-red */
-  --palette-red-100: #fff0f0;
-  --palette-red-200: #ffd9d9;
-  --palette-red-300: #ffb8b8;
-  --palette-red-400: #ff8586;
-  --palette-red-500: #fa5051;
-  --palette-red-600: #e83b3c;
-  --palette-red-700: #c92c2d;
-  --palette-red-800: #a32122;
-  --palette-red-900: #7a1718;
-  --palette-red-1000: #4d0b0c;
 
-  /* palette-orange */
-  --palette-orange-100: #fff4e8;
-  --palette-orange-200: #ffe4c2;
-  --palette-orange-300: #ffc98a;
-  --palette-orange-400: #ffb05c;
-  --palette-orange-500: #fa9d3b;
-  --palette-orange-600: #e88721;
-  --palette-orange-700: #c96e13;
-  --palette-orange-800: #a6560d;
-  --palette-orange-900: #7a3d08;
-  --palette-orange-1000: #4d2303;
 
-  /* palette-blue */
-  --palette-blue-100: #eaf4ff;
-  --palette-blue-200: #cfe7ff;
-  --palette-blue-300: #9fd0ff;
-  --palette-blue-400: #64b2ff;
-  --palette-blue-500: #208bf1;
-  --palette-blue-600: #1478d4;
-  --palette-blue-700: #0b62b3;
-  --palette-blue-800: #084d8f;
-  --palette-blue-900: #063a6b;
-  --palette-blue-1000: #032542;
 
-  /* palette-yellow */
-  --palette-yellow-100: #fff9e5;
-  --palette-yellow-200: #fff0b8;
-  --palette-yellow-300: #ffe480;
-  --palette-yellow-400: #ffd84d;
-  --palette-yellow-500: #ffc300;
-  --palette-yellow-600: #e6ad00;
-  --palette-yellow-700: #bf8f00;
-  --palette-yellow-800: #997000;
-  --palette-yellow-900: #705000;
-  --palette-yellow-1000: #473100;
 
-  /* palette-purple */
-  --palette-purple-100: #f0f0ff;
-  --palette-purple-200: #dedfff;
-  --palette-purple-300: #c4c6ff;
-  --palette-purple-400: #9699ff;
-  --palette-purple-500: #6367f0;
-  --palette-purple-600: #5054d8;
-  --palette-purple-700: #3e42b8;
-  --palette-purple-800: #303394;
-  --palette-purple-900: #24266f;
-  --palette-purple-1000: #17184a;
 
-  /* palette-gold */
-  --palette-gold-100: #fff7ed;
-  --palette-gold-200: #f8e7ca;
-  --palette-gold-300: #ecd19e;
-  --palette-gold-400: #dbb872;
-  --palette-gold-500: #c79a56;
-  --palette-gold-600: #ad7f3c;
-  --palette-gold-700: #8f642c;
-  --palette-gold-800: #724b20;
-  --palette-gold-900: #553616;
-  --palette-gold-1000: #38220d;
 
-  /* bg */
-  --bg-page: var(--palette-neutral-500);
-  --bg-surface: var(--palette-neutral-100);
-  --bg-panel: #f6f6f6;
-  --bg-muted: var(--palette-neutral-300);
-  --bg-subtle: var(--palette-neutral-200);
-  --bg-active: var(--palette-neutral-400);
-  --bg-inverse: var(--palette-neutral-1000);
-  --bg-inverse-surface-disabled: rgba(255, 255, 255, 0.03);
-  --bg-inverse-surface-l1: rgba(255, 255, 255, 0.10);
-  --bg-inverse-control: rgba(255, 255, 255, 0.16);
-  --bg-inverse-control-disabled: rgba(255, 255, 255, 0.08);
-  --bg-fill-strong: var(--palette-neutral-600);
-  --bg-placeholder: var(--palette-neutral-300);
-  --bg-skeleton: var(--palette-neutral-300);
-  --bg-toast: rgba(63, 67, 71, 0.96);
-  --bg-accent-yellow: rgba(255, 195, 0, 0.10);
-
-  /* bg-brand */
-  --bg-brand: var(--palette-green-500);
-  --bg-brand-hover: rgba(3, 193, 96, 0.80);
-  --bg-brand-disabled: rgba(3, 193, 96, 0.60);
-  --bg-brand-surface-l1: rgba(3, 193, 96, 0.10);
-  --bg-brand-surface-l2: rgba(3, 193, 96, 0.20);
-
-  /* bg-control */
-  --bg-control-off: #e5e5ea;
-  --bg-control-disabled: rgba(32, 47, 100, 0.03);
-
-  /* bg-state */
-  --bg-state-hover: rgba(32, 47, 100, 0.03);
-  --bg-state-pressed: rgba(32, 47, 100, 0.06);
-  --bg-state-selected: rgba(32, 47, 100, 0.10);
-  --bg-state-disabled: var(--palette-neutral-300);
-
-  /* bg-overlay */
-  --bg-overlay-l1: rgba(32, 47, 100, 0.03);
-  --bg-overlay-l2: rgba(32, 47, 100, 0.06);
-  --bg-overlay-l3: rgba(32, 47, 100, 0.10);
-
-  /* bg-mask */
-  --bg-mask-light: rgba(30, 32, 40, 0.30);
-  --bg-mask-modal: rgba(30, 32, 40, 0.60);
-  --bg-mask-strong: rgba(30, 32, 40, 0.80);
-  --bg-mask-press: rgba(30, 32, 40, 0.30);
-
-  /* text */
-  --text-default: var(--palette-neutral-1000);
-  --text-secondary: var(--palette-neutral-800);
-  --text-tertiary: var(--palette-neutral-700);
-  --text-disabled: var(--palette-neutral-600);
-  --text-placeholder: var(--palette-neutral-600);
-  --text-inverse: var(--palette-neutral-100);
-  --text-inverse-secondary: rgba(255, 255, 255, 0.70);
-  --text-inverse-weak: rgba(255, 255, 255, 0.50);
-  --text-brand: var(--palette-green-500);
-  --text-link: #285b9a;
-  --text-promotion: var(--palette-red-500);
-  --text-promotion-strong: #ff3333;
-
-  /* icon */
-  --icon-default: var(--text-default);
-  --icon-secondary: var(--text-secondary);
-  --icon-tertiary: var(--text-tertiary);
-  --icon-disabled: var(--text-disabled);
-  --icon-brand: var(--text-brand);
-  --icon-inverse: var(--text-inverse);
-  --icon-inverse-disabled: rgba(255, 255, 255, 0.18);
-
-  /* border */
-  --border-neutral-l1: rgba(32, 47, 100, 0.03);
-  --border-neutral-l2: rgba(32, 47, 100, 0.08);
-  --border-neutral-l3: rgba(32, 47, 100, 0.10);
-  --border-brand: var(--palette-green-500);
-  --border-danger: rgba(250, 80, 81, 0.20);
-  --border-info: rgba(32, 139, 241, 0.20);
-  --border-success: rgba(3, 193, 96, 0.20);
-  --border-warning: rgba(250, 157, 59, 0.20);
-  --border-promotion: rgba(255, 96, 69, 0.20);
-  --border-promotion-strong: rgba(250, 80, 81, 0.60);
-  --border-control: rgba(0, 0, 0, 0.15);
-  --border-control-disabled: rgba(0, 0, 0, 0.12);
-  --border-disabled: rgba(32, 47, 100, 0.06);
-  --border-inverse: rgba(255, 255, 255, 0.70);
-  --border-inverse-weak: rgba(255, 255, 255, 0.12);
-  --border-toast: rgba(255, 255, 255, 0.4);
-
-  /* status-success */
-  --status-success-default: #03c160;
-  --status-success-hover: rgba(3, 193, 96, 0.80);
-  --status-success-active: rgba(3, 193, 96, 0.60);
-  --status-success-surface-l1: rgba(3, 193, 96, 0.10);
-  --status-success-surface-l2: rgba(3, 193, 96, 0.20);
-  --status-success-surface-l3: rgba(3, 193, 96, 0.28);
-
-  /* status-warning */
-  --status-warning-default: #fa9d3b;
-  --status-warning-hover: rgba(250, 157, 59, 0.80);
-  --status-warning-active: rgba(250, 157, 59, 0.60);
-  --status-warning-surface-l1: rgba(250, 157, 59, 0.10);
-  --status-warning-surface-l2: rgba(250, 157, 59, 0.20);
-  --status-warning-surface-l3: rgba(250, 157, 59, 0.28);
-
-  /* status-danger */
-  --status-danger-default: #fa5051;
-  --status-danger-hover: rgba(250, 80, 81, 0.80);
-  --status-danger-active: rgba(250, 80, 81, 0.60);
-  --status-danger-surface-l1: rgba(250, 80, 81, 0.10);
-  --status-danger-surface-l2: rgba(250, 80, 81, 0.20);
-  --status-danger-surface-l3: rgba(250, 80, 81, 0.28);
-
-  /* status-info */
-  --status-info-default: #208bf1;
-  --status-info-hover: rgba(32, 139, 241, 0.80);
-  --status-info-active: rgba(32, 139, 241, 0.60);
-  --status-info-surface-l1: rgba(32, 139, 241, 0.10);
-  --status-info-surface-l2: rgba(32, 139, 241, 0.20);
-  --status-info-surface-l3: rgba(32, 139, 241, 0.28);
-
-  /* status-promotion */
-  --status-promotion-default: #ff6045;
-  --status-promotion-hover: rgba(255, 96, 69, 0.80);
-  --status-promotion-active: rgba(255, 96, 69, 0.60);
-  --status-promotion-surface-l1: rgba(255, 96, 69, 0.10);
-  --status-promotion-surface-l2: rgba(255, 96, 69, 0.20);
-  --status-promotion-surface-l3: rgba(255, 96, 69, 0.28);
-
-  /* accent */
-  --accent-yellow: var(--palette-yellow-500);
-  --accent-green: #00c777;
-  --accent-purple: var(--palette-purple-500);
-  --accent-gold: var(--palette-gold-500);
-
-  /* special */
+  /* PDF / Kuikly color tokens */
+  --text_100: #1e2028;
+  --text_80: #6e7382;
+  --text_30: #b7bec5;
+  --bg_line_08: rgba(32, 47, 100, 0.08);
+  --bg_100: #ededed;
+  --bg_white_100: #ffffff;
+  --bg_white_40: rgba(255, 255, 255, 0.40);
+  --bg_white_10: rgba(255, 255, 255, 0.10);
+  --bg_gray_03: rgba(32, 47, 100, 0.03);
+  --bg_gray_06: rgba(32, 47, 100, 0.06);
+  --bg_gray_10: rgba(32, 47, 100, 0.10);
+  --bg_gray_36: rgba(12, 33, 63, 0.36);
+  --bg_gray_03_pack: #f8f9fa;
+  --bg_gray_06_pack: #f2f3f6;
+  --bg_gray_10_pack: #e9eaef;
+  --bg_bar_80: rgba(246, 246, 246, 0.80);
+  --bg_bar_100: #f6f6f6;
+  --bg_toast_96: rgba(63, 67, 71, 0.96);
+  --bg_modal_20: rgba(30, 32, 40, 0.20);
+  --bg_modal_30: rgba(30, 32, 40, 0.30);
+  --bg_modal_40: rgba(30, 32, 40, 0.40);
+  --bg_modal_60: rgba(30, 32, 40, 0.60);
+  --bg_modal_80: rgba(30, 32, 40, 0.80);
+  --bg_shadow_04: rgba(30, 32, 40, 0.04);
+  --bg_shadow_08: rgba(30, 32, 40, 0.08);
+  --text_link_100: #285b9a;
+  --green_1_100: #03c160;
+  --green_1_80: rgba(3, 193, 96, 0.80);
+  --green_1_60: rgba(3, 193, 96, 0.60);
+  --green_1_20: rgba(3, 193, 96, 0.20);
+  --green_1_10: rgba(3, 193, 96, 0.10);
+  --yellow_1_100: #fa9d3b;
+  --yellow_1_80: rgba(250, 157, 59, 0.80);
+  --yellow_1_60: rgba(250, 157, 59, 0.60);
+  --yellow_1_20: rgba(250, 157, 59, 0.20);
+  --yellow_1_10: rgba(250, 157, 59, 0.10);
+  --red_100: #fa5051;
+  --red_80: rgba(250, 80, 81, 0.80);
+  --red_60: rgba(250, 80, 81, 0.60);
+  --red_20: rgba(250, 80, 81, 0.20);
+  --red_10: rgba(250, 80, 81, 0.10);
+  --orange_100: #ff6045;
+  --orange_80: rgba(255, 96, 69, 0.80);
+  --orange_60: rgba(255, 96, 69, 0.60);
+  --orange_20: rgba(255, 96, 69, 0.20);
+  --orange_10: rgba(255, 96, 69, 0.10);
+  --yellow_2_100: #ffc300;
+  --yellow_2_80: rgba(255, 195, 0, 0.80);
+  --yellow_2_60: rgba(255, 195, 0, 0.60);
+  --yellow_2_20: rgba(255, 195, 0, 0.20);
+  --yellow_2_10: rgba(255, 195, 0, 0.10);
+  --green_2_100: #00c777;
+  --green_2_80: rgba(0, 199, 119, 0.80);
+  --green_2_60: rgba(0, 199, 119, 0.60);
+  --green_2_20: rgba(0, 199, 119, 0.20);
+  --green_2_10: rgba(0, 199, 119, 0.10);
+  --blue_100: #208bf1;
+  --blue_80: rgba(32, 139, 241, 0.80);
+  --blue_60: rgba(32, 139, 241, 0.60);
+  --blue_20: rgba(32, 139, 241, 0.20);
+  --blue_10: rgba(32, 139, 241, 0.10);
+  --purple_100: #6367f0;
+  --purple_80: rgba(99, 103, 240, 0.80);
+  --purple_60: rgba(99, 103, 240, 0.60);
+  --purple_20: rgba(99, 103, 240, 0.20);
+  --purple_10: rgba(99, 103, 240, 0.10);
+  --gold_100: #c79a56;
+  --gold_80: rgba(199, 154, 86, 0.80);
+  --gold_60: rgba(199, 154, 86, 0.60);
+  --gold_20: rgba(199, 154, 86, 0.20);
+  --gold_10: rgba(199, 154, 86, 0.10);
   --transparent: transparent;
 
-  /* font-family */
-  --font-family-system: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  /* PDF / Kuikly font tokens */
+  --Font22-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font22-font-size: 22px;
+  --Font22-normal-font-weight: 400;
+  --Font22-medium-font-weight: 500;
+  --Font22-line-height: 33px;
+  --Font18-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font18-font-size: 18px;
+  --Font18-normal-font-weight: 400;
+  --Font18-medium-font-weight: 500;
+  --Font18-line-height: 27px;
+  --Font16-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font16-font-size: 16px;
+  --Font16-normal-font-weight: 400;
+  --Font16-medium-font-weight: 500;
+  --Font16-line-height: 24px;
+  --Font14-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font14-font-size: 14px;
+  --Font14-normal-font-weight: 400;
+  --Font14-medium-font-weight: 500;
+  --Font14-line-height: 21px;
+  --Font12-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font12-font-size: 12px;
+  --Font12-normal-font-weight: 400;
+  --Font12-medium-font-weight: 500;
+  --Font12-line-height: 18px;
+  --Font10-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font10-font-size: 10px;
+  --Font10-normal-font-weight: 400;
+  --Font10-medium-font-weight: 500;
+  --Font10-line-height: 14px;
   --font-family-icon: "wego-iconfont-s", sans-serif;
-
-  /* font-weight */
-  --font-weight-regular: 400;
-  --font-weight-medium: 500;
-  --font-weight-semibold: 600;
-
-  /* body */
-  --body-xs-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-xs-font-size: 10px;
-  --body-xs-font-weight: 400;
-  --body-xs-line-height: 14px;
-  --body-xs-strong-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-xs-strong-font-size: 10px;
-  --body-xs-strong-font-weight: 500;
-  --body-xs-strong-line-height: 14px;
-  --body-sm-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-sm-font-size: 12px;
-  --body-sm-font-weight: 400;
-  --body-sm-line-height: 18px;
-  --body-sm-strong-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-sm-strong-font-size: 12px;
-  --body-sm-strong-font-weight: 500;
-  --body-sm-strong-line-height: 18px;
-  --body-md-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-md-font-size: 14px;
-  --body-md-font-weight: 400;
-  --body-md-line-height: 22px;
-  --body-md-strong-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-md-strong-font-size: 14px;
-  --body-md-strong-font-weight: 500;
-  --body-md-strong-line-height: 22px;
-  --body-lg-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-lg-font-size: 16px;
-  --body-lg-font-weight: 400;
-  --body-lg-line-height: 24px;
-  --body-lg-strong-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-lg-strong-font-size: 16px;
-  --body-lg-strong-font-weight: 500;
-  --body-lg-strong-line-height: 24px;
-  --body-xl-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-xl-font-size: 18px;
-  --body-xl-font-weight: 400;
-  --body-xl-line-height: 26px;
-  --body-xl-strong-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --body-xl-strong-font-size: 18px;
-  --body-xl-strong-font-weight: 500;
-  --body-xl-strong-line-height: 26px;
-
-  /* heading */
-  --heading-xs-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --heading-xs-font-size: 16px;
-  --heading-xs-font-weight: 600;
-  --heading-xs-line-height: 24px;
-  --heading-sm-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --heading-sm-font-size: 18px;
-  --heading-sm-font-weight: 600;
-  --heading-sm-line-height: 28px;
-  --heading-md-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --heading-md-font-size: 22px;
-  --heading-md-font-weight: 600;
-  --heading-md-line-height: 32px;
-  --heading-lg-font-family: "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
-  --heading-lg-font-size: 24px;
-  --heading-lg-font-weight: 600;
-  --heading-lg-line-height: 34px;
 
   /* number */
   --number-sm-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -513,8 +326,8 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--bg-page);
-  font-family: var(--font-family-system);
+  background: var(--bg_100);
+  font-family: var(--Font14-font-family);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
