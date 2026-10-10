@@ -570,10 +570,14 @@
     freight: 0,
     rounding: 0,
     roundingMode: null,
+    orderPromotion: null,
+    orderPromotionDraft: null,
+    orderPromotionFreightBase: null,
     freightEditOpen: false,
     totalEditOpen: false,
     orderTotalAdjustment: 0,
     memberDiscount: 100,
+    memberDiscountChoice: '',
     couponCount: 0,
     couponDiscount: 0,
     pointsUsed: 0,
@@ -1026,64 +1030,43 @@
 
   function totals() {
     var quantitySummary = quantityBreakdown(state.products);
-    var productAmount = state.products.reduce(function (sum, item) {
+    var finalProductAmount = Math.round(state.products.reduce(function (sum, item) {
       return sum + itemAmount(item);
-    }, 0);
-    var effectiveMemberRate = Number(state.memberDiscount || 100) / 100;
-    var memberDiscountAmount = 0;
-    var memberAmount = state.products.reduce(function (sum, item) {
-      if (item.manualPrice) return sum + itemAmount(item);
-      memberDiscountAmount += (item.listPrice - item.listPrice * effectiveMemberRate) * item.qty;
-      return sum + item.listPrice * effectiveMemberRate * item.qty;
-    }, 0);
-    var discountMode = state.discountMode;
-    var discountValue = Math.max(0, Number(state.discountValue || 0));
-    var discountAmount = discountMode === 'item-rate' || discountMode === 'order-rate'
-      ? memberAmount * (100 - Math.min(discountValue, 100)) / 100
-      : discountMode === 'item-amount'
-        ? state.products.reduce(function (sum, item) { return sum + item.qty; }, 0) * discountValue
-        : discountMode === 'order-amount'
-          ? discountValue
-          : memberAmount * (100 - state.discount) / 100;
-    discountAmount = memberAmount > 0 ? Math.min(Math.max(discountAmount, 0), memberAmount) : 0;
-    var pointsAmount = memberAmount > 0 ? Number(state.pointsUsed || 0) / 100 : 0;
-    var couponAmount = memberAmount > 0 ? Number(state.couponDiscount || 0) : 0;
-    var promotionAmount = memberAmount > 0 && Number(state.promotionThreshold || 0) > 0 && memberAmount < Number(state.promotionThreshold)
-      ? 0
-      : memberAmount > 0 ? Number(state.promotionDiscount || 0) : 0;
+    }, 0) * 100) / 100;
+    var productAmount = Math.round(state.products.reduce(function (sum, item) {
+      return sum + itemOriginalAmount(item);
+    }, 0) * 100) / 100;
+    var totalDiscount = Math.round((productAmount - finalProductAmount) * 100) / 100;
+    var promotionDiscountAmount = Math.round(state.products.reduce(function (sum, item) {
+      return sum + Object.keys(item.skuPriceDetails || {}).reduce(function (skuSum, spec) {
+        var detail = item.skuPriceDetails[spec];
+        var qty = isSkuMode(item.mode) ? Number(item.skuQty[spec] || 0) : Number(item.qty || 0);
+        return skuSum + (detail.discountType ? (Number(detail.basePrice) - Number(detail.finallyPrice)) * qty : 0);
+      }, 0);
+    }, 0) * 100) / 100;
+    var productDiscountAmount = Math.round((totalDiscount - promotionDiscountAmount) * 100) / 100;
+    var memberDiscountAmount = state.orderPromotion && state.orderPromotion.type === 'member' ? promotionDiscountAmount : 0;
+    var discountAmount = state.orderPromotion && (state.orderPromotion.type === 'orderRate' || state.orderPromotion.type === 'orderAmount' || state.orderPromotion.type === 'total') ? promotionDiscountAmount : 0;
+    var roundingAmount = state.orderPromotion && state.orderPromotion.type === 'rounding' ? promotionDiscountAmount : 0;
     var freight = Number(state.freight || 0);
     var freightIncluded = state.delivery === 'express' || state.delivery === 'freight';
-    var payableBeforeRounding = memberAmount - discountAmount - pointsAmount - couponAmount - promotionAmount + (freightIncluded ? freight : 0);
-    var roundingTarget = payableBeforeRounding <= 0
-      ? null
-      : state.roundingMode === 'integer'
-      ? Math.floor(payableBeforeRounding)
-      : state.roundingMode === 'ones'
-        ? Math.floor(payableBeforeRounding / 10) * 10
-        : state.roundingMode === 'tens'
-          ? Math.floor(payableBeforeRounding / 100) * 100
-          : null;
-    var roundingAmount = payableBeforeRounding <= 0
-      ? 0
-      : roundingTarget == null
-      ? Math.min(Math.max(Number(state.rounding || 0), 0), payableBeforeRounding)
-      : Math.max(0, Math.round((payableBeforeRounding - roundingTarget) * 100) / 100);
-    var calculatedPayable = Math.round((payableBeforeRounding - roundingAmount) * 100) / 100;
-    var orderTotalAdjustment = Math.round(Number(state.orderTotalAdjustment || 0) * 100) / 100;
-    var payable = Math.round((calculatedPayable + orderTotalAdjustment) * 100) / 100;
+    var payable = Math.round((finalProductAmount + (freightIncluded ? freight : 0)) * 100) / 100;
     return {
       productAmount: productAmount,
-      memberAmount: memberAmount,
+      finalProductAmount: finalProductAmount,
+      memberAmount: finalProductAmount,
       memberDiscountAmount: memberDiscountAmount,
       discountAmount: discountAmount,
-      pointsAmount: pointsAmount,
-      couponAmount: couponAmount,
-      promotionAmount: promotionAmount,
+      productDiscountAmount: productDiscountAmount,
+      promotionDiscountAmount: promotionDiscountAmount,
+      pointsAmount: 0,
+      couponAmount: 0,
+      promotionAmount: 0,
       roundingAmount: roundingAmount,
-      totalDiscount: memberDiscountAmount + discountAmount + pointsAmount + couponAmount + promotionAmount + roundingAmount,
+      totalDiscount: totalDiscount,
       freight: freight,
-      calculatedPayable: calculatedPayable,
-      orderTotalAdjustment: orderTotalAdjustment,
+      calculatedPayable: payable,
+      orderTotalAdjustment: 0,
       payable: payable,
       pieces: state.products.reduce(function (sum, item) { return sum + item.qty; }, 0),
       salesPieces: quantitySummary.sales,
@@ -1101,8 +1084,12 @@
   }
 
   function customerPrice(product) {
-    var factor = Number(state.memberDiscount || 100) / 100;
-    return Number((product.listPrice * factor).toFixed(2));
+    // A newly added SKU does not inherit a previously applied order discount.
+    return Number(product.listPrice || 0);
+  }
+
+  function memberPrice(originalPrice) {
+    return Math.round(toCents(originalPrice) * Number(state.memberDiscount || 100) / 100) / 100;
   }
 
   function productCostPrice(product) {
@@ -1120,6 +1107,7 @@
   }
 
   function addDraftSkuBasePrice(draft, spec) {
+    if (draft.priceMode === 'member' && spec) return memberPrice(skuRowDetail(draft.product, spec).price);
     if (!draft.useSkuPrices || draft.priceMode !== 'retail' || !spec) return addDraftUnitPrice(draft);
     return skuRowDisplayPrice(skuRowDetail(draft.product, spec));
   }
@@ -1137,26 +1125,205 @@
   }
 
   function itemSkuPrice(item, spec) {
+    if (item.skuPriceDetails && item.skuPriceDetails[spec] && item.skuPriceDetails[spec].finallyPrice != null) {
+      return Number(item.skuPriceDetails[spec].finallyPrice);
+    }
     return item.skuPrices && item.skuPrices[spec] != null ? Number(item.skuPrices[spec]) : Number(item.price);
   }
 
+  function itemSkuOriginalPrice(item, spec) {
+    var detail = item.skuPriceDetails && item.skuPriceDetails[spec];
+    return detail && detail.basePrice != null ? Number(detail.basePrice) : itemSkuPrice(item, spec);
+  }
+
+  function itemOriginalAmount(item) {
+    if (!isSkuMode(item.mode)) return itemSkuOriginalPrice(item, '') * Number(item.qty || 0);
+    return Math.round(Object.keys(item.skuQty || {}).reduce(function (sum, spec) {
+      return sum + Number(item.skuQty[spec] || 0) * itemSkuOriginalPrice(item, spec);
+    }, 0) * 100) / 100;
+  }
+
   function itemAmount(item) {
-    if (!item.skuPrices || !isSkuMode(item.mode)) return item.price * item.qty;
+    if (!isSkuMode(item.mode)) return itemSkuPrice(item, '') * item.qty;
     return Math.round(Object.keys(item.skuQty || {}).reduce(function (sum, spec) {
       return sum + Number(item.skuQty[spec] || 0) * itemSkuPrice(item, spec);
     }, 0) * 100) / 100;
   }
 
   function recalculateCustomerPrices() {
-    state.products.forEach(function (item) {
-      if (!item.manualPrice) item.price = customerPrice(item);
-    });
+    // Order prices are written per SKU by the selected order promotion. Repricing
+    // the product-level fallback here would silently stack a member discount.
   }
 
   function applyCustomer(customer) {
     state.customer = customer || null;
     state.memberDiscount = state.customer && state.customer.factor ? Math.round(state.customer.factor * 10000) / 100 : 100;
-    recalculateCustomerPrices();
+    if (state.customer && state.memberDiscount < 100 && hasMemberPriceSku()) {
+      applyOrderPromotion('member', 'member-rate', state.memberDiscount);
+      state.memberDiscountChoice = 'use';
+    } else {
+      if (state.orderPromotion && state.orderPromotion.type === 'member') clearOrderPromotion();
+      state.memberDiscountChoice = state.customer && state.memberDiscount >= 100 ? 'none' : '';
+    }
+  }
+
+  function orderHasReturnSku() {
+    return quantityBreakdown(state.products).returns > 0;
+  }
+
+  function orderPriceEntries() {
+    var entries = [];
+    state.products.forEach(function (item) {
+      var specs = isSkuMode(item.mode) ? Object.keys(item.skuQty || {}) : [''];
+      specs.forEach(function (spec) {
+        var qty = isSkuMode(item.mode) ? Number(item.skuQty[spec] || 0) : Number(item.qty || 0);
+        if (!qty) return;
+        entries.push({ item: item, spec: spec, qty: qty, originalCents: toCents(itemSkuOriginalPrice(item, spec)) });
+      });
+    });
+    return entries;
+  }
+
+  function hasMemberPriceSku() {
+    return orderPriceEntries().some(function (entry) { return entry.item.priceMode === 'member' || entry.item.memberPromotionApplied; });
+  }
+
+  function hasActiveMemberPriceSku() {
+    return orderPriceEntries().some(function (entry) {
+      var detail = entry.item.skuPriceDetails && entry.item.skuPriceDetails[entry.spec];
+      return detail && detail.discountType === 'member-rate';
+    });
+  }
+
+  function hasActiveOrderPromotionSku() {
+    if (!state.orderPromotion) return false;
+    var promotion = state.orderPromotion;
+    var discountType = promotion.type === 'total' ? 'whole-order-fixed' : promotion.mode || promotion.type;
+    return orderPriceEntries().some(function (entry) {
+      var detail = entry.item.skuPriceDetails && entry.item.skuPriceDetails[entry.spec];
+      return detail && detail.discountType === discountType;
+    });
+  }
+
+  function orderPromotionCalculation(type, mode, value, memberApplyAll) {
+    var entries = orderPriceEntries();
+    var originalProductCents = entries.reduce(function (sum, entry) { return sum + entry.originalCents * entry.qty; }, 0);
+    var includesFreight = state.delivery === 'express' || state.delivery === 'freight';
+    var freightCents = includesFreight ? toCents(state.orderPromotionFreightBase == null ? state.freight : state.orderPromotionFreightBase) : 0;
+    var targetTotalCents = originalProductCents + freightCents;
+    var targetProductCents = originalProductCents;
+    var nextFreightCents = freightCents;
+    var perSku = type === 'member' || (type === 'orderRate' && mode === 'item-rate') || (type === 'orderAmount' && mode === 'item-amount');
+    if (type === 'orderRate' && mode === 'order-rate') targetTotalCents = Math.round(originalProductCents * value / 100) + freightCents;
+    if (type === 'orderAmount' && mode === 'order-amount') targetTotalCents = Math.max(0, targetTotalCents - toCents(value));
+    if (type === 'total') targetTotalCents = toCents(value);
+    if (type === 'rounding') {
+      var unit = mode === 'ones' ? 1000 : 100;
+      targetTotalCents = Math.floor(targetTotalCents / unit) * unit;
+    }
+    if (!perSku) {
+      nextFreightCents = Math.min(freightCents, Math.max(0, targetTotalCents));
+      targetProductCents = Math.max(0, targetTotalCents - nextFreightCents);
+    }
+    var priced = entries.map(function (entry) {
+      var cents = entry.originalCents;
+      if ((type === 'member' && (memberApplyAll || entry.item.priceMode === 'member' || entry.item.memberPromotionApplied)) || (type === 'orderRate' && mode === 'item-rate')) {
+        cents = Math.round(entry.originalCents * value / 100);
+      } else if (type === 'orderAmount' && mode === 'item-amount') {
+        cents = Math.max(0, entry.originalCents - toCents(value));
+      } else if (!perSku && originalProductCents > 0) {
+        cents = Math.round(targetProductCents * entry.originalCents / originalProductCents);
+      } else if (!perSku) {
+        cents = 0;
+      }
+      return { item: entry.item, spec: entry.spec, qty: entry.qty, originalCents: entry.originalCents, finallyCents: cents };
+    });
+    var actualProductCents = priced.reduce(function (sum, entry) { return sum + entry.finallyCents * entry.qty; }, 0);
+    return {
+      entries: priced,
+      originalCents: originalProductCents + freightCents,
+      actualCents: actualProductCents + nextFreightCents,
+      freightCents: nextFreightCents,
+      valid: perSku || targetProductCents <= 0 || originalProductCents > 0
+    };
+  }
+
+  function clearOrderPromotion() {
+    state.products.forEach(function (item) {
+      delete item.memberPromotionApplied;
+      Object.keys(item.skuPriceDetails || {}).forEach(function (spec) {
+        var detail = item.skuPriceDetails[spec];
+        detail.price = detail.basePrice;
+        detail.finallyPrice = detail.basePrice;
+        detail.discountType = null;
+        detail.discountValue = null;
+        if (item.skuPrices) item.skuPrices[spec] = detail.basePrice;
+        if (!isSkuMode(item.mode)) item.price = detail.basePrice;
+        if (item.createdType === 'temporary') {
+          item.price = detail.basePrice;
+          item.listPrice = detail.basePrice;
+        }
+      });
+    });
+    if (state.orderPromotionFreightBase != null) state.freight = state.orderPromotionFreightBase;
+    state.orderPromotionFreightBase = null;
+    state.orderPromotion = null;
+    state.discount = 100;
+    state.discountMode = null;
+    state.discountValue = 0;
+    state.rounding = 0;
+    state.roundingMode = null;
+    state.orderTotalAdjustment = 0;
+  }
+
+  function applyOrderPromotion(type, mode, value, memberApplyAll) {
+    var calculation = orderPromotionCalculation(type, mode, value, memberApplyAll);
+    if (!calculation.valid) return false;
+    state.products.forEach(function (item) {
+      if (type !== 'member') delete item.memberPromotionApplied;
+      else if (memberApplyAll) item.memberPromotionApplied = true;
+      Object.keys(item.skuPriceDetails || {}).forEach(function (spec) {
+        var detail = item.skuPriceDetails[spec];
+        detail.finallyPrice = detail.basePrice;
+        detail.discountType = null;
+        detail.discountValue = null;
+        if (item.skuPrices) item.skuPrices[spec] = detail.basePrice;
+      });
+    });
+    calculation.entries.forEach(function (entry) {
+      var item = entry.item;
+      if (!item.skuPriceDetails) item.skuPriceDetails = {};
+      var detail = item.skuPriceDetails[entry.spec];
+      if (!detail) {
+        detail = { price: entry.originalCents / 100, basePrice: entry.originalCents / 100, priceRecords: [] };
+        item.skuPriceDetails[entry.spec] = detail;
+      }
+      var nextPrice = entry.finallyCents / 100;
+      detail.finallyPrice = nextPrice;
+      var memberPriceApplied = type !== 'member' || item.priceMode === 'member' || item.memberPromotionApplied;
+      detail.discountType = memberPriceApplied ? (type === 'total' ? 'whole-order-fixed' : mode || type) : null;
+      detail.discountValue = memberPriceApplied ? value : null;
+      if (memberPriceApplied) detail.priceRecords.push({ type: detail.discountType, value: value, originalPrice: entry.originalCents / 100, finallyPrice: nextPrice });
+      if (item.createdType === 'temporary') {
+        detail.price = nextPrice;
+        item.price = nextPrice;
+        item.listPrice = nextPrice;
+      }
+      if (!item.skuPrices) item.skuPrices = {};
+      item.skuPrices[entry.spec] = nextPrice;
+      if (!isSkuMode(item.mode)) item.price = nextPrice;
+    });
+    if (state.delivery === 'express' || state.delivery === 'freight') {
+      if (state.orderPromotionFreightBase == null) state.orderPromotionFreightBase = Number(state.freight || 0);
+      state.freight = calculation.freightCents / 100;
+    }
+    state.orderPromotion = { type: type, mode: mode, value: value };
+    if (type !== 'member') state.memberDiscountChoice = '';
+    state.discountMode = type === 'orderRate' || type === 'orderAmount' ? mode : null;
+    state.discountValue = type === 'orderRate' || type === 'orderAmount' ? value : 0;
+    state.roundingMode = type === 'rounding' ? mode : null;
+    state.orderTotalAdjustment = 0;
+    return true;
   }
 
   function applyDeliveryPreference(preference) {
@@ -1922,6 +2089,16 @@
     return quantitySummaryHtml(quantityBreakdown([item]));
   }
 
+  function desktopSkuUnitPrice(item, itemIndex, spec) {
+    var current = itemSkuPrice(item, spec);
+    var original = itemSkuOriginalPrice(item, spec);
+    var showOriginal = item.createdType !== 'temporary' && Math.abs(current - original) >= 0.005;
+    return '<span class="order-desktop-sku-price">'
+      + '<button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-order-sku-price="' + itemIndex + '" data-order-sku-spec="' + encodeURIComponent(spec) + '" aria-label="修改' + escapeHtml(spec || item.name) + '单价 ' + money(current) + '">' + money(current) + '</button>'
+      + (showOriginal ? '<del class="order-desktop-sku-price__original">' + money(original) + '</del>' : '')
+      + '</span>';
+  }
+
   function desktopProductRow(item, itemIndex, row, grouped) {
     var specs = itemSpecRows(item);
     if (grouped) {
@@ -1930,7 +2107,7 @@
         return '<span class="order-desktop-grouped-sku-line" title="' + escapeHtml(entry.spec) + '">' + escapeHtml(entry.spec) + '</span>';
       }).join('');
       var groupedPrices = specs.map(function (entry) {
-        return '<span class="order-desktop-grouped-sku-line"><button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-price="' + itemIndex + '">' + money(itemSkuPrice(item, entry.spec)) + '</button></span>';
+        return '<span class="order-desktop-grouped-sku-line">' + desktopSkuUnitPrice(item, itemIndex, entry.spec) + '</span>';
       }).join('');
       var groupedQuantities = specs.map(function (entry) {
         return '<span class="order-desktop-grouped-sku-line">' + desktopQuantityCounter(itemIndex, entry.qty, entry.spec, '库存' + entry.stock) + '</span>';
@@ -1958,7 +2135,7 @@
       +   desktopProductName(item)
       +   clickableImage(item, 'order-desktop-product-image', 'data-preview-image="' + itemIndex + '"')
       +   '<span class="order-desktop-product-spec" title="' + escapeHtml(specText) + '">' + escapeHtml(specText) + '</span>'
-      +   '<button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-price="' + itemIndex + '">' + money(itemSkuPrice(item, specKey)) + '</button>'
+      +   desktopSkuUnitPrice(item, itemIndex, specKey)
       +   '<div class="order-desktop-product-qty">' + desktopQuantityCounter(itemIndex, qty, specKey, hint) + '</div>'
       +   '<strong class="order-desktop-product-total"><span class="order-desktop-product-total__value' + (itemSkuPrice(item, specKey) * qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(itemSkuPrice(item, specKey) * qty) + '</span></strong>'
       +   desktopProductNote(item, itemIndex)
@@ -2104,16 +2281,16 @@
   function freightEditModal() {
     if (!state.freightEditOpen) return '';
     return ''
-      + '<div class="order-note-modal order-freight-edit-modal" role="dialog" aria-modal="true" aria-label="设置运费" data-state="open">'
-      +   '<div class="order-note-modal__panel">'
-      +     '<div class="order-note-modal__head"><strong>设置运费</strong></div>'
-      +     '<div class="order-note-modal__body">'
-      +       '<div class="input-group input-group--surface-white"><label class="field-label" for="freight-edit-value">运费</label><div class="input number-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)"><input class="number-input__field" id="freight-edit-value" type="text" inputmode="decimal" value="' + escapeHtml(String(state.freight || '')) + '" placeholder="请输入运费金额" data-freight-edit-value><span class="number-input__suffix">元</span></div></div>'
+      + '<div class="order-sku-price-modal order-promotion-modal order-promotion-modal--total order-freight-edit-modal" role="dialog" aria-modal="true" aria-labelledby="freight-edit-title" data-state="open">'
+      +   '<div class="order-sku-price-modal__panel">'
+      +     '<header class="order-sku-price-modal__head"><strong id="freight-edit-title">设置运费</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-freight-edit-cancel aria-label="关闭设置运费"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +     '<div class="order-sku-price-modal__body">'
+      +       '<label class="order-sku-price-field"><span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" id="freight-edit-value" type="text" inputmode="decimal" value="' + escapeHtml(String(state.freight || '')) + '" placeholder="请输入运费金额" aria-label="运费金额" data-freight-edit-value><span class="number-input__suffix">元</span></span></label>'
       +     '</div>'
-      +     '<div class="order-note-modal__actions">'
+      +     '<footer class="order-sku-price-modal__footer">'
       +       button('取消', 'weak', 'md', 'data-freight-edit-cancel')
-      +       button('确定', 'strong', 'md', 'data-freight-edit-confirm')
-      +     '</div>'
+      +       button('确认', 'strong', 'md', 'data-freight-edit-confirm')
+      +     '</footer>'
       +   '</div>'
       + '</div>';
   }
@@ -3113,24 +3290,20 @@
   }
 
   function discountDetailText(t) {
-    return [
-      ['会员优惠', t.memberDiscountAmount],
-      ['积分抵扣', t.pointsAmount],
-      ['优惠券', t.couponAmount],
-      ['满减优惠', t.promotionAmount],
-      ['整单优惠', t.discountAmount],
-      ['抹零', t.roundingAmount]
-    ].filter(function (item) {
-      return item[1] > 0;
-    }).map(function (item) {
-      var amount = (Math.round(item[1] * 100) / 100).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
-      return item[0] + amount + '元';
-    }).join('，');
+    if (t.totalDiscount === 0) return '';
+    var name = state.orderPromotion ? ({ member: '会员折扣', orderRate: '整单折扣', orderAmount: '整单优惠', rounding: '整单抹零', total: '整单改价' })[state.orderPromotion.type] : '商品优惠';
+    var details = [];
+    if (t.productDiscountAmount !== 0) details.push('商品优惠' + compactNumber(t.productDiscountAmount) + '元');
+    if (t.promotionDiscountAmount !== 0) details.push(name + compactNumber(t.promotionDiscountAmount) + '元');
+    return details.join('，');
+  }
+
+  function discountDisplayAmount(amount) {
+    return amount > 0 ? '-' + money(amount) : amount < 0 ? '+' + money(-amount) : money(0);
   }
 
   function desktopSummaryDetails() {
     var t = totals();
-    var deduction = function (amount) { return amount > 0 ? '-' + money(amount) : money(0); };
     var discountText = discountDetailText(t);
     var showFreight = state.delivery === 'express' || state.delivery === 'freight';
     return ''
@@ -3139,12 +3312,12 @@
       +   '<div class="order-summary-row order-summary-row--deduction">'
       +     '<span class="order-summary-row__label">优惠</span>'
       +     '<span class="order-summary-row__value order-summary-discount">'
-      +       '<strong data-summary-discount-total>' + deduction(t.totalDiscount) + '</strong>'
+      +       '<strong data-summary-discount-total>' + discountDisplayAmount(t.totalDiscount) + '</strong>'
       +       '<span class="order-summary-discount__detail" data-summary-discount-detail' + (discountText ? '' : ' hidden') + '>' + escapeHtml(discountText) + '</span>'
       +     '</span>'
       +   '</div>'
       +   (showFreight ? summaryDetailRow('运费', '<strong data-summary-freight>' + money(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>') : '')
-      +   summaryDetailRow('订单总价', '<strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong><button type="button" class="order-summary-row__edit" data-edit-total aria-label="修改订单总价"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>', 'order-summary-row--total')
+      +   summaryDetailRow('订单总价', '<button type="button" class="order-summary-total-edit" data-edit-total aria-label="修改订单总价"><strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>', 'order-summary-row--total')
       + '</div>';
   }
 
@@ -3160,7 +3333,7 @@
     };
     if (nodes.meta) nodes.meta.innerHTML = quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces });
     if (nodes.product) nodes.product.textContent = money(t.productAmount);
-    if (nodes.discountTotal) nodes.discountTotal.textContent = t.totalDiscount > 0 ? '-' + money(t.totalDiscount) : money(0);
+    if (nodes.discountTotal) nodes.discountTotal.textContent = discountDisplayAmount(t.totalDiscount);
     if (nodes.discountDetail) {
       nodes.discountDetail.textContent = discountDetailText(t);
       nodes.discountDetail.hidden = !nodes.discountDetail.textContent;
@@ -3244,7 +3417,7 @@
   }
 
   var QUICK_OP_DEFS = {
-    freight: { title: '运费', unit: '元', inputmode: 'decimal', hint: '输入本单运费金额', get: function () { return state.freight; }, apply: function (value) { state.freight = value; } },
+    freight: { title: '运费', unit: '元', inputmode: 'decimal', hint: '输入本单运费金额', get: function () { return state.freight; }, apply: function (value) { state.freight = value; if (state.orderPromotion) state.orderPromotionFreightBase = value; } },
     member: { title: '会员折扣', unit: '%', inputmode: 'decimal', hint: '已自动带入当前会员等级折扣，可手动修改并以本次输入为准', get: function () { return state.memberDiscount; }, apply: function (value) { state.memberDiscount = Math.min(Math.max(Math.round(value * 100) / 100, 0), 100); recalculateCustomerPrices(); } },
     points: { title: '积分抵扣', unit: '分', inputmode: 'numeric', hint: '100 积分抵 1 元，填 500 即抵 5 元', get: function () { return state.pointsUsed; }, apply: function (value) { state.pointsUsed = Math.min(availablePoints(), Math.max(0, Math.round(value))); } },
     coupon: { title: '优惠券' },
@@ -3321,14 +3494,19 @@
   }
 
   function quickOpStatus(op) {
-    if (op === 'member' && Number(state.memberDiscount) < 100) return compactNumber(Number(state.memberDiscount) / 10) + '折';
+    if (op === 'member') {
+      if (!state.customer) return null;
+      if (Number(state.memberDiscount) >= 100 || state.memberDiscountChoice === 'none') return '无';
+      if (state.memberDiscountChoice === 'use' && state.orderPromotion && state.orderPromotion.type === 'member' && hasActiveMemberPriceSku()) return compactNumber(Number(state.memberDiscount) / 10) + '折';
+      return null;
+    }
     if (op === 'points' && Number(state.pointsUsed) > 0) return '扣' + Math.round(Number(state.pointsUsed)) + '积分';
     if (op === 'coupon' && Number(state.couponCount) > 0 && Number(state.couponDiscount) > 0) return '用' + Math.round(Number(state.couponCount)) + '张';
     if (op === 'promotion' && Number(state.promotionThreshold) > 0 && Number(state.promotionDiscount) > 0) return '满' + compactNumber(state.promotionThreshold) + '减' + compactNumber(state.promotionDiscount);
-    if (op === 'orderRate' && state.discountMode === 'order-rate' && Number(state.discountValue) > 0) return compactNumber(Number(state.discountValue) / 10) + '折';
-    if (op === 'orderAmount' && state.discountMode === 'order-amount' && Number(state.discountValue) > 0) return '减' + compactNumber(state.discountValue) + '元';
+    if (op === 'orderRate' && state.orderPromotion && state.orderPromotion.type === 'orderRate' && hasActiveOrderPromotionSku()) return compactNumber(Number(state.orderPromotion.value) / 10) + '折';
+    if (op === 'orderAmount' && state.orderPromotion && state.orderPromotion.type === 'orderAmount' && hasActiveOrderPromotionSku()) return (state.orderPromotion.mode === 'item-amount' ? '每件优惠' : '整单优惠') + compactNumber(state.orderPromotion.value) + '元';
     if (op === 'discount' && state.discountMode && Number(state.discountValue) > 0) return DISCOUNT_MODE_LABELS[state.discountMode] || null;
-    if (op === 'rounding' && state.roundingMode) return ROUNDING_MODE_LABELS[state.roundingMode] || null;
+    if (op === 'rounding' && state.orderPromotion && state.orderPromotion.type === 'rounding' && hasActiveOrderPromotionSku()) return state.orderPromotion.mode === 'integer' ? '整数' : '个位';
     return null;
   }
 
@@ -4841,7 +5019,8 @@
       + '</div></div>';
     var priceModes = '<fieldset class="order-add-price-modes" aria-label="开单价格">'
       + '<span class="order-add-price-option tag tag--28 ' + (draft.priceMode === 'cost' ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag"><button type="button" class="order-add-cost-visibility" data-toggle-cost-price aria-label="' + (draft.costPriceVisible ? '隐藏拿货价' : '显示拿货价') + '"><i class="wego-iconfont-s ' + (draft.costPriceVisible ? 'icon-xianshi' : 'icon-yincang') + '" aria-hidden="true"></i></button><button type="button" class="order-add-price-select" data-add-price-mode="cost" aria-pressed="' + String(draft.priceMode === 'cost') + '"><span class="tag__label">拿货价 ' + (draft.costPriceVisible ? money(productCostPrice(product)) : '***') + '</span></button></span>'
-      + '<button type="button" class="tag tag--28 ' + (draft.priceMode !== 'cost' ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag" data-add-price-mode="retail" aria-pressed="' + String(draft.priceMode !== 'cost') + '"><span class="tag__label">' + (draft.priceMode === 'discount' ? '优惠价 ' + money(unitPrice) : '售价 ' + money(customerPrice(product))) + '</span></button>'
+      + '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'retail' || draft.priceMode === 'discount' ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag" data-add-price-mode="retail" aria-pressed="' + String(draft.priceMode === 'retail' || draft.priceMode === 'discount') + '"><span class="tag__label">' + (draft.priceMode === 'discount' ? '优惠价 ' + money(unitPrice) : '售价 ' + money(customerPrice(product))) + '</span></button>'
+      + (state.customer && Number(state.memberDiscount) < 100 ? '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'member' ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag" data-add-price-mode="member" aria-pressed="' + String(draft.priceMode === 'member') + '"><span class="tag__label">会员价 ' + money(memberPrice(product.listPrice)) + '</span></button>' : '')
       + '</fieldset>';
     var selectorContent = (desktop ? '' : '<div class="order-segment order-add-mode-switch"><button class="' + (draft.mode === 'single' ? 'is-active' : '') + '" data-add-mode="single">单买</button><button class="' + (draft.mode === 'batch' ? 'is-active' : '') + '" data-add-mode="batch">多买</button></div>')
       + (draft.mode === 'batch' ? addBatchPicker(draft, desktop) : addSinglePicker(draft, desktop))
@@ -4865,7 +5044,7 @@
     var valid = raw === '' || (/^\d+(?:\.\d{0,2})?$/.test(raw) && Number.isFinite(value)
       && (edit.mode !== 'discount' || value <= 100));
     var hasInput = raw !== '';
-    var after = edit.original;
+    var after = edit.current == null ? edit.original : edit.current;
     if (valid && hasInput) {
       if (edit.mode === 'fixed') after = value;
       else if (edit.mode === 'discount') after = edit.original * value / 100;
@@ -4896,7 +5075,7 @@
 
   function skuPriceModal() {
     var edit = state.skuPriceDraft;
-    if (!edit || !state.addDraft) return '';
+    if (!edit || (edit.source !== 'order' && !state.addDraft)) return '';
     var preview = skuPricePreview(edit);
     var modeNames = { fixed: '一口价', discount: '折扣', amount: '优惠' };
     var unit = edit.mode === 'discount' ? '%' : '元';
@@ -4914,6 +5093,130 @@
       +   '</div>'
       +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-sku-price') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-sku-price>确认改价</button></footer>'
       + '</div></div>';
+  }
+
+  function applyOrderSkuPriceEdit(edit, preview) {
+    var item = state.products[edit.itemIndex];
+    if (!item || !preview.hasInput) return;
+    var spec = edit.spec;
+    if (!item.skuPriceDetails) item.skuPriceDetails = {};
+    var detail = item.skuPriceDetails[spec];
+    if (!detail) {
+      var basePrice = itemSkuOriginalPrice(item, spec);
+      detail = { price: basePrice, basePrice: basePrice, finallyPrice: edit.original, discountType: null, discountValue: null, priceRecords: [] };
+      item.skuPriceDetails[spec] = detail;
+    }
+    if (!Array.isArray(detail.priceRecords)) detail.priceRecords = [];
+    detail.finallyPrice = preview.after;
+    detail.discountType = 'sku-' + edit.mode;
+    detail.discountValue = Number(edit.input);
+    detail.priceRecords.push({ type: detail.discountType, value: detail.discountValue, originalPrice: edit.original, finallyPrice: preview.after });
+    if (item.createdType === 'temporary') {
+      detail.price = preview.after;
+      item.price = preview.after;
+      item.listPrice = preview.after;
+    }
+    if (!item.skuPrices) item.skuPrices = {};
+    item.skuPrices[spec] = preview.after;
+  }
+
+  function openOrderPromotion(type) {
+    var selected = state.orderPromotion && state.orderPromotion.type === type ? state.orderPromotion : null;
+    var defaults = { orderRate: 'item-rate', orderAmount: 'item-amount', rounding: 'integer', total: 'fixed' };
+    state.orderPromotionDraft = {
+      type: type,
+      mode: selected ? selected.mode : defaults[type] || 'member-rate',
+      input: selected && type !== 'rounding' && type !== 'member' ? String(selected.value) : (type === 'total' ? totals().payable.toFixed(2) : ''),
+      memberChoice: type === 'member' ? (state.memberDiscountChoice || '') : ''
+    };
+    renderActive();
+    var input = activeContext && activeContext.root && activeContext.root.querySelector('[data-order-promotion-input]');
+    if (input) {
+      input.focus({ preventScroll: true });
+      input.select();
+    }
+  }
+
+  function orderPromotionDraftPreview(draft) {
+    var raw = String(draft.input || '').trim();
+    if (draft.type === 'member') {
+      if (draft.memberChoice === 'use') return { valid: true, calculation: orderPromotionCalculation('member', 'member-rate', state.memberDiscount) };
+      return { valid: true, calculation: { actualCents: orderPromotionBaseCents() } };
+    }
+    if (draft.type === 'rounding') return { valid: true, calculation: orderPromotionCalculation('rounding', draft.mode, 0) };
+    if (!raw) return { valid: false, error: '请输入有效金额' };
+    var decimal = /^\d+(?:\.\d{0,2})?$/.test(raw) && Number.isFinite(Number(raw));
+    var value = Number(raw);
+    if (!decimal) return { valid: false, error: '请输入有效数字，最多两位小数' };
+    if (draft.type === 'orderRate' && (value < 0 || value > 99.99)) return { valid: false, error: '请输入 0–99.99 的百分比' };
+    if (draft.type === 'orderAmount' && value < 0) return { valid: false, error: '请输入非负优惠金额' };
+    var calculation = orderPromotionCalculation(draft.type, draft.mode, value);
+    return { valid: calculation.valid, error: calculation.valid ? '' : '商品原价为零，无法分配金额', calculation: calculation, value: value };
+  }
+
+  function orderPromotionBaseCents() {
+    var goods = orderPriceEntries().reduce(function (sum, entry) { return sum + entry.originalCents * entry.qty; }, 0);
+    var freight = state.delivery === 'express' || state.delivery === 'freight'
+      ? toCents(state.orderPromotionFreightBase == null ? state.freight : state.orderPromotionFreightBase) : 0;
+    return goods + freight;
+  }
+
+  function orderPromotionOption(mode, label, selected, attr) {
+    return '<button type="button" class="stack order-sku-price-mode' + (selected ? ' stack--selected' : '') + '" data-component="stack" data-variant-name="' + (selected ? 'selected' : 'unselected') + '" role="radio" aria-checked="' + selected + '" ' + attr + '="' + mode + '"><span class="stack__bg"><span class="stack__label">' + label + '</span><span class="stack__check-corner" aria-hidden="true"><i class="wego-iconfont-s icon-gou16 stack__check-icon"></i></span></span></button>';
+  }
+
+  function orderMemberChoiceCell(choice, label, selected, divider) {
+    return '<button type="button" class="cell cell--single cell--bg-white order-promotion-member-cell' + (divider ? ' cell--divider-right-edge' : '') + '" data-component="cell" data-variant-name="Cell_Action" role="checkbox" aria-checked="' + selected + '" data-order-promotion-choice="' + choice + '">'
+      + '<span class="cell__select">' + paymentSmallCheckbox(selected) + '</span><span class="cell__body"><span class="cell__content"><span class="cell__title-row"><span class="cell__title">' + label + '</span></span></span></span></button>';
+  }
+
+  function orderPromotionModal() {
+    var draft = state.orderPromotionDraft;
+    if (!draft) return '';
+    var titles = { member: '会员折扣', orderRate: '整单折扣', orderAmount: '整单优惠', rounding: '整单抹零', total: '整单改价' };
+    var modes = draft.type === 'orderRate' ? { 'item-rate': '每件折扣', 'order-rate': '整单折扣' }
+      : draft.type === 'orderAmount' ? { 'item-amount': '每件优惠', 'order-amount': '整单优惠' }
+      : draft.type === 'rounding' ? { integer: '整数', ones: '个位' } : null;
+    var methodLabel = draft.type === 'orderRate' ? '折扣方式' : draft.type === 'orderAmount' ? '优惠方式' : '抹零方式';
+    var options = modes ? Object.keys(modes).map(function (mode) { return orderPromotionOption(mode, modes[mode], draft.mode === mode, 'data-order-promotion-mode'); }).join('') : '';
+    var inputLabel = draft.type === 'total' ? '改价后金额' : modes && modes[draft.mode] || '';
+    var hasInput = draft.type === 'orderRate' || draft.type === 'orderAmount' || draft.type === 'total';
+    var unit = draft.type === 'orderRate' ? '%' : '元';
+    var preview = orderPromotionDraftPreview(draft);
+    var original = orderPromotionBaseCents();
+    var after = preview.valid ? preview.calculation.actualCents : original;
+    var change = after - original;
+    var isMember = draft.type === 'member';
+    var isTotal = draft.type === 'total';
+    return '<div class="order-sku-price-modal order-promotion-modal' + (isMember ? ' order-promotion-modal--member' : isTotal ? ' order-promotion-modal--total' : hasInput ? ' order-promotion-modal--entry' : ' order-promotion-modal--rounding') + '" role="dialog" aria-modal="true" aria-labelledby="order-promotion-title" data-state="open">'
+      + '<div class="order-sku-price-modal__panel">'
+      +   '<header class="order-sku-price-modal__head"><strong id="order-promotion-title">' + titles[draft.type] + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-close-order-promotion aria-label="关闭' + titles[draft.type] + '"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +   '<div class="order-sku-price-modal__body">'
+      +     (isMember ? '<div class="cell-group order-promotion-member-list" data-component="cell" data-variant-name="Cell_Action"><div class="cell-group__content">' + orderMemberChoiceCell('use', '使用会员折扣（' + compactNumber(Number(state.memberDiscount) / 10) + '折）', draft.memberChoice === 'use', true) + orderMemberChoiceCell('none', '不使用', draft.memberChoice === 'none', false) + '</div></div>' : '')
+      +     (modes ? '<div class="order-sku-price-method-row"><span class="order-sku-price-method-label" id="order-promotion-method-label">' + methodLabel + '</span><div class="order-sku-price-modes" role="radiogroup" aria-labelledby="order-promotion-method-label">' + options + '</div></div>' : '')
+      +     (hasInput ? '<label class="order-sku-price-field">' + (isTotal ? '' : '<span data-order-promotion-field-label>' + inputLabel + '</span>') + '<span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" type="text" inputmode="decimal" autocomplete="off" value="' + escapeHtml(draft.input) + '" placeholder="' + (isTotal ? '请输入改价后的金额' : '请输入') + '" data-order-promotion-input aria-label="' + inputLabel + '"><span class="number-input__suffix" data-order-promotion-unit>' + unit + '</span></span></label>' : '')
+      +     (hasInput ? '<small class="order-sku-price-error" data-order-promotion-error>' + (draft.input && !preview.valid ? preview.error : '') + '</small>' : '')
+      +     (isMember || isTotal ? '' : '<div class="order-sku-price-preview"><div><span>订单金额</span><strong data-order-promotion-before>' + money(original / 100) + '</strong></div><div><span>改价金额</span><strong data-order-promotion-change class="' + (change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(change / 100) + '</strong></div><div class="order-sku-price-preview__after"><span>应收金额</span><strong data-order-promotion-after>' + money(after / 100) + '</strong></div></div>')
+      +   '</div>'
+      +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-order-promotion') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-order-promotion>确认</button></footer>'
+      + '</div></div>';
+  }
+
+  function syncOrderPromotionPreview(root) {
+    var draft = state.orderPromotionDraft;
+    if (!draft) return;
+    var preview = orderPromotionDraftPreview(draft);
+    var error = root.querySelector('[data-order-promotion-error]');
+    var after = root.querySelector('[data-order-promotion-after]');
+    var change = root.querySelector('[data-order-promotion-change]');
+    var original = orderPromotionBaseCents();
+    var afterCents = preview.valid ? preview.calculation.actualCents : original;
+    if (error) error.textContent = draft.input && !preview.valid ? preview.error : '';
+    if (after) after.textContent = money(afterCents / 100);
+    if (change) {
+      change.textContent = skuPriceChangeText((afterCents - original) / 100);
+      change.classList.toggle('is-negative', afterCents < original);
+    }
   }
 
   function pricePanel() {
@@ -5422,7 +5725,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + totalEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
@@ -5881,6 +6184,21 @@
     var priceMode = pricing && pricing.priceMode ? pricing.priceMode : 'retail';
     var unitPrice = pricing && pricing.unitPrice != null ? Number(pricing.unitPrice) : customerPrice(product);
     var skuPrices = pricing && pricing.skuPrices ? Object.assign({}, pricing.skuPrices) : null;
+    var createdType = product.createdType || 'product';
+    var skuPriceDetails = {};
+    Object.keys(skuQty).forEach(function (spec) {
+      var original = createdType === 'temporary' ? unitPrice : Number(skuRowDetail(product, spec).price);
+      var finalPrice = skuPrices && skuPrices[spec] != null ? Number(skuPrices[spec]) : unitPrice;
+      var usesMemberPrice = priceMode === 'member' && toCents(finalPrice) === toCents(memberPrice(original));
+      skuPriceDetails[spec] = {
+        price: original,
+        basePrice: original,
+        finallyPrice: finalPrice,
+        discountType: usesMemberPrice ? 'member-rate' : null,
+        discountValue: usesMemberPrice ? state.memberDiscount : null,
+        priceRecords: usesMemberPrice ? [{ type: 'member-rate', value: state.memberDiscount, originalPrice: original, finallyPrice: finalPrice }] : []
+      };
+    });
     var searchMeta = pricing && pricing.searchMeta ? pricing.searchMeta : {
       used_multi_picture_search: false,
       used_picture_precise_search: false
@@ -5894,6 +6212,8 @@
         existing.orderSpecs = itemOrderSpecs(existing);
       }
       Object.keys(skuQty).forEach(function (spec) {
+        if (!existing.skuPriceDetails) existing.skuPriceDetails = {};
+        if (!existing.skuPriceDetails[spec]) existing.skuPriceDetails[spec] = skuPriceDetails[spec];
         if (Number(skuQty[spec] || 0) !== 0 && existing.orderSpecs.indexOf(spec) < 0) existing.orderSpecs.push(spec);
         existing.skuQty[spec] = Number(existing.skuQty[spec] || 0) + Number(skuQty[spec] || 0);
       });
@@ -5912,6 +6232,7 @@
       listPrice: product.listPrice,
       price: unitPrice,
       skuPrices: skuPrices,
+      skuPriceDetails: skuPriceDetails,
       priceMode: priceMode,
       image: product.image,
       freightTemplate: product.freightTemplate ? Object.assign({}, product.freightTemplate) : { requiresRealName: false },
@@ -5923,7 +6244,7 @@
       manualPrice: priceMode !== 'retail' || Boolean(skuPrices),
       used_multi_picture_search: Boolean(searchMeta.used_multi_picture_search),
       used_picture_precise_search: Boolean(searchMeta.used_picture_precise_search),
-      createdType: product.createdType || 'product'
+      createdType: createdType
     };
     state.products.push(created);
     return created;
@@ -5948,6 +6269,14 @@
       { id: 'p1', code: 'TS-2408', name: '韩版休闲T恤', listPrice: 89, price: 72.98, image: PRODUCTS[0].image, freightTemplate: Object.assign({}, PRODUCTS[0].freightTemplate), qty: 2, mode: 'single', skuQty: { '白色/M': 2 }, note: '白色优先' },
       { id: 'p2', code: 'JK-1082', name: '高腰牛仔短裤', listPrice: 129, price: 105.78, image: PRODUCTS[1].image, qty: 1, mode: 'batch', skuQty: { '蓝色/28': 1 }, note: '' }
     ];
+    state.products.forEach(function (item) {
+      var product = PRODUCTS.find(function (entry) { return entry.code === item.code; });
+      item.skuPriceDetails = {};
+      Object.keys(item.skuQty).forEach(function (spec) {
+        var original = product ? skuRowDetail(product, spec).price : item.listPrice;
+        item.skuPriceDetails[spec] = { price: original, basePrice: original, finallyPrice: original, discountType: null, discountValue: null, priceRecords: [] };
+      });
+    });
     state.orderTotalAdjustment = 0;
     applyCustomer(CUSTOMERS[0]);
     state.draftAvailable = false;
@@ -6459,6 +6788,53 @@
     if (state.paymentDraft && state.paymentDraft.refundWarehouseMenuOpen && !event.target.closest('.order-refund-warehouse-popmenu')) closeRefundWarehouseMenu(root);
     var target = event.target.closest('button, [data-clickable]');
     if (!target || !root.contains(target)) return;
+    if (state.orderPromotionDraft) {
+      if (!target.closest('.order-promotion-modal')) return;
+      if (target.matches('[data-close-order-promotion]')) {
+        state.orderPromotionDraft = null;
+        renderActive();
+        return;
+      }
+      if (target.matches('[data-order-promotion-mode]')) {
+        state.orderPromotionDraft.mode = target.dataset.orderPromotionMode;
+        state.orderPromotionDraft.input = '';
+        renderActive();
+        var promotionInput = root.querySelector('[data-order-promotion-input]');
+        if (promotionInput) promotionInput.focus({ preventScroll: true });
+        return;
+      }
+      if (target.matches('[data-order-promotion-choice]')) {
+        var choice = target.dataset.orderPromotionChoice;
+        state.orderPromotionDraft.memberChoice = state.orderPromotionDraft.memberChoice === choice ? '' : choice;
+        renderActive();
+        return;
+      }
+      if (target.matches('[data-confirm-order-promotion]')) {
+        var orderDraft = state.orderPromotionDraft;
+        var draftPreview = orderPromotionDraftPreview(orderDraft);
+        if (!draftPreview.valid) {
+          syncOrderPromotionPreview(root);
+          ctx.toast(draftPreview.error || '请输入有效改价金额');
+          return;
+        }
+        if (orderDraft.type === 'member' && orderDraft.memberChoice !== 'use') {
+          clearOrderPromotion();
+          state.memberDiscountChoice = orderDraft.memberChoice;
+        } else {
+          var promotionValue = orderDraft.type === 'member' ? state.memberDiscount : orderDraft.type === 'rounding' ? 0 : draftPreview.value;
+          if (!applyOrderPromotion(orderDraft.type, orderDraft.mode, promotionValue, orderDraft.type === 'member')) {
+            ctx.toast('商品原价为零，无法分配金额');
+            return;
+          }
+          if (orderDraft.type === 'member') state.memberDiscountChoice = 'use';
+        }
+        state.orderPromotionDraft = null;
+        markDirty(ctx);
+        ctx.toast('整单改价已更新');
+        return;
+      }
+      return;
+    }
     if (state.skuPriceDraft) {
       if (!target.closest('.order-sku-price-modal')) return;
       if (target.matches('[data-close-sku-price]')) {
@@ -6475,15 +6851,20 @@
         return;
       }
       if (target.matches('[data-confirm-sku-price]')) {
-        var changePreview = skuPricePreview(state.skuPriceDraft);
+        var skuPriceEdit = state.skuPriceDraft;
+        var changePreview = skuPricePreview(skuPriceEdit);
         if (!changePreview.valid) {
           syncSkuPricePreview(root);
           var invalidPriceInput = root.querySelector('[data-sku-price-input]');
           if (invalidPriceInput) invalidPriceInput.focus({ preventScroll: true });
           return;
         }
-        if (changePreview.hasInput) state.addDraft.skuPriceOverrides[state.skuPriceDraft.spec] = changePreview.after;
+        if (changePreview.hasInput) {
+          if (skuPriceEdit.source === 'order') applyOrderSkuPriceEdit(skuPriceEdit, changePreview);
+          else state.addDraft.skuPriceOverrides[skuPriceEdit.spec] = changePreview.after;
+        }
         state.skuPriceDraft = null;
+        if (skuPriceEdit.source === 'order' && changePreview.hasInput) markDirty(ctx);
         renderActive();
         if (changePreview.hasInput) ctx.toast('当前 SKU 价格已修改');
         return;
@@ -6497,6 +6878,17 @@
       renderActive();
       var priceInput = root.querySelector('[data-sku-price-input]');
       if (priceInput) priceInput.focus({ preventScroll: true });
+      return;
+    }
+    if (target.matches('[data-edit-order-sku-price]')) {
+      var orderItemIndex = Number(target.dataset.editOrderSkuPrice);
+      var orderItem = state.products[orderItemIndex];
+      var orderSpec = decodeURIComponent(target.dataset.orderSkuSpec || '');
+      if (!orderItem || (isSkuMode(orderItem.mode) && !Object.prototype.hasOwnProperty.call(orderItem.skuQty || {}, orderSpec))) return;
+      state.skuPriceDraft = { source: 'order', itemIndex: orderItemIndex, spec: orderSpec, original: itemSkuOriginalPrice(orderItem, orderSpec), current: itemSkuPrice(orderItem, orderSpec), mode: 'fixed', input: '' };
+      renderActive();
+      var orderSkuPriceInput = root.querySelector('[data-sku-price-input]');
+      if (orderSkuPriceInput) orderSkuPriceInput.focus({ preventScroll: true });
       return;
     }
 
@@ -6917,6 +7309,23 @@
     }
     if (target.matches('[data-open-panel]')) {
       var type = target.dataset.openPanel;
+      if (type === 'quick' && ['member', 'orderRate', 'orderAmount', 'rounding'].indexOf(target.dataset.quickOp) >= 0) {
+        var promotionType = target.dataset.quickOp;
+        if (promotionType === 'member' && (!state.customer || Number(state.memberDiscount) >= 100)) {
+          ctx.toast('请先选择客户');
+          return;
+        }
+        if (promotionType !== 'member' && orderPriceEntries().length === 0) {
+          ctx.toast('请先添加商品');
+          return;
+        }
+        if (promotionType !== 'member' && orderHasReturnSku()) {
+          ctx.toast('含退货商品，无法整单改价');
+          return;
+        }
+        openOrderPromotion(promotionType);
+        return;
+      }
       if (type === 'customer' && isDesktopWorkbench() && state.panel === 'customer') {
         closeDesktopCustomerPopover();
         return;
@@ -7457,6 +7866,7 @@
         if (state.addDraft.batchRecord) state.addDraft.batchRecord = copyAddSkuQty(editedProduct, state.addDraft.batchRecord);
         if (state.addDraft.priceMode === 'retail') state.addDraft.unitPrice = customerPrice(editedProduct);
         if (state.addDraft.priceMode === 'cost') state.addDraft.unitPrice = productCostPrice(editedProduct);
+        if (state.addDraft.priceMode === 'member') state.addDraft.unitPrice = memberPrice(editedProduct.listPrice);
         state.addDraft.lastDiscountPrice = productLastDiscountPrice(editedProduct);
       }
       state.productEditDraft = null;
@@ -7782,7 +8192,8 @@
     }
     if (target.matches('[data-add-price-mode]') && state.addDraft) {
       state.addDraft.priceMode = target.dataset.addPriceMode;
-      state.addDraft.unitPrice = state.addDraft.priceMode === 'cost' ? productCostPrice(state.addDraft.product) : customerPrice(state.addDraft.product);
+      state.addDraft.unitPrice = state.addDraft.priceMode === 'cost' ? productCostPrice(state.addDraft.product)
+        : state.addDraft.priceMode === 'member' ? memberPrice(state.addDraft.product.listPrice) : customerPrice(state.addDraft.product);
       state.addDraft.skuPriceOverrides = {};
       renderActive();
       return;
@@ -7918,6 +8329,7 @@
       var freightScope = target.closest('.order-freight-edit-modal');
       var freightInput = freightScope ? freightScope.querySelector('[data-freight-edit-value]') : null;
       state.freight = Math.max(0, Math.round(Number(freightInput ? freightInput.value : state.freight) * 100) / 100 || 0);
+      if (state.orderPromotion) state.orderPromotionFreightBase = state.freight;
       state.freightEditOpen = false;
       markDirty(ctx);
       renderActive();
@@ -7925,13 +8337,15 @@
       return;
     }
     if (target.matches('[data-edit-total]')) {
-      state.totalEditOpen = true;
-      renderActive();
-      var totalField = activeContext.root.querySelector('[data-total-edit-value]');
-      if (totalField) {
-        totalField.focus({ preventScroll: true });
-        totalField.select();
+      if (orderPriceEntries().length === 0) {
+        ctx.toast('请先添加商品');
+        return;
       }
+      if (orderHasReturnSku()) {
+        ctx.toast('含退货商品，无法整单改价');
+        return;
+      }
+      openOrderPromotion('total');
       return;
     }
     if (target.matches('[data-total-edit-cancel]')) {
@@ -7989,9 +8403,14 @@
       var noteInput = addScope.querySelector('[data-add-note]');
       draft.note = noteInput ? noteInput.value.trim() : draft.note;
       if (draft.mode === 'batch') rememberBatchPattern(draft);
-      var draftSkuPrices = draft.useSkuPrices ? {} : null;
+      var draftSkuPrices = draft.useSkuPrices || draft.priceMode === 'member' ? {} : null;
       if (draftSkuPrices) draft.product.specs.forEach(function (spec) { draftSkuPrices[spec] = addDraftSkuPrice(draft, spec); });
+      if (draft.priceMode === 'member' && state.orderPromotion && state.orderPromotion.type !== 'member') clearOrderPromotion();
       mergeProductIntoOrder(draft.product, draft.skuQty, draft.mode, draft.note, { priceMode: draft.priceMode, unitPrice: draft.unitPrice, skuPrices: draftSkuPrices, searchMeta: draft.searchMeta });
+      if (draft.priceMode === 'member') {
+        state.orderPromotion = { type: 'member', mode: 'member-rate', value: state.memberDiscount };
+        state.memberDiscountChoice = 'use';
+      }
       state.panel = null;
       state.addDraft = null;
       markDirty(ctx, true);
@@ -8480,6 +8899,11 @@
 
   function handleInput(event, root, ctx) {
     var target = event.target;
+    if (target.matches('[data-order-promotion-input]') && state.orderPromotionDraft) {
+      state.orderPromotionDraft.input = target.value;
+      syncOrderPromotionPreview(root);
+      return;
+    }
     if (target.matches('[data-sku-price-input]') && state.skuPriceDraft) {
       state.skuPriceDraft.input = target.value;
       syncSkuPricePreview(root);
@@ -8783,6 +9207,7 @@
     }
     if (target.matches('[data-freight]')) {
       state.freight = Math.max(0, Number(target.value || 0));
+      if (state.orderPromotion) state.orderPromotionFreightBase = state.freight;
       if (event.type === 'change') markDirty(ctx);
       return;
     }
@@ -9248,8 +9673,8 @@
     }, true);
     root.addEventListener('keydown', function (event) {
       if (handlePaymentControlKeydown(event)) return;
-      if (event.key === 'Tab' && state.skuPriceDraft) {
-        var priceModal = root.querySelector('.order-sku-price-modal');
+      if (event.key === 'Tab' && (state.skuPriceDraft || state.orderPromotionDraft || state.freightEditOpen)) {
+        var priceModal = root.querySelector(state.orderPromotionDraft ? '.order-promotion-modal' : state.skuPriceDraft ? '.order-sku-price-modal' : '.order-freight-edit-modal');
         var priceControls = priceModal ? Array.from(priceModal.querySelectorAll('button:not([disabled]), input:not([disabled])')) : [];
         if (priceControls.length) {
           var firstPriceControl = priceControls[0];
@@ -9266,6 +9691,16 @@
       }
       if (event.key === 'Escape' && state.skuPriceDraft) {
         state.skuPriceDraft = null;
+        renderActive();
+        return;
+      }
+      if (event.key === 'Escape' && state.orderPromotionDraft) {
+        state.orderPromotionDraft = null;
+        renderActive();
+        return;
+      }
+      if (event.key === 'Escape' && state.freightEditOpen) {
+        state.freightEditOpen = false;
         renderActive();
         return;
       }
@@ -9490,6 +9925,10 @@
     state.discountMode = null;
     state.discountValue = 0;
     state.orderTotalAdjustment = 0;
+    state.orderPromotion = null;
+    state.orderPromotionDraft = null;
+    state.orderPromotionFreightBase = null;
+    state.memberDiscountChoice = '';
     state.freight = 0;
     state.rounding = 0;
     state.roundingMode = null;
