@@ -12119,11 +12119,11 @@ button.order-payment-method-card {
 }
 
 /* 退款备注复用 Input_36 的浅灰输入面；图片区在输入区域内靠左排列。 */
-.order-payment-note-modal--refund .order-note-modal__head {
+.order-remark-modal .order-note-modal__head {
   background: var(--bg_bar_100);
 }
 
-.order-payment-note-modal--refund .order-payment-note-modal__input {
+.order-remark-modal .order-payment-note-modal__input {
   gap: 0;
   overflow: hidden;
   background: var(--bg_gray_06_pack);
@@ -12131,13 +12131,13 @@ button.order-payment-method-card {
   border-radius: var(--radius-6);
 }
 
-.order-payment-note-modal--refund .order-payment-note-modal__input textarea {
+.order-remark-modal .order-payment-note-modal__input textarea {
   min-height: var(--size-96);
   background: transparent;
   border: 0;
 }
 
-.order-payment-note-modal--refund .order-refund-payment__images {
+.order-remark-modal .order-refund-payment__images {
   padding: 0 var(--spacer-12) var(--spacer-12);
 }
 
@@ -12172,18 +12172,18 @@ button.order-payment-method-card {
 }
 
 /* 退款批注：图片入口与底栏使用归档字号和颜色令牌。 */
-.order-payment-note-modal--refund .order-refund-payment__image-add {
+.order-remark-modal .order-refund-payment__image-add {
   color: var(--text_80);
   font-size: var(--Font12-font-size);
   border: var(--stroke-1) solid var(--bg_gray_03);
 }
 
-.order-payment-note-modal--refund .order-refund-payment__image-add > i,
-.order-payment-note-modal--refund .order-refund-payment__image-add > span {
+.order-remark-modal .order-refund-payment__image-add > i,
+.order-remark-modal .order-refund-payment__image-add > span {
   color: var(--text_80);
 }
 
-.order-payment-note-modal--refund .order-refund-payment__image-add > span {
+.order-remark-modal .order-refund-payment__image-add > span {
   font-size: var(--Font12-font-size);
 }
 
@@ -12211,12 +12211,27 @@ button.order-payment-method-card {
   font-size: var(--size-20);
 }
 
-.order-payment-note-modal--refund .order-refund-payment__image-add {
+.order-remark-modal .order-refund-payment__image-add {
   background: var(--bg_white_100);
 }
 
-.order-payment-note-modal--refund .order-note-modal__body {
+.order-remark-modal .order-note-modal__body {
   padding-bottom: 0;
+}
+
+/* 整单两组备注分别复用退款编辑面；标签保留在灰色输入面外。 */
+.order-remark-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacer-8);
+  flex-shrink: 0;
+}
+
+.order-remark-field > .field-label {
+  color: var(--text_100);
+  font-size: var(--Font14-font-size);
+  font-weight: var(--Font14-medium-font-weight);
+  line-height: var(--Font14-line-height);
 }
 /* 选品工具栏：复用 Search 的纵向筛选入口，保留应用态。 */
 @media (min-width: 768px) {

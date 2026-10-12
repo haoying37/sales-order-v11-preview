@@ -538,6 +538,9 @@
     senderInfo: { name: '何小小', phone: '13690809124' },
     orderNoteMerchant: '',
     orderNoteBuyer: '',
+    orderNoteMerchantImages: [],
+    orderNoteBuyerImages: [],
+    orderNoteDraft: null,
     orderNoteOpen: false,
     selectedRow: null,
     displayMode: storedDisplayMode(),
@@ -620,6 +623,7 @@
     dailyTotalRecorded: false,
     previewImageIndex: null,
     refundImagePreviewIndex: null,
+    noteImagePreviewScope: 'payment',
     confirmClearOrder: false,
     productEditDraft: null,
     productEditReturnPanel: null,
@@ -1398,6 +1402,8 @@
       || hasOrdinaryProduct
       || hasText(state.orderNoteBuyer)
       || hasText(state.orderNoteMerchant)
+      || state.orderNoteMerchantImages.length > 0
+      || state.orderNoteBuyerImages.length > 0
       || hasAddressContent(state.address)
       || hasSender
       || hasText(pickupContact.name)
@@ -1461,6 +1467,8 @@
     '.order-desktop-modal--checkout .order-desktop-modal__body',
     '.order-v2-modal .order-v2-modal__body',
     '.order-reference-payment__sheet',
+    '.order-remark-modal .order-note-modal__body',
+    '.order-remark-modal textarea',
     '.order-delivery-panel__scroll',
     '.order-draft-panel__list'
   ];
@@ -2241,34 +2249,36 @@
 
   function orderNoteEntry() {
     if (!state.products.length) return '';
-    var hasNote = !!(state.orderNoteMerchant || state.orderNoteBuyer);
+    var hasImages = state.orderNoteMerchantImages.length || state.orderNoteBuyerImages.length;
+    var hasNote = !!(state.orderNoteMerchant || state.orderNoteBuyer || hasImages);
     var preview = '';
     if (hasNote) {
       var lines = [];
       if (state.orderNoteMerchant) lines.push('<span class="order-note-bar__line"><span class="order-note-bar__label">商家备注</span>' + escapeHtml(state.orderNoteMerchant) + '</span>');
       if (state.orderNoteBuyer) lines.push('<span class="order-note-bar__line"><span class="order-note-bar__label">买家备注</span>' + escapeHtml(state.orderNoteBuyer) + '</span>');
-      preview = '<p class="order-note-bar__preview">' + lines.join('') + '</p>';
+      preview = '<div class="order-refund-note-entry__content">' + (lines.length ? '<p class="order-note-bar__preview">' + lines.join('') + '</p>' : '')
+        + noteSavedImages(state.orderNoteMerchantImages, 'merchant', '商家备注')
+        + noteSavedImages(state.orderNoteBuyerImages, 'buyer', '买家备注') + '</div>';
     }
     return ''
       + '<section class="order-note-bar" aria-label="订单备注">'
-      +   '<div class="order-note-bar__row' + (hasNote ? ' order-note-bar__row--filled' : '') + '"' + (hasNote ? ' data-clickable data-toggle-order-note role="button" tabindex="0" aria-label="编辑整单备注"' : '') + '>'
+      +   '<div class="order-note-bar__row' + (hasNote ? ' order-note-bar__row--filled' : '') + '"' + (hasNote && !hasImages ? ' data-clickable data-toggle-order-note role="button" tabindex="0" aria-label="编辑整单备注"' : '') + '>'
       +     (hasNote
-            ? '<div class="order-note-bar__note">' + preview + '<span class="order-note-bar__edit"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i>编辑</span></div>'
+            ? '<div class="order-note-bar__note' + (hasImages ? ' order-note-bar__note--with-images' : '') + '">' + preview + '<button type="button" class="order-note-bar__edit" data-toggle-order-note aria-label="编辑整单备注"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i>编辑</button></div>'
             : '<button type="button" class="link link--14 order-note-bar__toggle" data-component-slug="link" data-toggle-order-note>添加备注</button>')
       +   '</div>'
       + '</section>';
   }
 
   function orderNoteModal() {
-    if (!state.orderNoteOpen) return '';
-    var hasNote = !!(state.orderNoteMerchant || state.orderNoteBuyer);
+    if (!state.orderNoteOpen || !state.orderNoteDraft) return '';
     return ''
-      + '<div class="order-note-modal" role="dialog" aria-modal="true" aria-label="整单备注" data-state="open">'
+      + '<div class="order-note-modal order-payment-note-modal order-remark-modal order-note-modal--order" role="dialog" aria-modal="true" aria-label="整单备注" data-state="open">'
       +   '<div class="order-note-modal__panel">'
-      +     '<div class="order-note-modal__head"><strong>' + (hasNote ? '编辑备注' : '添加备注') + '</strong></div>'
+      +     '<div class="order-note-modal__head"><strong>添加备注</strong>' + noteCloseButton('data-note-cancel') + '</div>'
       +     '<div class="order-note-modal__body">'
-      +       '<div class="input input-group input-group--surface-white" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框"><label class="field-label" for="order-note-merchant">商家备注</label><textarea id="order-note-merchant" placeholder="请输入文字，商家备注仅你可见" data-order-note-merchant>' + escapeHtml(state.orderNoteMerchant) + '</textarea></div>'
-      +       '<div class="input input-group input-group--surface-white" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框"><label class="field-label" for="order-note-buyer">买家备注</label><textarea id="order-note-buyer" placeholder="请输入文字，买家备注双方可见" data-order-note-buyer>' + escapeHtml(state.orderNoteBuyer) + '</textarea></div>'
+      +       '<section class="order-remark-field"><label class="field-label" for="order-note-merchant">商家备注</label>' + noteEditorField(state.orderNoteDraft.merchant, 'merchant', '商家备注', '请输入文字，商家备注仅你可见') + '</section>'
+      +       '<section class="order-remark-field"><label class="field-label" for="order-note-buyer">买家备注</label>' + noteEditorField(state.orderNoteDraft.buyer, 'buyer', '买家备注', '请输入文字，买家备注双方可见') + '</section>'
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-note-cancel')
@@ -3765,11 +3775,73 @@
     if (menu) menu.remove();
   }
 
-  function paymentRefundImages(draft) {
+  function noteCloseButton(action) {
+    return '<button type="button" class="btn btn--weak btn--sm btn--icon-only order-payment-note-modal__close" data-component="button" data-component-slug="button" ' + action + ' aria-label="关闭"><i class="btn__icon wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>';
+  }
+
+  function noteImageLabel(scope) {
+    return scope === 'merchant' ? '商家备注' : scope === 'buyer' ? '买家备注' : totals().payable < 0 ? '退款' : '收款';
+  }
+
+  function noteEditorField(draft, scope, label, placeholder) {
+    var id = scope === 'payment' ? 'order-payment-note-value' : 'order-note-' + scope;
+    var hook = scope === 'payment' ? 'data-payment-note-editor' : 'data-order-note-' + scope;
+    return '<div class="input input-group order-payment-note-modal__input" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框（多行文本）" data-field-type="textarea"><label class="field-label" for="' + id + '">' + label + '</label><textarea id="' + id + '" rows="4" aria-label="' + label + '" placeholder="' + placeholder + '" maxlength="200" ' + hook + '>' + escapeHtml(draft.noteEditorValue || '') + '</textarea>' + paymentRefundImages(draft, scope) + '</div>';
+  }
+
+  function paymentRefundImages(draft, scope) {
+    scope = scope || 'payment';
+    var label = noteImageLabel(scope) + '图片';
     var images = Array.isArray(draft && draft.refundImagesEditor) ? draft.refundImagesEditor : [];
-    return '<div class="order-refund-payment__images" aria-label="退款图片">' + images.map(function (item, index) {
-      return '<figure data-business-component="RefundImageUploadItem"><img src="' + escapeHtml(item.url) + '" alt="退款图片 ' + (index + 1) + '"><button type="button" data-remove-refund-image="' + index + '" aria-label="删除退款图片"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></figure>';
-    }).join('') + '<button type="button" class="order-refund-payment__image-add" data-trigger-refund-image aria-label="添加退款图片"><i class="wego-iconfont-s icon-xiangji" aria-hidden="true"></i><span>添加图片</span></button><input type="file" accept="image/*" multiple data-refund-image-input hidden></div>';
+    return '<div class="order-refund-payment__images" aria-label="' + label + '">' + images.map(function (item, index) {
+      return '<figure data-business-component="RefundImageUploadItem"><img src="' + escapeHtml(item.url) + '" alt="' + label + ' ' + (index + 1) + '"><button type="button" data-remove-refund-image="' + index + '" data-note-image-scope="' + scope + '" aria-label="删除' + label + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></figure>';
+    }).join('') + '<button type="button" class="order-refund-payment__image-add" data-trigger-refund-image data-note-image-scope="' + scope + '" aria-label="添加' + label + '"><i class="wego-iconfont-s icon-xiangji" aria-hidden="true"></i><span>添加图片</span></button><input type="file" accept="image/*" multiple data-refund-image-input data-note-image-scope="' + scope + '" hidden></div>';
+  }
+
+  function noteSavedImages(images, scope, label) {
+    if (!images.length) return '';
+    return '<div class="order-refund-note-entry__images" aria-label="已添加' + label + '图片">' + images.map(function (item, index) {
+      return '<button type="button" class="image wg-image wg-image--sm wg-image--rounded-sm wg-image--clickable order-refund-note-entry__image" data-component="image" data-component-slug="image" data-preview-refund-image="' + index + '" data-note-image-scope="' + scope + '" aria-label="查看' + label + '图片 ' + (index + 1) + ' 大图"><img class="wg-image__src is-loaded" src="' + escapeHtml(item.url) + '" alt="' + label + '图片 ' + (index + 1) + '"><span class="wg-image__overlay"></span></button>';
+    }).join('') + '</div>';
+  }
+
+  function activeNoteImageDraft(scope) {
+    if (scope === 'merchant' || scope === 'buyer') return state.orderNoteOpen && state.orderNoteDraft ? state.orderNoteDraft[scope] : null;
+    return state.paymentDraft && state.paymentDraft.noteEditorOpen ? state.paymentDraft : null;
+  }
+
+  function captureNoteEditorValues(root) {
+    ['payment', 'merchant', 'buyer'].forEach(function (scope) {
+      var draft = activeNoteImageDraft(scope);
+      var field = root.querySelector(scope === 'payment' ? '[data-payment-note-editor]' : '[data-order-note-' + scope + ']');
+      if (draft && field) draft.noteEditorValue = field.value;
+    });
+  }
+
+  function cancelNoteEditor(scope) {
+    if (scope === 'order') {
+      state.orderNoteOpen = false;
+      state.orderNoteDraft = null;
+    } else if (state.paymentDraft) {
+      state.paymentDraft.noteEditorValue = state.paymentDraft.note || '';
+      state.paymentDraft.noteEditorOpen = false;
+      state.paymentDraft.refundImagesEditor = null;
+      state.paymentDraft.refundImageReadsPending = 0;
+    }
+  }
+
+  function renderNoteEditorPreservingContext(root) {
+    var active = document.activeElement;
+    var input = active && root.contains(active) && active.matches('[data-payment-note-editor], [data-order-note-merchant], [data-order-note-buyer]') ? active : null;
+    var selection = input ? { id: input.id, start: input.selectionStart, end: input.selectionEnd, top: input.scrollTop, left: input.scrollLeft } : null;
+    renderActive();
+    if (!selection) return;
+    var next = root.querySelector('#' + selection.id);
+    if (!next) return;
+    next.focus({ preventScroll: true });
+    next.setSelectionRange(selection.start, selection.end);
+    next.scrollTop = selection.top;
+    next.scrollLeft = selection.left;
   }
 
   function paymentAmountMetric(value, size, theme, negative) {
@@ -3855,14 +3927,10 @@
   }
 
   function paymentNoteEntry(draft, isRefund) {
-    var refundImages = isRefund && Array.isArray(draft && draft.refundImages) ? draft.refundImages : [];
+    var refundImages = Array.isArray(draft && draft.refundImages) ? draft.refundImages : [];
     var hasNote = Boolean(draft && draft.note) || refundImages.length > 0;
     var noteLabel = isRefund ? '退款备注' : '收款备注';
-    var refundImagePreview = refundImages.length
-      ? '<div class="order-refund-note-entry__images" aria-label="已添加退款图片">' + refundImages.map(function (item, index) {
-        return '<button type="button" class="wg-image wg-image--sm wg-image--rounded-sm wg-image--clickable order-refund-note-entry__image" data-component="image" data-component-slug="image" data-preview-refund-image="' + index + '" aria-label="查看退款图片 ' + (index + 1) + ' 大图"><img class="wg-image__src is-loaded" src="' + escapeHtml(item.url) + '" alt="退款图片 ' + (index + 1) + '"><span class="wg-image__overlay"></span></button>';
-      }).join('') + '</div>'
-      : '';
+    var refundImagePreview = noteSavedImages(refundImages, 'payment', isRefund ? '退款' : '收款');
     var noteText = draft.note ? '<span class="order-note-bar__label">' + noteLabel + '</span>' + escapeHtml(draft.note) : '';
     var noteContent = refundImages.length
       ? '<div class="order-refund-note-entry__content">' + (noteText ? '<button type="button" class="order-refund-note-entry__text" data-open-payment-note>' + noteText + '</button>' : '') + refundImagePreview + '</div>'
@@ -3878,15 +3946,18 @@
   function refundImagePreview() {
     var draft = state.paymentDraft;
     if (state.refundImagePreviewIndex == null) return '';
-    var image = draft && Array.isArray(draft.refundImages) ? draft.refundImages[Number(state.refundImagePreviewIndex)] : null;
+    var scope = state.noteImagePreviewScope || 'payment';
+    var images = scope === 'merchant' ? state.orderNoteMerchantImages : scope === 'buyer' ? state.orderNoteBuyerImages : draft && draft.refundImages || [];
+    var image = images[Number(state.refundImagePreviewIndex)];
+    var label = noteImageLabel(scope) + '图片';
     if (!image) return '';
     return ''
-      + '<div class="order-image-preview order-refund-image-preview" role="dialog" aria-modal="true" aria-label="退款图片大图" tabindex="-1">'
-      +   '<button type="button" class="order-image-preview__backdrop" data-close-refund-image-preview aria-label="关闭退款图片大图"></button>'
+      + '<div class="order-image-preview order-refund-image-preview" role="dialog" aria-modal="true" aria-label="' + label + '大图" tabindex="-1">'
+      +   '<button type="button" class="order-image-preview__backdrop" data-close-refund-image-preview aria-label="关闭' + label + '大图"></button>'
       +   '<div class="order-image-preview__panel">'
       +     '<button type="button" class="order-image-preview__close" data-close-refund-image-preview aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
-      +     '<span class="wg-image wg-image--contain wg-image--rounded-lg order-image-preview__image" data-component="image" data-component-slug="image" data-variant-name="Image_Contain_ClickablePreview"><img class="wg-image__src is-loaded" src="' + escapeHtml(image.url) + '" alt="退款备注图片大图"></span>'
-      +     '<small>退款图片</small>'
+      +     '<span class="wg-image wg-image--contain wg-image--rounded-lg order-image-preview__image" data-component="image" data-component-slug="image" data-variant-name="Image_Contain_ClickablePreview"><img class="wg-image__src is-loaded" src="' + escapeHtml(image.url) + '" alt="' + label + '大图"></span>'
+      +     '<small>' + label + '</small>'
       +   '</div>'
       + '</div>';
   }
@@ -3898,11 +3969,11 @@
     var noteLabel = isRefund ? '退款备注' : '收款备注';
     var noteEditorValue = typeof draft.noteEditorValue === 'string' ? draft.noteEditorValue : (draft.note || '');
     return ''
-      + '<div class="order-note-modal order-payment-note-modal' + (isRefund ? ' order-payment-note-modal--refund' : '') + '" role="dialog" aria-modal="true" aria-labelledby="order-payment-note-title" data-state="open">'
+      + '<div class="order-note-modal order-payment-note-modal order-remark-modal' + (isRefund ? ' order-payment-note-modal--refund' : '') + '" role="dialog" aria-modal="true" aria-labelledby="order-payment-note-title" data-state="open">'
       +   '<div class="order-note-modal__panel">'
-      +     '<div class="order-note-modal__head"><strong id="order-payment-note-title">' + (draft.note ? '编辑' : '添加') + noteLabel + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only order-payment-note-modal__close" data-component="button" data-component-slug="button" data-payment-note-cancel aria-label="关闭"><i class="btn__icon wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>'
+      +     '<div class="order-note-modal__head"><strong id="order-payment-note-title">' + (isRefund && draft.note ? '编辑' : '添加') + noteLabel + '</strong>' + noteCloseButton('data-payment-note-cancel') + '</div>'
       +     '<div class="order-note-modal__body">'
-      +       '<div class="input input-group order-payment-note-modal__input" data-component="input" data-component-slug="input" data-variant-name="Input_36" data-variant-cn="输入框（多行文本）" data-field-type="textarea"><label class="field-label" for="order-payment-note-value">' + noteLabel + '</label><textarea id="order-payment-note-value" rows="4" aria-label="' + noteLabel + '" placeholder="请输入' + noteLabel + '" maxlength="200" data-payment-note-editor>' + escapeHtml(noteEditorValue) + '</textarea>' + (isRefund ? paymentRefundImages(draft) : '') + '</div>'
+      +       noteEditorField(Object.assign({}, draft, { noteEditorValue: noteEditorValue }), 'payment', noteLabel, '请输入' + noteLabel)
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-payment-note-cancel')
@@ -7278,6 +7349,7 @@
       return;
     }
     if (target.matches('[data-preview-refund-image]')) {
+      state.noteImagePreviewScope = target.dataset.noteImageScope || 'payment';
       state.refundImagePreviewIndex = Number(target.dataset.previewRefundImage);
       renderActive();
       var refundPreviewDialog = root.querySelector('.order-refund-image-preview');
@@ -7288,7 +7360,7 @@
       var closedRefundPreviewIndex = state.refundImagePreviewIndex;
       state.refundImagePreviewIndex = null;
       renderActive();
-      var closedRefundPreviewTrigger = Array.from(root.querySelectorAll('[data-preview-refund-image="' + closedRefundPreviewIndex + '"]')).find(function (node) { return node.getClientRects().length > 0; });
+      var closedRefundPreviewTrigger = Array.from(root.querySelectorAll('[data-preview-refund-image="' + closedRefundPreviewIndex + '"][data-note-image-scope="' + state.noteImagePreviewScope + '"]')).find(function (node) { return node.getClientRects().length > 0; });
       if (closedRefundPreviewTrigger) closedRefundPreviewTrigger.focus({ preventScroll: true });
       return;
     }
@@ -8307,6 +8379,10 @@
       return;
     }
     if (target.closest('[data-toggle-order-note]')) {
+      state.orderNoteDraft = {
+        merchant: { noteEditorValue: state.orderNoteMerchant, refundImagesEditor: state.orderNoteMerchantImages.slice(), refundImageReadsPending: 0 },
+        buyer: { noteEditorValue: state.orderNoteBuyer, refundImagesEditor: state.orderNoteBuyerImages.slice(), refundImageReadsPending: 0 }
+      };
       state.orderNoteOpen = true;
       renderActive();
       var noteField = activeContext.root.querySelector('[data-order-note-merchant]');
@@ -8371,17 +8447,22 @@
       return;
     }
     if (target.matches('[data-note-cancel]')) {
-      state.orderNoteOpen = false;
+      cancelNoteEditor('order');
       renderActive();
       return;
     }
     if (target.matches('[data-note-confirm]')) {
-      var noteScope = target.closest('.order-note-modal');
-      var merchantField = noteScope ? noteScope.querySelector('[data-order-note-merchant]') : null;
-      var buyerField = noteScope ? noteScope.querySelector('[data-order-note-buyer]') : null;
-      if (merchantField) state.orderNoteMerchant = merchantField.value.trim();
-      if (buyerField) state.orderNoteBuyer = buyerField.value.trim();
-      state.orderNoteOpen = false;
+      if (!state.orderNoteDraft) return;
+      if (state.orderNoteDraft.merchant.refundImageReadsPending || state.orderNoteDraft.buyer.refundImageReadsPending) {
+        ctx.toast('图片正在读取，请稍后再试');
+        return;
+      }
+      captureNoteEditorValues(root);
+      state.orderNoteMerchant = state.orderNoteDraft.merchant.noteEditorValue.trim().slice(0, 200);
+      state.orderNoteBuyer = state.orderNoteDraft.buyer.noteEditorValue.trim().slice(0, 200);
+      state.orderNoteMerchantImages = state.orderNoteDraft.merchant.refundImagesEditor.slice();
+      state.orderNoteBuyerImages = state.orderNoteDraft.buyer.refundImagesEditor.slice();
+      cancelNoteEditor('order');
       markDirty(ctx);
       renderActive();
       ctx.toast('整单备注已保存');
@@ -8553,10 +8634,8 @@
     if (target.matches('[data-open-payment-note]')) {
       if (!state.paymentDraft) return;
       state.paymentDraft.noteEditorValue = state.paymentDraft.note || '';
-      if (totals().payable < 0) {
-        state.paymentDraft.refundImagesEditor = state.paymentDraft.refundImages.slice();
-        state.paymentDraft.refundImageReadsPending = 0;
-      }
+      state.paymentDraft.refundImagesEditor = state.paymentDraft.refundImages.slice();
+      state.paymentDraft.refundImageReadsPending = 0;
       state.paymentDraft.noteEditorOpen = true;
       renderActive();
       var paymentNoteField = activeContext.root.querySelector('[data-payment-note-editor]');
@@ -8565,10 +8644,7 @@
     }
     if (target.matches('[data-payment-note-cancel]')) {
       if (!state.paymentDraft) return;
-      state.paymentDraft.noteEditorValue = state.paymentDraft.note || '';
-      state.paymentDraft.noteEditorOpen = false;
-      state.paymentDraft.refundImagesEditor = null;
-      state.paymentDraft.refundImageReadsPending = 0;
+      cancelNoteEditor('payment');
       renderPaymentPreservingScroll(root, '[data-open-payment-note]');
       return;
     }
@@ -8580,7 +8656,7 @@
       }
       var paymentNoteScope = target.closest('.order-payment-note-modal');
       var paymentNoteEditor = paymentNoteScope ? paymentNoteScope.querySelector('[data-payment-note-editor]') : null;
-      state.paymentDraft.note = paymentNoteEditor ? paymentNoteEditor.value.trim() : state.paymentDraft.note;
+      state.paymentDraft.note = String(paymentNoteEditor ? paymentNoteEditor.value : state.paymentDraft.noteEditorValue || '').trim().slice(0, 200);
       if (Array.isArray(state.paymentDraft.refundImagesEditor)) {
         state.paymentDraft.refundImages = state.paymentDraft.refundImagesEditor.slice();
         state.paymentDraft.refundImagesEditor = null;
@@ -8643,17 +8719,17 @@
       return;
     }
     if (target.matches('[data-trigger-refund-image]')) {
-      var refundImageInput = root.querySelector('[data-refund-image-input]');
+      var refundImageInput = root.querySelector('[data-refund-image-input][data-note-image-scope="' + (target.dataset.noteImageScope || 'payment') + '"]');
       if (refundImageInput) refundImageInput.click();
       return;
     }
     if (target.matches('[data-remove-refund-image]')) {
       var refundImageIndex = Number(target.dataset.removeRefundImage);
-      if (!state.paymentDraft || !Array.isArray(state.paymentDraft.refundImagesEditor)) return;
-      var refundNoteEditor = root.querySelector('[data-payment-note-editor]');
-      if (refundNoteEditor) state.paymentDraft.noteEditorValue = refundNoteEditor.value;
-      state.paymentDraft.refundImagesEditor.splice(refundImageIndex, 1);
-      renderPaymentPreservingScroll(root);
+      var imageEditorDraft = activeNoteImageDraft(target.dataset.noteImageScope || 'payment');
+      if (!imageEditorDraft || !Array.isArray(imageEditorDraft.refundImagesEditor)) return;
+      captureNoteEditorValues(root);
+      imageEditorDraft.refundImagesEditor.splice(refundImageIndex, 1);
+      renderNoteEditorPreservingContext(root);
       return;
     }
     if (target.matches('[data-close-refund-balance-guide]')) {
@@ -9039,33 +9115,34 @@
       imageReader.readAsDataURL(productImageFile);
       return;
     }
-    if (target.matches('[data-refund-image-input]') && state.paymentDraft) {
+    if (target.matches('[data-refund-image-input]')) {
       // Prototype-only local preview; production uploads through FormImageUpload and stores server file ids.
-      if (!state.paymentDraft.noteEditorOpen || !Array.isArray(state.paymentDraft.refundImagesEditor) || !target.files || !target.files.length) return;
-      var activeRefundNoteEditor = root.querySelector('[data-payment-note-editor]');
-      if (activeRefundNoteEditor) state.paymentDraft.noteEditorValue = activeRefundNoteEditor.value;
+      var imageScope = target.dataset.noteImageScope || 'payment';
+      var refundImageDraft = activeNoteImageDraft(imageScope);
+      if (!refundImageDraft || !Array.isArray(refundImageDraft.refundImagesEditor) || !target.files || !target.files.length) return;
+      captureNoteEditorValues(root);
       var refundImageFiles = Array.from(target.files || []).filter(function (file) { return !file.type || file.type.indexOf('image/') === 0; });
       if (!refundImageFiles.length) {
         ctx.toast('请选择图片文件');
         target.value = '';
         return;
       }
-      var refundImageDraft = state.paymentDraft;
       var refundEditorImages = refundImageDraft.refundImagesEditor;
       var imageSlots = Math.max(0, 9 - refundEditorImages.length - refundImageDraft.refundImageReadsPending);
       refundImageFiles.slice(0, imageSlots).forEach(function (file) {
         refundImageDraft.refundImageReadsPending += 1;
         var reader = new FileReader();
         reader.onload = function () {
-          if (state.paymentDraft !== refundImageDraft || !refundImageDraft.noteEditorOpen || refundImageDraft.refundImagesEditor !== refundEditorImages) return;
+          if (activeNoteImageDraft(imageScope) !== refundImageDraft || refundImageDraft.refundImagesEditor !== refundEditorImages) return;
+          captureNoteEditorValues(root);
           refundImageDraft.refundImageReadsPending -= 1;
           refundEditorImages.push({ name: file.name, url: String(reader.result || '') });
-          renderActive();
+          renderNoteEditorPreservingContext(root);
         };
         reader.onerror = function () {
-          if (state.paymentDraft !== refundImageDraft || !refundImageDraft.noteEditorOpen || refundImageDraft.refundImagesEditor !== refundEditorImages) return;
+          if (activeNoteImageDraft(imageScope) !== refundImageDraft || refundImageDraft.refundImagesEditor !== refundEditorImages) return;
           refundImageDraft.refundImageReadsPending -= 1;
-          ctx.toast('退款图片读取失败，请重试');
+          ctx.toast(noteImageLabel(imageScope) + '图片读取失败，请重试');
         };
         reader.readAsDataURL(file);
       });
@@ -9325,11 +9402,15 @@
       return;
     }
     if (target.matches('[data-order-note-merchant]')) {
-      state.orderNoteMerchant = target.value;
+      if (state.orderNoteDraft) state.orderNoteDraft.merchant.noteEditorValue = target.value;
       return;
     }
     if (target.matches('[data-order-note-buyer]')) {
-      state.orderNoteBuyer = target.value;
+      if (state.orderNoteDraft) state.orderNoteDraft.buyer.noteEditorValue = target.value;
+      return;
+    }
+    if (target.matches('[data-payment-note-editor]') && state.paymentDraft) {
+      state.paymentDraft.noteEditorValue = target.value;
       return;
     }
     if (target.matches('[data-split]') && state.paymentDraft) {
@@ -9709,6 +9790,16 @@
         renderActive();
         return;
       }
+      if (event.key === 'Escape' && state.paymentDraft && state.paymentDraft.noteEditorOpen) {
+        cancelNoteEditor('payment');
+        renderPaymentPreservingScroll(root, '[data-open-payment-note]');
+        return;
+      }
+      if (event.key === 'Escape' && state.orderNoteOpen) {
+        cancelNoteEditor('order');
+        renderActive();
+        return;
+      }
       if (event.key === 'Escape' && state.guidePickerOpen) {
         state.guidePickerOpen = false;
         state.guideDraftId = state.guide.id;
@@ -9918,6 +10009,11 @@
     state.senderInfo = { name: '何小小', phone: '13690809124' };
     state.orderNoteMerchant = '';
     state.orderNoteBuyer = '';
+    state.orderNoteMerchantImages = [];
+    state.orderNoteBuyerImages = [];
+    state.orderNoteDraft = null;
+    state.refundImagePreviewIndex = null;
+    state.noteImagePreviewScope = 'payment';
     state.orderNoteOpen = false;
     state.freightEditOpen = false;
     state.selectedRow = null;
