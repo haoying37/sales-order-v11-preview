@@ -7113,11 +7113,6 @@ button.order-payment-method-card {
     padding-left: 0;
   }
 
-  .order-desktop__lines .order-note-bar__note {
-    flex-shrink: 0;
-    width: max(100%, 924px);
-  }
-
   .order-desktop-product-row {
     position: relative;
     align-items: center;
@@ -8293,9 +8288,6 @@ button.order-payment-method-card {
     min-width: calc(760px - var(--spacer-16));
   }
 
-  .order-desktop__lines .order-note-bar__note {
-    width: max(100%, 760px);
-  }
 }
 
 @media (max-width: 460px) {
@@ -10547,10 +10539,6 @@ button.order-payment-method-card {
     min-width: 0;
   }
 
-  .order-desktop__lines .order-note-bar__note {
-    width: 100%;
-  }
-
   .order-desktop__table-head,
   .order-desktop-product-row {
     grid-template-columns: minmax(96px, 1.2fr) var(--size-48) minmax(76px, .9fr) minmax(60px, .65fr) 88px minmax(64px, .75fr) minmax(64px, .75fr) var(--size-32);
@@ -12490,3 +12478,155 @@ button.order-payment-method-card {
 .order-promotion-modal--total .order-sku-price-input { width: 100%; max-width: none; }
 .order-promotion-modal--total .order-sku-price-modal__panel { width: min(300px, 100%); }
 .order-summary-row--total .order-summary-total-edit strong.is-negative { color: var(--red_100); }
+
+/* 已添加区：字段保持可读下限，只有商品表格扩宽；备注跟随可视区。 */
+.order-note-bar__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacer-8);
+  min-width: 0;
+  font-size: var(--Font14-font-size);
+  line-height: var(--Font14-line-height);
+}
+
+.order-note-bar__row { min-width: 0; }
+.order-note-bar__note { max-width: 100%; }
+
+@media (min-width: 768px) {
+  .order-desktop__table {
+    --order-image-column: ;
+    --order-note-column: minmax(112px, 1fr);
+    --order-fields-min-width: 828px;
+    container-type: inline-size;
+    overflow: auto;
+  }
+  .order-desktop__table.is-product-note-hidden {
+    --order-note-column: ;
+    --order-fields-min-width: 708px;
+  }
+  .order-desktop__table.is-showing-images {
+    --order-image-column: var(--size-64);
+    --order-fields-min-width: 900px;
+  }
+  .order-desktop__table.is-product-note-hidden.is-showing-images {
+    --order-fields-min-width: 780px;
+  }
+  .order-desktop__table-title {
+    left: 0;
+    width: 100cqw;
+    min-width: 0;
+    min-height: var(--size-56);
+  }
+  .order-desktop__table-content {
+    width: max(100%, var(--order-fields-min-width));
+  }
+  .order-desktop__grid .order-desktop__lines {
+    height: auto;
+    min-width: 0;
+    padding: 0 var(--spacer-12);
+  }
+  .order-desktop__table .order-desktop__grid .order-desktop__table-head,
+  .order-desktop__table .order-desktop__grid .order-desktop-product-row,
+  .order-desktop__table.is-showing-images .order-desktop__grid .order-desktop__table-head,
+  .order-desktop__table.is-showing-images .order-desktop__grid .order-desktop-product-row {
+    grid-template-columns: minmax(180px, 2fr) var(--order-image-column) minmax(104px, 1.2fr) minmax(96px, 1fr) 112px minmax(120px, 1.2fr) var(--order-note-column) var(--size-32);
+    gap: var(--spacer-8);
+    min-width: 0;
+  }
+  .order-desktop__grid .order-desktop__table-head {
+    top: var(--size-56);
+    margin: 0;
+    padding: var(--spacer-8) var(--spacer-12);
+  }
+  .order-desktop__table .order-desktop__grid .order-desktop__table-head > :nth-child(n),
+  .order-desktop__table .order-desktop__grid .order-desktop-product-row > :nth-child(n) {
+    grid-column: auto;
+    min-width: 0;
+    padding-right: 0;
+  }
+  .order-desktop__table .order-desktop__grid .order-desktop-row-delete {
+    position: static;
+    align-self: center;
+    justify-self: end;
+    transform: none;
+  }
+  .order-desktop__table .order-desktop__grid .order-desktop-product-row--multi-sku > .order-desktop-row-delete {
+    align-self: start;
+  }
+  .order-desktop__grid .order-desktop-sku-price,
+  .order-desktop__grid .order-desktop-product-total__value {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .order-desktop__table-content > .order-note-bar {
+    position: sticky;
+    left: 0;
+    width: 100cqw;
+    min-width: 0;
+    padding: var(--spacer-12);
+    border-top: 0;
+  }
+  .order-desktop__table-content > .order-note-bar .order-note-bar__note {
+    width: 100%;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+
+  /* 首列冻结：表头与商品行共用左边距，其他字段从不透明底色下滚过。 */
+  .order-desktop__grid .order-desktop__name-head,
+  .order-desktop__grid .order-desktop-product-row > .order-desktop-product-name {
+    position: sticky;
+    left: var(--spacer-12);
+    z-index: 2;
+    align-self: stretch;
+    background: var(--bg_white_100);
+  }
+  .order-desktop__grid .order-desktop__name-head {
+    background: var(--bg_gray_03_pack);
+  }
+  .order-desktop__grid .order-desktop-product-row > .order-desktop-product-name {
+    justify-content: center;
+  }
+  .order-desktop__grid .order-desktop-product-row--multi-sku > .order-desktop-product-name {
+    justify-content: flex-start;
+  }
+  .order-desktop__grid .order-desktop-product-row.is-selected > .order-desktop-product-name {
+    /* 选中色叠在白底上，不能透出背后的图片或文字。 */
+    background: linear-gradient(var(--green_1_10), var(--green_1_10)), var(--bg_white_100);
+  }
+  .order-desktop__grid .order-desktop__name-head::before,
+  .order-desktop__grid .order-desktop-product-name::before {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    bottom: 0;
+    width: var(--spacer-12);
+    background: inherit;
+    content: "";
+    pointer-events: none;
+  }
+
+  /* 阴影跨过父行上下 padding 和底部分隔线，与下一行首尾相接；不改变内容布局。 */
+  .order-desktop__grid .order-desktop-product-row {
+    --order-frozen-shadow-inset: var(--spacer-4);
+  }
+  .order-desktop__grid .order-desktop__table-head,
+  .order-desktop__grid .order-desktop-product-row--multi-sku {
+    --order-frozen-shadow-inset: var(--spacer-8);
+  }
+
+  /* 横向偏移后提示首列下方仍有字段；回到起点无阴影，不占列宽或拦截点击。 */
+  .order-desktop__table.is-fields-scrolled .order-desktop__name-head::after,
+  .order-desktop__table.is-fields-scrolled .order-desktop-product-row > .order-desktop-product-name::after {
+    position: absolute;
+    top: calc(0px - var(--order-frozen-shadow-inset));
+    bottom: calc(0px - var(--order-frozen-shadow-inset) - var(--stroke-hairline));
+    left: 100%;
+    width: var(--spacer-8);
+    background: linear-gradient(to right, var(--bg_shadow_08), transparent);
+    content: "";
+    pointer-events: none;
+  }
+}

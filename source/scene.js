@@ -1489,6 +1489,11 @@
     return snapshots;
   }
 
+  function syncOrderFrozenColumnShadow(table) {
+    if (!table || !table.classList) return;
+    table.classList.toggle('is-fields-scrolled', table.scrollLeft > 0 && table.scrollWidth > table.clientWidth);
+  }
+
   function restoreRenderScrollPositions(root, snapshots) {
     if (!root || !root.querySelectorAll || !snapshots || !snapshots.length) return;
     snapshots.forEach(function (snapshot) {
@@ -1496,6 +1501,7 @@
       if (!node) return;
       node.scrollTop = snapshot.top;
       node.scrollLeft = snapshot.left;
+      if (snapshot.selector === '.order-desktop__table') syncOrderFrozenColumnShadow(node);
     });
   }
 
@@ -2253,12 +2259,9 @@
     var hasNote = !!(state.orderNoteMerchant || state.orderNoteBuyer || hasImages);
     var preview = '';
     if (hasNote) {
-      var lines = [];
-      if (state.orderNoteMerchant) lines.push('<span class="order-note-bar__line"><span class="order-note-bar__label">商家备注</span>' + escapeHtml(state.orderNoteMerchant) + '</span>');
-      if (state.orderNoteBuyer) lines.push('<span class="order-note-bar__line"><span class="order-note-bar__label">买家备注</span>' + escapeHtml(state.orderNoteBuyer) + '</span>');
-      preview = '<div class="order-refund-note-entry__content">' + (lines.length ? '<p class="order-note-bar__preview">' + lines.join('') + '</p>' : '')
-        + noteSavedImages(state.orderNoteMerchantImages, 'merchant', '商家备注')
-        + noteSavedImages(state.orderNoteBuyerImages, 'buyer', '买家备注') + '</div>';
+      preview = '<div class="order-refund-note-entry__content">'
+        + orderNotePreviewGroup(state.orderNoteMerchant, state.orderNoteMerchantImages, 'merchant', '商家备注')
+        + orderNotePreviewGroup(state.orderNoteBuyer, state.orderNoteBuyerImages, 'buyer', '买家留言') + '</div>';
     }
     return ''
       + '<section class="order-note-bar" aria-label="订单备注">'
@@ -2270,6 +2273,13 @@
       + '</section>';
   }
 
+  function orderNotePreviewGroup(text, images, scope, label) {
+    if (!text && !images.length) return '';
+    return '<div class="order-note-bar__group" data-note-preview-scope="' + scope + '" aria-label="' + label + '">'
+      + (text ? '<button type="button" class="order-refund-note-entry__text" data-toggle-order-note><span class="order-note-bar__label">' + label + '</span>' + escapeHtml(text) + '</button>' : '<span class="order-note-bar__label">' + label + '</span>')
+      + noteSavedImages(images, scope, label) + '</div>';
+  }
+
   function orderNoteModal() {
     if (!state.orderNoteOpen || !state.orderNoteDraft) return '';
     return ''
@@ -2278,7 +2288,7 @@
       +     '<div class="order-note-modal__head"><strong>添加备注</strong>' + noteCloseButton('data-note-cancel') + '</div>'
       +     '<div class="order-note-modal__body">'
       +       '<section class="order-remark-field"><label class="field-label" for="order-note-merchant">商家备注</label>' + noteEditorField(state.orderNoteDraft.merchant, 'merchant', '商家备注', '请输入文字，商家备注仅你可见') + '</section>'
-      +       '<section class="order-remark-field"><label class="field-label" for="order-note-buyer">买家备注</label>' + noteEditorField(state.orderNoteDraft.buyer, 'buyer', '买家备注', '请输入文字，买家备注双方可见') + '</section>'
+      +       '<section class="order-remark-field"><label class="field-label" for="order-note-buyer">买家留言</label>' + noteEditorField(state.orderNoteDraft.buyer, 'buyer', '买家留言', '请输入文字，买家留言双方可见') + '</section>'
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-note-cancel')
@@ -3260,9 +3270,12 @@
       +   '</div>'
       +   '<section class="order-desktop__list-card" aria-labelledby="order-desktop-list-title">'
       +     '<div class="order-desktop__table' + (state.desktopShowProductImages ? ' is-showing-images' : '') + (!featureEnabled('productNoteColumn') ? ' is-product-note-hidden' : '') + '">'
+      +       '<div class="order-desktop__table-content">'
       +       '<div class="order-desktop__table-title"><div class="order-desktop__table-title-main"><strong id="order-desktop-list-title">已添加</strong><span>显示商品图</span><button type="button" class="switch ' + (state.desktopShowProductImages ? 'switch--on' : 'switch--off') + '" role="switch" aria-checked="' + state.desktopShowProductImages + '" aria-label="显示商品图" data-component="switch" data-variant-name="Switch" data-component-slug="switch" data-toggle-product-images><span class="switch__thumb"></span></button></div><div class="order-desktop__table-actions">' + (state.products.length ? '<button type="button" class="btn btn--weak btn--sm order-desktop-clear-order" data-component-slug="button" data-clear-order><i class="btn__icon icon-shanchu" aria-hidden="true"></i>清空整单</button>' : '') + '<button type="button" class="btn btn--weak btn--sm order-desktop-fullscreen" data-component-slug="button" data-toggle-order-fullscreen><i class="btn__icon ' + (state.desktopOrderFullscreen ? 'icon-feiquanping16' : 'icon-quanping16') + '" aria-hidden="true"></i>' + (state.desktopOrderFullscreen ? '退出全屏' : '全屏') + '</button></div></div>'
-      +       '<div class="order-desktop__table-head"><span class="order-desktop__name-head"><button type="button" class="order-display-dropdown-trigger" data-toggle-display-menu aria-haspopup="listbox" aria-expanded="' + state.displayModeMenuOpen + '">货号／名称 (<span class="order-display-dropdown-trigger__value" data-display-mode-anchor>' + (state.displayMode === 'grouped' ? '按商品' : '按规格') + '</span>)<i class="wego-iconfont-s ' + (state.displayModeMenuOpen ? 'icon-shangjiantou-mian16' : 'icon-xiajiantou-mian16') + '" aria-hidden="true"></i></button></span><span>商品图</span><span>颜色／规格</span><span>单价</span><span>数量</span><span>合计</span><span' + (featureEnabled('productNoteColumn') ? '' : ' hidden aria-hidden="true"') + '>备注</span><span aria-hidden="true"></span></div>'
-      +       '<div class="order-desktop__lines">' + (state.products.length ? desktopProductRows() : '<div class="order-empty"><strong>当前订单暂无商品</strong><span>从右侧商品库添加商品</span></div>') + orderNoteEntry() + '</div>'
+      +       '<div class="order-desktop__grid">'
+      +         '<div class="order-desktop__table-head"><span class="order-desktop__name-head"><button type="button" class="order-display-dropdown-trigger" data-toggle-display-menu aria-haspopup="listbox" aria-expanded="' + state.displayModeMenuOpen + '">货号／名称 (<span class="order-display-dropdown-trigger__value" data-display-mode-anchor>' + (state.displayMode === 'grouped' ? '按商品' : '按规格') + '</span>)<i class="wego-iconfont-s ' + (state.displayModeMenuOpen ? 'icon-shangjiantou-mian16' : 'icon-xiajiantou-mian16') + '" aria-hidden="true"></i></button></span><span>商品图</span><span>颜色／规格</span><span>单价</span><span>数量</span><span>合计</span><span' + (featureEnabled('productNoteColumn') ? '' : ' hidden aria-hidden="true"') + '>备注</span><span aria-hidden="true"></span></div>'
+      +         '<div class="order-desktop__lines">' + (state.products.length ? desktopProductRows() : '<div class="order-empty"><strong>当前订单暂无商品</strong><span>从右侧商品库添加商品</span></div>') + '</div>'
+      +       '</div>' + orderNoteEntry() + '</div>'
       +     '</div>'
       +   '</section>'
       +   '<footer class="order-desktop__summary">'
@@ -3780,7 +3793,7 @@
   }
 
   function noteImageLabel(scope) {
-    return scope === 'merchant' ? '商家备注' : scope === 'buyer' ? '买家备注' : totals().payable < 0 ? '退款' : '收款';
+    return scope === 'merchant' ? '商家备注' : scope === 'buyer' ? '买家留言' : totals().payable < 0 ? '退款' : '收款';
   }
 
   function noteEditorField(draft, scope, label, placeholder) {
@@ -5905,6 +5918,7 @@
     state.catalogWidth = clamped;
     workspace.style.gridTemplateColumns = 'minmax(0,1fr) 0 minmax(300px,' + Math.round(clamped) + 'px)';
     syncCatalogGridColumns(root, clamped);
+    syncOrderFrozenColumnShadow(root.querySelector('.order-desktop__table'));
   }
 
   function beginCatalogResize(event, root) {
@@ -9486,6 +9500,7 @@
 
   function applyLayoutWatch() {
     closeRefundWarehouseMenu(activeContext && activeContext.root);
+    syncOrderFrozenColumnShadow(activeContext && activeContext.root && activeContext.root.querySelector('.order-desktop__table'));
     var tabletPortrait = isTabletPortrait();
     var desktopWorkbench = isDesktopWorkbench();
     var layoutChanged = tabletPortrait !== layoutWatchTabletPortrait || desktopWorkbench !== layoutWatchDesktop;
@@ -9504,7 +9519,10 @@
     layoutWatchSnapshot();
     bindLayoutWatch();
     renderWorkbench(root, ctx);
-    root.addEventListener('scroll', function () { closeRefundWarehouseMenu(root); }, true);
+    root.addEventListener('scroll', function (event) {
+      closeRefundWarehouseMenu(root);
+      if (event.target.matches && event.target.matches('.order-desktop__table')) syncOrderFrozenColumnShadow(event.target);
+    }, true);
     window.clearTimeout(imageSearchPermissionTimer);
     imageSearchPermissionTimer = window.setTimeout(function () {
       if (!state.imageSearch) return;
