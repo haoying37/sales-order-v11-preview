@@ -196,7 +196,9 @@
     couponDiscount: false,
     promotionDiscount: false,
     productNoteColumn: false,
-    addProductNote: false
+    addProductNote: false,
+    comboPayment: false, // 本期隐藏组合支付；后续确认开放时改为 true，保留原有实现。
+    onlinePayment: false // 本期隐藏在线收款；后续明确开放后单点恢复。
   });
 
   function featureEnabled(name) {
@@ -405,9 +407,10 @@
     try {
       var saved = JSON.parse(window.localStorage.getItem('wego-order-payment-preference') || 'null');
       if (!saved || ['unpaid', 'online', 'private', 'debt'].indexOf(saved.kind) < 0) return null;
+      if (saved.kind === 'online' && !featureEnabled('onlinePayment')) return null;
       return {
         kind: saved.kind,
-        mode: saved.mode === 'combo' ? 'combo' : 'single',
+        mode: featureEnabled('comboPayment') && saved.mode === 'combo' ? 'combo' : 'single',
         method: PAYMENT_METHODS.some(function (method) { return method.id === saved.method; }) ? saved.method : ''
       };
     } catch (error) {
@@ -3636,6 +3639,7 @@
 
   function checkoutPanel() {
     var draft = state.paymentDraft;
+    applyPaymentFeatureVisibility(draft);
     var t = totals();
     if (!draft) return '';
     if (t.payable < 0) return refundCheckoutPanel(draft, t);
@@ -3648,12 +3652,12 @@
       collectionContent = '<div class="order-reference-payment__status-row' + (isCollecting ? ' is-guided' : '') + '">'
         + '<div class="order-payment-kind" role="radiogroup" aria-label="收款状态">'
         + paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid')
-        + paymentKindOption('online', '在线收款', draft.kind === 'online')
+        + (featureEnabled('onlinePayment') ? paymentKindOption('online', '在线收款', draft.kind === 'online') : '')
         + paymentKindOption('private', '已私下收款', draft.kind === 'private')
         + paymentKindOption('debt', '记欠款', draft.kind === 'debt', !state.customer)
         + '</div></div>'
         + (isCollecting ? paymentReferenceMethods(draft, targetCents) : '')
-        + (draft.kind === 'debt' ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span><strong>累计欠款 ' + money(17880) + '（含本次）</strong></div>' : '');
+        + (draft.kind === 'debt' ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span></div>' : '');
     }
     var overlay = '';
     if (draft.showShortageDialog) overlay = paymentShortageDialog(draft, t.payable);
@@ -3723,7 +3727,7 @@
       + '</div>';
   }
 
-  // Stack anatomy with scene-sized tiles; selection remains owned by the refund state machine.
+  // Shared collection/refund Stack anatomy; each host owns its selection state.
   function refundStackOption(classes, attributes, content, selected) {
     var corner = '<span class="stack__check-corner order-delivery-option__check order-reference-payment__selection-check" aria-hidden="true"><img class="stack__check-icon" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>';
     return '<button type="button" class="stack order-refund-stack' + (selected ? ' stack--selected' : '') + '" data-component="stack" data-component-slug="stack" data-state="' + (selected ? 'selected' : 'unselected') + '" ' + attributes + '>'
@@ -3888,6 +3892,8 @@
   }
 
   function paymentReferenceMethods(draft, targetCents) {
+    applyPaymentFeatureVisibility(draft);
+    if (!draft || (draft.kind !== 'online' && draft.kind !== 'private')) return '';
     var methods = paymentMethodsForKind(draft.kind);
     var selectedMethods = selectedPaymentMethods(draft);
     var selectedMethod = paymentMethodById(draft.method);
@@ -3908,10 +3914,12 @@
     } else {
       content = '<div class="order-reference-payment__private-methods">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
+        return refundStackOption('', 'data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"',
+          '<i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span class="stack__label"><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '') + '</span>', Boolean(active));
       }).join('') + '</div>';
     }
-    return '<section class="order-reference-payment__methods"><header><strong>支付方式</strong><button type="button" class="order-reference-payment__mode-switch" role="switch" aria-checked="' + (draft.mode === 'combo') + '" data-payment-mode="' + (draft.mode === 'combo' ? 'single' : 'combo') + '"><span>组合支付</span><i class="switch ' + (draft.mode === 'combo' ? 'switch--on' : 'switch--off') + '" data-component-slug="switch"><span class="switch__thumb"></span></i></button></header>' + content + '</section>';
+    var modeSwitch = featureEnabled('comboPayment') ? '<button type="button" class="order-reference-payment__mode-switch" role="switch" aria-checked="' + (draft.mode === 'combo') + '" data-payment-mode="' + (draft.mode === 'combo' ? 'single' : 'combo') + '"><span>组合支付</span><i class="switch ' + (draft.mode === 'combo' ? 'switch--on' : 'switch--off') + '" data-component-slug="switch"><span class="switch__thumb"></span></i></button>' : '';
+    return '<section class="order-reference-payment__methods"><header><strong>支付方式</strong>' + modeSwitch + '</header>' + content + '</section>';
   }
 
   function paymentOnlineComboInput(method, draft, index) {
@@ -4023,6 +4031,11 @@
     if (isSingleQrCodePayment(draft) && draft.flowMethodId === 'qrpay' && state.paymentStatus !== 'idle') return '';
     var parts = [];
     var balance = paymentBalanceCents(draft, payable) / 100;
+    if (draft.kind === 'private') {
+      if (balance > 0) parts.push('余额抵扣');
+      selectedPaymentMethods(draft).forEach(function (method) { parts.push(method.label); });
+      return parts.join(' + ');
+    }
     if (balance > 0) parts.push('余额抵扣' + money(balance));
     var allocated = paymentAllocatedCents(draft) / 100;
     if (allocated > 0) parts.push((draft.kind === 'online' ? '在线收款' : '私下收款') + money(allocated));
@@ -6401,6 +6414,23 @@
     return true;
   }
 
+  function applyPaymentFeatureVisibility(draft) {
+    if (draft && !featureEnabled('onlinePayment') && draft.kind === 'online') {
+      // 隐藏功能不能从旧状态继续扣款；保留在线金额字段，但不转换为私下收款。
+      draft.kind = 'unpaid';
+      draft.showShortageDialog = false;
+      clearOnlinePaymentFlow(draft);
+      state.paymentStatus = 'idle';
+    }
+    if (!draft || featureEnabled('comboPayment') || draft.mode !== 'combo') return;
+    // 仅恢复本次单一支付选择，不把旧组合金额合并成一次收款；组合草稿字段保留。
+    draft.lastComboMethods = (draft.selectedMethods || []).slice();
+    draft.mode = 'single';
+    draft.method = draft.lastSingleMethod || '';
+    draft.singleAmount = draft.method ? String(draft.lastSingleAmount || '') : '';
+    draft.selectedMethods = draft.method ? [draft.method] : [];
+  }
+
   function createPaymentDraft() {
     var draft = {
       kind: 'unpaid',
@@ -6523,6 +6553,7 @@
 
   function confirmPayment(ctx) {
     var draft = state.paymentDraft;
+    applyPaymentFeatureVisibility(draft);
     var payable = totals().payable;
     if (payable < 0) {
       confirmRefund(ctx, draft);
@@ -6620,6 +6651,7 @@
   }
 
   function startOnlinePayment() {
+    if (!featureEnabled('onlinePayment')) return;
     var draft = state.paymentDraft;
     if (!draft) return;
     draft.flowMethodIds = selectedPaymentMethods(draft).filter(function (method) {
@@ -6632,6 +6664,7 @@
   }
 
   function retryOnlinePayment(ctx) {
+    if (!featureEnabled('onlinePayment')) return;
     var method = paymentMethodById(state.paymentDraft && state.paymentDraft.flowMethodId);
     state.paymentStatus = method && method.id === 'scanpay' ? 'scanning' : 'awaiting-qr';
     renderActive();
@@ -6639,6 +6672,7 @@
   }
 
   function advanceOnlinePayment(ctx) {
+    if (!featureEnabled('onlinePayment')) return;
     var draft = state.paymentDraft;
     if (!draft) return;
     if (draft.flowMethodId && draft.flowCompletedIds.indexOf(draft.flowMethodId) < 0) draft.flowCompletedIds.push(draft.flowMethodId);
@@ -6665,6 +6699,7 @@
   }
 
   function settleQrPayment(ctx, succeeded) {
+    if (!featureEnabled('onlinePayment')) return;
     var draft = state.paymentDraft;
     if (!draft || draft.flowMethodId !== 'qrpay' || state.paymentStatus === 'processing') return;
     state.paymentStatus = 'processing';
@@ -6750,6 +6785,7 @@
   }
 
   async function openPaymentScanner(ctx) {
+    if (!featureEnabled('onlinePayment')) return;
     if (paymentScannerStream || !state.paymentDraft || state.paymentDraft.flowMethodId !== 'scanpay' || state.paymentStatus !== 'scanning') return;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.BarcodeDetector) {
       ctx.toast('无法使用摄像头，请检查设备支持');
@@ -8762,6 +8798,7 @@
       return;
     }
     if (target.matches('[data-payment-kind]')) {
+      if (target.dataset.paymentKind === 'online' && !featureEnabled('onlinePayment')) return;
       if (target.dataset.paymentKind === 'debt' && !state.customer) {
         ctx.toast('请先选择客户');
         return;
@@ -8783,6 +8820,7 @@
       return;
     }
     if (target.matches('[data-payment-mode]')) {
+      if (!featureEnabled('comboPayment')) return;
       var nextPaymentMode = target.dataset.paymentMode;
       if (nextPaymentMode === state.paymentDraft.mode) return;
       if (nextPaymentMode === 'combo') {
@@ -8818,6 +8856,7 @@
     if (target.matches('[data-select-payment-method]')) {
       var selectedMethodId = target.dataset.selectPaymentMethod;
       var selectedMethod = paymentMethodById(selectedMethodId);
+      if (selectedMethod && selectedMethod.category === 'online' && !featureEnabled('onlinePayment')) return;
       if (!selectedMethod || selectedMethod.category !== state.paymentDraft.kind) return;
       var payableTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
       if (state.paymentDraft.mode === 'single') {
@@ -8924,6 +8963,7 @@
       confirmPayment(ctx);
       return;
     }
+    if (!featureEnabled('onlinePayment') && target.matches('[data-online-pay-success], [data-query-online-payment], [data-online-pay-fail], [data-online-pay-timeout], [data-online-pay-unknown], [data-retry-online-payment], [data-cancel-online-payment]')) return;
     if (target.matches('[data-online-pay-success], [data-query-online-payment]')) {
       state.paymentStatus = 'processing';
       renderActive();
