@@ -1,0 +1,70 @@
+/* Seg 分段控制器 — canonical: segment-control; visible track 32, hit target 40. */
+.segment-control.wg-segment-control {
+  display: inline-flex;
+  position: relative;
+  align-items: center;
+  height: var(--size-40);
+  max-width: 100%;
+  vertical-align: middle;
+  font-family: var(--Font14-font-family);
+  font-size: var(--Font14-font-size);
+  line-height: var(--Font14-line-height);
+}
+.wg-segment-control[data-layout="fill"] { display: flex; width: 100%; }
+.wg-segment-control__track {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  box-sizing: border-box;
+  height: var(--size-32);
+  padding: 0 var(--spacer-4);
+  border-radius: var(--radius-6);
+  background: var(--bg_gray_03);
+  isolation: isolate;
+}
+.wg-segment-control__item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 var(--_seg-item-width, var(--size-40));
+  box-sizing: border-box;
+  width: var(--_seg-item-width, var(--size-40));
+  min-width: var(--size-40);
+  height: var(--size-40);
+  margin: 0;
+  padding: 0 var(--spacer-6);
+  border: 0;
+  border-radius: var(--radius-4);
+  background: transparent;
+  color: var(--text_80);
+  font: inherit;
+  font-weight: var(--Font14-normal-font-weight);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.wg-segment-control[data-layout="fill"] .wg-segment-control__item { flex: 1 1 0; width: 0; }
+.wg-segment-control__label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.wg-segment-control__item[aria-checked="true"] { color: var(--text_100); font-weight: var(--Font14-medium-font-weight); }
+.wg-segment-control__item:active:not(:disabled):not([aria-disabled="true"]) { opacity: .8; }
+.wg-segment-control__item:focus-visible { outline: var(--spacer-2) solid var(--green_1_100); outline-offset: 0; }
+.wg-segment-control[aria-disabled="true"], .wg-segment-control[disabled],
+.wg-segment-control__item:disabled, .wg-segment-control__item[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
+.wg-segment-control[aria-disabled="true"] .wg-segment-control__item,
+.wg-segment-control[disabled] .wg-segment-control__item { cursor: not-allowed; }
+.wg-segment-control__indicator {
+  position: absolute;
+  z-index: 0;
+  top: var(--spacer-2);
+  left: var(--_seg-indicator-x, var(--spacer-4));
+  width: var(--_seg-indicator-width, var(--size-40));
+  height: var(--size-28);
+  border-radius: var(--radius-4);
+  background: var(--bg_white_100);
+  pointer-events: none;
+  transition: left var(--duration-normal) var(--ease-standard), width var(--duration-normal) var(--ease-standard);
+}
+.wg-segment-control__indicator[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .wg-segment-control__indicator { transition: none; } }

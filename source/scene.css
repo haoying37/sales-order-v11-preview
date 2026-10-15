@@ -457,7 +457,6 @@ body[data-order-layout="landscape"] .phone-indicator {
 
 .order-list-head > div,
 .order-display-switch,
-.order-catalog-view-switch,
 .order-segment {
   display: flex;
   padding: var(--spacer-2);
@@ -467,7 +466,6 @@ body[data-order-layout="landscape"] .phone-indicator {
 
 .order-mode-btn,
 .order-display-switch button,
-.order-catalog-view-switch button,
 .order-segment button {
   min-height: var(--size-28);
   padding: 0 var(--spacer-8);
@@ -481,7 +479,6 @@ body[data-order-layout="landscape"] .phone-indicator {
 
 .order-mode-btn.is-active,
 .order-display-switch button.is-active,
-.order-catalog-view-switch button.is-active,
 .order-segment button.is-active {
   color: var(--green_1_100);
   font-weight: var(--Font14-medium-font-weight);
@@ -7220,9 +7217,6 @@ button.order-payment-method-card {
     justify-content: center;
   }
 
-  .order-desktop-grouped-sku-stack--qty .counter {
-    width: 110px;
-  }
 
   .order-desktop-product-name {
     display: flex;
@@ -7295,9 +7289,6 @@ button.order-payment-method-card {
     min-height: var(--size-48);
   }
 
-  .order-desktop-product-qty .counter {
-    width: 110px;
-  }
 
   .order-desktop-product-qty .counter__hint,
   .order-desktop-grouped-sku-stack--qty .counter__hint {
@@ -8247,9 +8238,6 @@ button.order-payment-method-card {
     font-size: var(--Font16-font-size);
   }
 
-  .order-catalog-view-switch {
-    flex: 0 0 auto;
-  }
 
   .order-desktop-product-search--catalog {
     padding: var(--spacer-8) var(--spacer-12);
@@ -8856,23 +8844,8 @@ button.order-payment-method-card {
     gap: var(--spacer-16);
   }
 
-  .order-catalog-view-switch {
-    height: var(--size-32);
-    padding: var(--spacer-2) var(--spacer-4);
-  }
 
-  .order-catalog-view-switch button {
-    min-width: calc(var(--size-40) + var(--spacer-4));
-    height: var(--size-28);
-    min-height: var(--size-28);
-    padding: 0 var(--spacer-6);
-    color: var(--text_80);
-    font-size: var(--Font14-font-size);
-  }
 
-  .order-catalog-view-switch button.is-active {
-    color: var(--text_100);
-  }
 
   .order-catalog-publish {
     color: var(--text_100);
@@ -12257,47 +12230,10 @@ button.order-payment-method-card {
   }
 }
 
-/* seg_32 HUG: reviewed scene adapter; width follows label + 6px each side. */
+/* Seg 分段控制器布局：视觉与状态由组件资源提供。 */
 .order-desktop-modal--add .order-add-view-head {
   justify-content: flex-start;
   gap: var(--spacer-16);
-}
-.order-add-view-seg {
-  display: inline-flex;
-  flex: 0 0 auto;
-  width: max-content;
-  height: var(--size-32);
-  padding: var(--spacer-2) var(--spacer-4);
-  box-sizing: border-box;
-  border-radius: var(--radius-6);
-  background: var(--bg_gray_03);
-}
-.order-add-view-seg > button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: max-content;
-  min-width: 0;
-  text-align: center;
-  white-space: nowrap;
-  height: 28px;
-  padding: 0 var(--spacer-6);
-  border: 0;
-  border-radius: var(--radius-4);
-  background: transparent;
-  color: var(--text_80);
-  font-size: var(--Font14-font-size);
-  cursor: pointer;
-}
-.order-add-view-seg > button.is-active {
-  background: var(--bg_white_100);
-  color: var(--text_100);
-  font-weight: var(--Font14-medium-font-weight);
-}
-.order-add-view-seg > button:focus-visible {
-  outline: 2px solid var(--green_1_100);
-  outline-offset: 2px;
 }
 
 .order-add-view-head > .order-add-spec-link {
@@ -12655,3 +12591,133 @@ button.order-payment-method-card {
     pointer-events: none;
   }
 }
+/* FR-REFUND-09/10/11: return labels, history-sync host and configured inventory. */
+.order-spec-label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--spacer-4);
+}
+.order-spec-label__text {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.order-return-tag[hidden] { display: none; }
+.order-desktop-product-spec > .order-spec-label { width: 100%; }
+.order-refund-sync-entry {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0;
+  padding: var(--spacer-8) 0;
+  text-align: left;
+  color: var(--text_80);
+}
+.order-refund-sync-entry > small {
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--spacer-8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--text_80);
+  font-size: var(--Font12-font-size);
+}
+/* Range selection shares the refund remark host, header, close and action bar. */
+.order-refund-sync-dialog {
+  position: fixed;
+  z-index: calc(var(--z-modal) + 3);
+}
+.order-refund-sync-dialog__panel { min-height: 0; }
+.order-refund-sync-dialog__body { min-height: 0; }
+.order-refund-sync-dialog__body > p { margin: 0; }
+.order-refund-sync-options { display: flex; flex-direction: column; }
+.order-refund-sync-option { width: 100%; border: 0; text-align: left; font: inherit; }
+.order-refund-sync-option:last-child::after { display: none; }
+.order-refund-sync-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacer-8);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text_100);
+  font-size: var(--Font14-font-size);
+  line-height: var(--Font14-line-height);
+  text-align: left;
+}
+.order-refund-sync-dialog .order-note-modal__actions {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacer-12);
+}
+.order-refund-sync-dialog__buttons { display: flex; gap: var(--spacer-8); margin-left: auto; }
+.order-return-inventory-remember { flex-shrink: 0; white-space: nowrap; }
+.order-return-inventory-remember .checkbox::before { display: none; }
+.order-refund-sync-prompt { align-items: center; padding: var(--spacer-24); }
+.order-refund-sync-prompt__count { color: #ff3333; font-weight: 500; }
+.order-refund-sync-prompt__remember {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  margin: 24px auto -6px; padding: 0; border: 0; background: transparent;
+  color: var(--text_100); font: inherit; line-height: 20px;
+}
+.order-refund-sync-prompt__remember .checkbox-field__text { font: inherit; }
+.order-refund-sync-prompt .dialog__btn--confirm { color: var(--text_link_100); }
+.order-refund-sync-entry > i { color: var(--text_80); margin: 0; }
+.order-refund-sync-dialog .checkbox:not(.checkbox--checked),
+.order-return-inventory-remember .checkbox:not(.checkbox--checked) { --checkbox-border: var(--text_30); }
+.order-refund-sync-dialog .order-note-modal__head .order-payment-note-modal__close.btn--sm.btn--icon-only { background: var(--bg_gray_03); }
+.order-refund-sync-dialog[data-state="range"] .order-refund-sync-dialog__body { padding: 12px var(--spacer-16) 12px 0; overflow-x: hidden; }
+/* Status options share the three-column payment method tile width, even with fewer options. */
+.order-reference-payment__status-row { grid-template-columns: minmax(0, 1fr); }
+.order-reference-payment .order-payment-kind { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (min-width: 768px) {
+  .order-desktop__context--pure-return { grid-template-columns: minmax(0, 1fr); }
+  .order-desktop__context--pure-return .order-desktop-customer-anchor { flex: 1 1 100%; width: 100%; max-width: none; }
+  .order-desktop__context--pure-return .order-desktop-product-search { flex: 1 1 0; }
+}
+@media (max-width: 390px) {
+  .order-refund-payment__field > header { flex-wrap: wrap; gap: var(--spacer-4); }
+}
+.order-refund-sync-dialog[data-state="blocked"] .order-refund-sync-dialog__body { padding: 0; gap: 0; overflow: hidden; }
+.order-refund-sync-explanation { flex: 0 0 auto; padding: 12px 16px; color: var(--text_80); font-size: 14px; line-height: 21px; font-weight: 400; }
+.order-refund-sync-problems {
+  flex: 0 1 auto; min-height: 0; height: calc(70vh - 122px); margin-top: -4px;
+  overflow-y: auto; overscroll-behavior: contain;
+}
+.order-refund-sync-product {
+  display: flex; align-items: flex-start; gap: 12px; min-height: 84px;
+  padding: 16px; border-bottom: 0.5px solid var(--bg_line_08); box-sizing: border-box;
+}
+.order-refund-sync-product__image { flex: 0 0 72px; width: 72px; height: 72px; }
+.order-refund-sync-product__info { flex: 1; min-width: 0; }
+.order-refund-sync-product__head { display: flex; align-items: baseline; gap: 8px; }
+.order-refund-sync-product__head > strong,
+.order-refund-sync-product__sku > span:first-child { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.order-refund-sync-product__price { flex-shrink: 0; color: var(--red_100); font-size: 14px; white-space: nowrap; }
+.order-refund-sync-product__code { display: block; color: var(--text_80); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.order-refund-sync-product__sku { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; font-size: 14px; line-height: 21px; }
+.order-refund-sync-product__quantity { flex-shrink: 0; color: var(--red_100); }
+.order-return-inventory-error { color: var(--red_100); margin: var(--spacer-8) 0; }
+@media (max-width: 390px) {
+  .order-refund-sync-product__sku { flex-wrap: wrap; gap: 0; }
+  .order-refund-sync-product__quantity { flex-basis: 100%; }
+}
+
+
+/* Current walkthrough: native Counter widths; inline auxiliary choices. */
+.order-return-inventory-remember { gap: 4px; }
+.order-add-price-modes .tag:not(.tag--selected) { background: var(--bg_gray_03_pack); border: 0; }
+.order-reference-payment__post-option--courier { grid-template-columns: minmax(0, 1fr) auto; }
+.order-reference-payment__post-toggle { min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; gap: var(--spacer-6); }
+.order-reference-payment__post-toggle[aria-disabled="true"] .checkbox-field__text { color: var(--text_30); }
+.order-reference-payment__courier-printer { display: inline-flex; align-items: center; gap: 0; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text_80); font-size: var(--Font10-font-size); }
+.order-reference-payment__courier-printer > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.order-reference-payment__courier-printer > i { flex-shrink: 0; font-size: var(--size-14); }
+
+
+.order-catalog-view-switch, .order-add-view-seg { flex: 0 0 auto; }

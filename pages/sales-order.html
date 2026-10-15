@@ -8,7 +8,8 @@
   <link rel="stylesheet" href="../assets/design-system/wego-design/iconfont.css">
   <link rel="stylesheet" href="../assets/design-system/iconfont/iconfont-aliases.css">
   <link rel="stylesheet" href="../assets/design-system/wego-design/components.css">
-  <link rel="stylesheet" href="../source/scene.css?v=checkout-inventory40-20261013">
+  <link rel="stylesheet" href="../assets/design-system/extensions/segment-control/segment-control.css">
+  <link rel="stylesheet" href="../source/scene.css?v=refund-seg-integrated-20261015">
   <style>
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg_100); }
     body { color: var(--text_100); font-family: var(--Font14-font-family); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
@@ -22,6 +23,7 @@
 <body data-bg="page">
   <div class="preview-shell"><div class="phone-screen"><main id="scene-root" aria-label="销售开单"></main></div></div>
   <div class="toast toast--default is-floating app-toast-host" data-component="toast" data-variant-name="Toast" data-variant-cn="默认提示" data-toast-host role="status" aria-live="polite" aria-atomic="true"><span class="toast__text" data-toast-text></span></div>
+  <script src="../source/refund-demo-isolation.js"></script>
   <script>
     (function () {
       var scenes = {};
@@ -65,7 +67,8 @@
       window.__mountSalesOrder = function () { mountScene('workspace-order-create', false); };
     })();
   </script>
-  <script src="../source/scene.js?v=checkout-inventory40-20261013"></script>
+  <script src="../assets/design-system/extensions/segment-control/segment-control.js"></script>
+  <script src="../source/scene.js?v=sync-single-modal-20261015"></script>
   <script>window.__mountSalesOrder();</script>
 </body>
 </html>

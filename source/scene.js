@@ -1,4 +1,12 @@
 (function () {
+  var QUANTITY_MIN = -999999;
+  var QUANTITY_MAX = 9999999;
+
+  function signedQuantity(value) {
+    var number = Number(value);
+    return Math.max(QUANTITY_MIN, Math.min(QUANTITY_MAX, Number.isFinite(number) ? Math.trunc(number) : 0));
+  }
+
   var CUSTOMERS = [
     { id: 'c1', name: '玛尼轰', phone: '玛尼大吉', mobile: '13800138001', address: '广东省深圳市南山区科技园18号', tag: '老客 · 微信好友、回头客', priceType: '8.5折', factor: 0.85, lastDelivery: 'express', lastAddress: { name: '玛尼大吉', phone: '13800138001', detail: '广东省深圳市南山区科技园18号' }, avatar: './scenes/bcg/开单/assets/customer-picker/customer-mani.png', number: '99812', level: 'V3', balance: 4000, points: 132, amount: '¥800.00', pieces: '2250', contact: '玛尼大吉', employee: '员工名称', wechatName: '玛尼轰', ipRegion: '广东 深圳', assignedAt: '2025/07/07', assignedTo: '大黄', activity: '近7天添加0条图文，分享0次' },
     { id: 'c4', name: '测试客户（无地址）', phone: '无地址客户', mobile: '13800138004', address: '', tag: '新客 · 微信好友', priceType: '9.5折', factor: 0.95, lastDelivery: 'express', lastAddress: null, avatar: './scenes/bcg/开单/assets/customer-picker/recent-chen.png', number: 'TEST04', level: 'V1', balance: 0, points: 0, amount: '¥0.00', pieces: '0', contact: '无地址客户', employee: '员工名称' },
@@ -619,6 +627,9 @@
     paymentDraft: null,
     paymentStatus: 'idle',
     refundCapabilities: initialRefundCapabilities(),
+    refundSync: null,
+    refundPrototype: null,
+    prototypeRefundEvents: [],
     orderNo: '',
     paymentSummary: '',
     paymentPostActions: null,
@@ -841,14 +852,14 @@
 
   function singleQuantityLimit(product, spec) {
     var sku = skuRowDetail(product, spec);
-    if (sku.stock !== null && sku.stock !== undefined) return Math.max(0, Number(sku.stock));
-    return productTracksInventory(product) ? specStock(product, spec) : 9999;
+    if (sku.stock !== null && sku.stock !== undefined) return Math.min(QUANTITY_MAX, Math.max(0, Number(sku.stock)));
+    return productTracksInventory(product) ? specStock(product, spec) : QUANTITY_MAX;
   }
 
   function batchQuantityLimit(product, spec) {
-    if (!productTracksInventory(product)) return 9999;
+    if (!productTracksInventory(product)) return QUANTITY_MAX;
     var stock = specStock(product, spec);
-    return stock > 0 ? stock : 9999;
+    return stock > 0 ? stock : QUANTITY_MAX;
   }
 
   function batchSelectionMatches(selection, color, size) {
@@ -904,15 +915,10 @@
     return Object.keys(draft.skuQty).reduce(function (sum, key) { return sum + Number(draft.skuQty[key] || 0); }, 0);
   }
 
-  // 单买允许同一 SKU 多件；只有有效非零数量才替换其他 SKU，超库存待确认值不提前替换。
+  // 每个 SKU 独立录入；批量操作不改变其他 SKU 的数量或已确认超卖状态。
   function setSingleSkuQuantity(draft, spec, quantity) {
+    quantity = signedQuantity(quantity);
     if (quantity !== 0) {
-      if (!draft.listBulkActive) Object.keys(draft.skuQty).forEach(function (key) {
-        if (key !== spec) {
-          draft.skuQty[key] = 0;
-          delete draft.confirmedOverstock[key];
-        }
-      });
       var pair = splitSpec(spec);
       draft.selectedColor = pair.color;
       draft.selectedSize = pair.size;
@@ -934,7 +940,7 @@
       else input.removeAttribute('aria-invalid');
       var stock = row.querySelector('.order-add-sku-stock');
       if (stock) stock.classList.toggle('is-error', sku.isOverStock);
-      row.querySelector('[data-single-qty-delta="-1"]').disabled = quantity <= -9999;
+      row.querySelector('[data-single-qty-delta="-1"]').disabled = quantity <= QUANTITY_MIN;
       row.querySelector('[data-single-qty-delta="1"]').disabled = quantity >= singleQuantityLimit(draft.product, spec);
     });
     syncAddColorTotals(root, draft);
@@ -958,7 +964,7 @@
   }
 
   function pendingSizeStock(product, size) {
-    if (!productTracksInventory(product)) return 9999;
+    if (!productTracksInventory(product)) return QUANTITY_MAX;
     return addProductMatrix(product).colors.reduce(function (maxStock, color) {
       var candidateSpec = specKey(product, color, size);
       return Math.max(maxStock, candidateSpec ? specStock(product, candidateSpec) : 0);
@@ -1055,7 +1061,7 @@
     var memberDiscountAmount = state.orderPromotion && state.orderPromotion.type === 'member' ? promotionDiscountAmount : 0;
     var discountAmount = state.orderPromotion && (state.orderPromotion.type === 'orderRate' || state.orderPromotion.type === 'orderAmount' || state.orderPromotion.type === 'total') ? promotionDiscountAmount : 0;
     var roundingAmount = state.orderPromotion && state.orderPromotion.type === 'rounding' ? promotionDiscountAmount : 0;
-    var freight = Number(state.freight || 0);
+    var freight = isPureReturnOrder() ? 0 : Number(state.freight || 0);
     var freightIncluded = state.delivery === 'express' || state.delivery === 'freight';
     var payable = Math.round((finalProductAmount + (freightIncluded ? freight : 0)) * 100) / 100;
     return {
@@ -1176,6 +1182,388 @@
 
   function orderHasReturnSku() {
     return quantityBreakdown(state.products).returns > 0;
+  }
+
+  // 原型能力：服务端配置、超退响应及退款结果使用示例数据；不定义可退额度或历史订单分配算法。
+  function refundPrototypeConfig() {
+    if (state.refundPrototype) return state.refundPrototype;
+    var params = new URLSearchParams(window.location.search || '');
+    var saved = {};
+    try { saved = JSON.parse(window.localStorage.getItem('wego-order-refund-sync') || '{}') || {}; } catch (error) {}
+    // Direct review states isolate mock fixtures from persistent preferences.
+    if (params.has('state') || params.has('syncRemember') || params.has('syncNoRemind') || params.has('syncIntent')) saved = {};
+    var remembered = (params.has('syncRemember') ? params.get('syncRemember').split(',') : (Array.isArray(saved.ranges) ? saved.ranges : [])).filter(function (type) {
+      return ['syncWait', 'syncSend', 'syncUnSend', 'unSync'].indexOf(type) >= 0;
+    });
+    if (remembered.indexOf('unSync') >= 0) remembered = ['unSync'];
+    state.refundPrototype = {
+      syncChoices: remembered,
+      syncRangeRemember: remembered.length > 0,
+      syncPromptIntent: (['sync', 'skip'].indexOf(params.get('syncIntent')) >= 0 ? params.get('syncIntent') : '') || (params.get('syncNoRemind') === '1' ? (remembered.length && remembered[0] !== 'unSync' ? 'sync' : 'skip') : (['sync', 'skip'].indexOf(saved.intent) >= 0 ? saved.intent : '')),
+      syncResult: params.get('syncResult') || 'success',
+      refundResult: params.get('refundResult') || 'success',
+      orderResult: params.get('orderResult') || 'success',
+      debtPermission: params.get('debtPermission') !== '0',
+      inventoryTypes: ['noReturnWarehouse', 'returnShipWarehouse', 'returnSpecificWarehouse'],
+      inventoryFailed: params.get('inventoryConfig') === 'failed',
+      rememberType: params.get('rememberType') || '',
+      rememberWarehouseId: params.get('rememberWarehouseId') || ''
+    };
+    return state.refundPrototype;
+  }
+
+  function refundSyncState() {
+    if (!state.refundSync) {
+      var config = refundPrototypeConfig();
+      state.refundSync = {
+        choices: config.syncChoices.slice(), rememberRange: config.syncRangeRemember,
+        promptIntent: config.syncPromptIntent,
+        hasRecord: config.syncChoices.length > 0 || Boolean(config.syncPromptIntent),
+        dialog: '', draftChoices: [], draftRememberRange: false, draftNoRemind: false,
+        blockedItems: [], checking: false, requestId: 0, continuation: null
+      };
+    }
+    return state.refundSync;
+  }
+
+  function persistRefundSync() {
+    var sync = refundSyncState();
+    var config = refundPrototypeConfig();
+    config.syncRangeRemember = sync.rememberRange;
+    config.syncChoices = sync.rememberRange ? sync.choices.slice() : [];
+    config.syncPromptIntent = sync.promptIntent;
+    try {
+      // Prototype namespace; no production account/customer persistence is implied.
+      if (!sync.rememberRange && !sync.promptIntent) window.localStorage.removeItem('wego-order-refund-sync');
+      else window.localStorage.setItem('wego-order-refund-sync', JSON.stringify({ ranges: config.syncChoices, intent: sync.promptIntent }));
+    } catch (error) {} // Storage unavailable: retain this page session's preference.
+  }
+
+  function resetRefundSync() {
+    if (state.refundSync) state.refundSync.requestId += 1;
+    state.refundSync = null;
+  }
+
+  function canSyncRefund() {
+    return Boolean(state.customer && orderHasReturnSku() && !orderAllTemporary());
+  }
+
+  function isHistoryRefundSync() {
+    var sync = refundSyncState();
+    return canSyncRefund() && sync.choices.length > 0 && sync.choices.indexOf('unSync') < 0;
+  }
+
+  function refundOrderSignature() {
+    return JSON.stringify({
+      customer: state.customer && state.customer.id, delivery: state.delivery,
+      freight: totals().freight, payable: totals().payable,
+      items: state.products.map(function (item) {
+        return { id: item.id, type: item.createdType, qty: item.qty, skus: item.skuQty,
+          prices: item.skuPrices, price: item.price, details: item.skuPriceDetails };
+      })
+    });
+  }
+
+  function refundSyncEntry() {
+    if (!canSyncRefund()) return '';
+    var sync = refundSyncState();
+    if (isPureReturnOrder() && !sync.choices.length) return '';
+    var labels = { syncWait: '已挂起', syncSend: '已发货', syncUnSend: '未发货', unSync: '不同步' };
+    return '<button type="button" class="order-refund-sync-entry link link--14" data-component="link" data-open-refund-sync data-prototype="历史同步配置为原型模拟"><span>退货商品同步已有订单</span><small>'
+      + escapeHtml(sync.choices.map(function (type) { return labels[type]; }).join('、') || '选择同步范围')
+      + '</small><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>';
+  }
+
+  function openRefundSync(continuation) {
+    var sync = refundSyncState();
+    sync.requestId += 1;
+    sync.checking = false;
+    sync.dialog = 'range';
+    sync.draftChoices = sync.choices.slice();
+    sync.draftRememberRange = sync.rememberRange;
+    sync.continuation = continuation || null;
+    renderActive();
+  }
+
+  function closeRefundSync() {
+    var sync = refundSyncState();
+    sync.requestId += 1;
+    sync.checking = false;
+    sync.dialog = '';
+    sync.continuation = null;
+    renderActive();
+    var root = activeContext && activeContext.root;
+    var opener = root && root.querySelector(state.panel === 'checkout' ? '[data-confirm-payment]' : '[data-open-refund-sync], [data-open-checkout], [data-checkout]');
+    if (opener) opener.focus({ preventScroll: true });
+  }
+
+  function syncCheckbox(type, label, checked) {
+    return '<button type="button" class="order-refund-sync-option cell cell--single cell--bg-white cell--clickable cell--divider-right-edge" data-component="cell" data-variant-name="Cell_Action" data-sync-range="' + type + '" role="checkbox" aria-checked="' + checked + '">'
+      + '<div class="cell__select">' + paymentSelectionCheckboxControl(checked, false) + '</div><div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">' + label + '</span></div></div></div></button>';
+  }
+
+  function shouldHideCheckoutForRefundSync() {
+    var dialog = refundSyncState().dialog;
+    return (state.panel === 'checkout' || state.panel === 'payment')
+      && (dialog === 'blocked' || dialog === 'failed');
+  }
+
+  function refundSyncDialog() {
+    var sync = refundSyncState();
+    if (!sync.dialog) return '';
+    if (sync.dialog === 'prompt') {
+      return '<div class="dialog dialog--text order-refund-sync-dialog order-refund-sync-prompt" role="dialog" aria-modal="true" aria-labelledby="refund-sync-title" aria-describedby="refund-sync-content" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_2">'
+        + '<section class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h2 class="dialog__title" id="refund-sync-title">是否同步？</h2></div>'
+        + '<div class="dialog__content" id="refund-sync-content">此单包含 <span class="order-refund-sync-prompt__count">' + quantityBreakdown(state.products).returns + '</span> 件退货商品，是否将已有订单中商品状态同步为退款？'
+        + '<button type="button" class="checkbox-field order-refund-sync-prompt__remember" data-sync-no-remind role="checkbox" aria-checked="' + sync.draftNoRemind + '">' + paymentSmallCheckbox(sync.draftNoRemind) + '<span class="checkbox-field__text">不再提醒</span></button></div></div>'
+        + '<div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual"><button type="button" class="dialog__btn dialog__btn--dismiss" data-refund-sync-prompt="skip">跳过</button><span class="dialog__divider" aria-hidden="true"></span><button type="button" class="dialog__btn dialog__btn--confirm" data-refund-sync-prompt="sync">去同步</button></div></div></section></div>';
+    }
+    var selecting = sync.dialog === 'range';
+    var title = selecting ? '选择要同步退货的商品订单类型' : '无法同步';
+    var content = '';
+    var actions = '';
+    if (selecting) {
+      var options = [{ type: 'syncWait', label: '已挂起的商品' }, { type: 'syncSend', label: '已发货的商品' }, { type: 'syncUnSend', label: '未发货的商品' }];
+      if (sync.hasRecord) options.push({ type: 'unSync', label: '不同步' });
+      content = '<div class="order-refund-sync-options">'
+        + options.map(function (option) { return syncCheckbox(option.type, option.label, sync.draftChoices.indexOf(option.type) >= 0); }).join('') + '</div>';
+      actions = button('取消', 'weak', 'md', 'data-close-refund-sync')
+        + button('确定', 'strong', 'md', 'data-confirm-refund-sync ' + (!sync.draftChoices.length || sync.checking ? 'disabled' : ''));
+    } else {
+      content = sync.dialog === 'failed' ? '<p class="order-refund-sync-explanation" role="alert">历史订单校验失败，请重新选择后再确认。</p>'
+        : '<p class="order-refund-sync-explanation" role="alert">' + (sync.blockedSyncType === 1 ? '退货的商品数需小于已售的商品数' : '退货金额超出已售的金额无法同步') + '</p>'
+          + '<div class="order-refund-sync-problems" tabindex="0" role="region" aria-label="无法同步的商品列表">' + refundSyncProblemCards(sync.blockedItems, sync.blockedSyncType) + '</div>';
+      actions = button('暂不同步', 'weak', 'md', 'data-skip-refund-sync')
+        + button('重新选择', 'strong', 'md', 'data-reselect-refund-sync');
+    }
+    return '<div class="order-refund-sync-dialog order-note-modal order-payment-note-modal order-remark-modal" role="dialog" aria-modal="true" aria-labelledby="refund-sync-title" data-state="' + sync.dialog + '">'
+      + '<div class="order-refund-sync-dialog__panel order-note-modal__panel"><div class="order-note-modal__head"><strong id="refund-sync-title">' + title + '</strong>' + noteCloseButton('data-close-refund-sync') + '</div>'
+      + '<div class="order-refund-sync-dialog__body order-note-modal__body">' + content + '</div>'
+      + (selecting ? '<div class="order-note-modal__actions">' : '<footer class="order-sku-price-modal__footer">')
+      + (selecting ? '<button type="button" class="checkbox-field order-refund-sync-remember" data-sync-remember-range role="checkbox" aria-checked="' + sync.draftRememberRange + '">' + paymentSmallCheckbox(sync.draftRememberRange) + '<span class="checkbox-field__text">记住选项</span></button>' : '')
+      + (selecting ? '<div class="order-refund-sync-dialog__buttons">' + actions + '</div></div>' : actions + '</footer>') + '</div></div>';
+  }
+
+  function refundSyncProblemCards(items, syncType) {
+    var products = [];
+    items.forEach(function (item, index) {
+      var key = item.productId || (item.code ? item.code + '|' + item.name : 'item-' + index);
+      var product = products.find(function (entry) { return entry.key === key; });
+      if (!product) { product = { key: key, item: item, skus: [] }; products.push(product); }
+      product.skus.push(item);
+    });
+    return products.map(function (product) {
+      var item = product.item;
+      return '<article class="order-refund-sync-product"><span class="wg-image order-refund-sync-product__image" data-component="image"><img class="wg-image__src is-loaded" src="' + escapeHtml(item.image || PRODUCTS[0].image) + '" alt="' + escapeHtml(item.name || '商品图片') + '"></span>'
+        + '<div class="order-refund-sync-product__info"><div class="order-refund-sync-product__head"><strong title="' + escapeHtml(item.name) + '">' + escapeHtml(item.name) + '</strong>'
+        + (syncType === 1 ? '' : '<span class="order-refund-sync-product__price">' + money(item.minPrice) + ' ~ ' + money(item.maxPrice) + '</span>') + '</div>'
+        + (item.code ? '<small class="order-refund-sync-product__code">货号：' + escapeHtml(item.code) + '</small>' : '')
+        + product.skus.map(function (sku) {
+          return '<div class="order-refund-sync-product__sku"><span title="' + escapeHtml(sku.spec) + '">' + escapeHtml(sku.spec || '默认规格') + '</span>'
+            + (syncType === 1 ? '<span class="order-refund-sync-product__quantity">已售 ' + Math.abs(Number(sku.soldQuantity || 0)) + '，不可退 ' + Math.abs(Number(sku.returnQuantity == null ? sku.excessQuantity : sku.returnQuantity) || 0) + '</span>' : '') + '</div>';
+        }).join('') + '</div></article>';
+    }).join('');
+  }
+
+  function prototypeSyncResponse() {
+    var result = refundPrototypeConfig().syncResult;
+    if (result === 'failed') return { failed: true, items: [] };
+    if (['quantity', 'amount', 'both'].indexOf(result) < 0) return { items: [] };
+    var items = [];
+    state.products.forEach(function (item) {
+      var specs = isSkuMode(item.mode) ? Object.keys(item.skuQty || {}) : [''];
+      specs.forEach(function (spec) {
+        var qty = isSkuMode(item.mode) ? Number(item.skuQty[spec]) : Number(item.qty);
+        if (qty >= 0 || item.createdType === 'temporary') return;
+        // Fixed response fixture: these figures are illustrative API data, not frontend eligibility formulas.
+        items.push({ productId: item.id, image: item.image, code: item.code, name: item.name, spec: spec,
+          quantityExceeded: result !== 'amount', amountExceeded: result !== 'quantity',
+          minPrice: 79, maxPrice: 129, soldQuantity: 0, returnQuantity: Math.abs(qty), excessQuantity: Math.abs(qty) });
+      });
+    });
+    return { syncType: result === 'quantity' ? 1 : 2, items: items };
+  }
+
+  function validateRefundSync(ctx, continuation, useCurrentRange) {
+    if (!canSyncRefund()) { continuation(); return; }
+    var sync = refundSyncState();
+    if (sync.checking) return;
+    // Source priority: remembered range > prompt intent > this order's range > ask.
+    if (!useCurrentRange && !sync.rememberRange) {
+      if (sync.promptIntent === 'skip') { sync.choices = ['unSync']; sync.hasRecord = true; continuation(); return; }
+      if (!sync.choices.length) {
+        if (sync.promptIntent === 'sync') { openRefundSync(continuation); return; }
+        sync.dialog = 'prompt'; sync.draftNoRemind = false; sync.continuation = continuation; renderActive(); return;
+      }
+    }
+    if (sync.choices.indexOf('unSync') >= 0) { sync.dialog = ''; sync.continuation = null; continuation(); return; }
+    if (!sync.choices.length) { openRefundSync(continuation); return; }
+    var signature = refundOrderSignature();
+    var request = ++sync.requestId;
+    sync.checking = true;
+    sync.continuation = continuation;
+    renderActive();
+    window.setTimeout(function () {
+      if (state.refundSync !== sync || sync.requestId !== request) return;
+      if (refundOrderSignature() !== signature) {
+        closeRefundSync();
+        ctx.toast('订单已变化，请重新确认开单');
+        return;
+      }
+      var response = prototypeSyncResponse();
+      sync.checking = false;
+      state.prototypeRefundEvents.push('sync-check');
+      if (response.failed || response.items.length) {
+        sync.blockedItems = response.items;
+        sync.blockedSyncType = response.syncType;
+        sync.dialog = response.failed ? 'failed' : 'blocked';
+        renderActive();
+        return;
+      }
+      sync.dialog = '';
+      sync.continuation = null;
+      continuation();
+    }, 240);
+  }
+
+  function returnDebtAllowed() {
+    return Boolean(state.customer && refundPrototypeConfig().debtPermission && state.refundCapabilities.balanceEnabled);
+  }
+
+  var RETURN_INVENTORY_LABELS = {
+    noReturnStock: '不退回库存', returnStock: '退回库存', noReturnWarehouse: '不退回仓库',
+    returnShipWarehouse: '原路退回', returnSpecificWarehouse: '退回指定仓库'
+  };
+
+  function normalizeInventoryType(type) {
+    return ({ none: 'noReturnWarehouse', origin: 'returnShipWarehouse', specified: 'returnSpecificWarehouse' })[type] || type;
+  }
+
+  function returnInventoryTypes() {
+    return refundPrototypeConfig().inventoryTypes.filter(function (type) {
+      return ['noReturnWarehouse', 'returnShipWarehouse', 'returnSpecificWarehouse'].indexOf(type) >= 0;
+    });
+  }
+
+  function returnInventoryPanel(draft) {
+    if (!orderHasReturnSku()) return '';
+    var config = refundPrototypeConfig();
+    if (config.inventoryFailed) return '<p class="order-return-inventory-error" role="alert">库存退回方式加载失败，请关闭后重新打开结算。</p>';
+    return '<section class="order-refund-payment__field" aria-labelledby="order-refund-inventory-title"><header><strong id="order-refund-inventory-title">退货商品库存退回方式</strong><button type="button" class="checkbox-field order-refund-sync-remember order-return-inventory-remember" data-remember-return-inventory role="checkbox" aria-checked="' + Boolean(draft.rememberInventory) + '">' + paymentSmallCheckbox(draft.rememberInventory) + '<span class="checkbox-field__text">记住本次选择</span></button></header><div class="order-refund-payment__option-grid order-refund-payment__option-grid--inventory" role="radiogroup" aria-label="退货商品库存退回方式">'
+      + returnInventoryTypes().map(function (type) {
+        return refundRadioOption('inventory', type, RETURN_INVENTORY_LABELS[type], draft.inventoryReturnMode === type, draft.refundWarehouseId);
+      }).join('') + '</div></section>';
+  }
+
+  function validateReturnInventory(ctx, draft) {
+    if (!orderHasReturnSku()) return true;
+    var config = refundPrototypeConfig();
+    var type = normalizeInventoryType(draft.inventoryReturnMode);
+    if (config.inventoryFailed || returnInventoryTypes().indexOf(type) < 0) {
+      ctx.toast(config.inventoryFailed ? '库存退回方式加载失败' : '请先选择库存退回方式');
+      return false;
+    }
+    if (type === 'returnSpecificWarehouse' && !WAREHOUSES.some(function (warehouse) { return warehouse.id === draft.refundWarehouseId; })) {
+      ctx.toast('请先选择退回仓库');
+      return false;
+    }
+    draft.inventoryReturnMode = type;
+    draft.submittedRefundStock = type !== 'noReturnStock' && type !== 'noReturnWarehouse';
+    draft.submittedRefundWarehouseId = type === 'returnSpecificWarehouse' ? draft.refundWarehouseId : '';
+    if (draft.rememberInventory) {
+      config.rememberType = type;
+      config.rememberWarehouseId = draft.submittedRefundWarehouseId;
+    }
+    return true;
+  }
+
+  function removeZeroReturnSpecs() {
+    if (!isPureReturnOrder() && totals().payable >= 0) return;
+    state.products.forEach(function (item) {
+      if (!isSkuMode(item.mode)) return;
+      Object.keys(item.skuQty || {}).forEach(function (spec) {
+        if (Number(item.skuQty[spec]) !== 0) return;
+        delete item.skuQty[spec];
+        if (item.skuPrices) delete item.skuPrices[spec];
+        if (item.skuPriceDetails) delete item.skuPriceDetails[spec];
+      });
+      item.orderSpecs = Object.keys(item.skuQty || {});
+    });
+    state.products = state.products.filter(function (item) {
+      return isSkuMode(item.mode) ? Object.keys(item.skuQty || {}).length > 0 : Number(item.qty) !== 0;
+    });
+  }
+
+  function scheduleOrderCompletion(ctx, delay) {
+    var draft = state.paymentDraft;
+    var signature = refundOrderSignature();
+    var synchronized = isHistoryRefundSync();
+    var hasReturns = orderHasReturnSku();
+    if (draft) draft.submittedSyncChoices = canSyncRefund() ? refundSyncState().choices.slice() : ['unSync'];
+    var valid = function () {
+      if (state.paymentDraft !== draft || state.paymentStatus !== 'processing') return false;
+      if (refundOrderSignature() === signature) return true;
+      state.paymentStatus = 'idle'; renderActive(); ctx.toast('订单已变化，请重新确认开单'); return false;
+    };
+    var create = function () {
+      if (!valid()) return;
+      if (refundPrototypeConfig().orderResult === 'failed') {
+        state.paymentStatus = 'idle'; renderActive(); ctx.toast('订单创建失败，请重新确认'); return;
+      }
+      removeZeroReturnSpecs();
+      state.prototypeRefundEvents.push('order-created');
+      finishOrder(ctx);
+      if (hasReturns && !synchronized) {
+        state.prototypeRefundEvents.push('refund-after-order');
+        window.setTimeout(function () {
+          // 原型能力：记录演示结果；不代表真实后台日志或详情页处理。
+          if (state.paymentDraft === draft) state.prototypeRefundEvents.push(refundPrototypeConfig().refundResult === 'failed' ? 'refund-failed-log-only' : 'refund-completed');
+        }, 240);
+      }
+    };
+    if (synchronized) {
+      state.prototypeRefundEvents.push('refund-before-order');
+      window.setTimeout(function () {
+        if (!valid()) return;
+        if (refundPrototypeConfig().refundResult === 'failed') {
+          state.prototypeRefundEvents.push('refund-failed-order-stopped');
+          state.paymentStatus = 'idle'; renderActive(); ctx.toast('同步退单退款失败，未创建订单'); return;
+        }
+        state.prototypeRefundEvents.push('refund-completed');
+        create();
+      }, delay);
+    } else window.setTimeout(create, delay);
+  }
+
+  function isPureReturnOrder() {
+    var quantities = quantityBreakdown(state.products);
+    return quantities.returns > 0 && quantities.sales === 0;
+  }
+
+  function orderDeliveryStatus() {
+    return isPureReturnOrder() ? 'returned' : 'sales-' + (state.delivery || 'none');
+  }
+
+  function orderAllTemporary() {
+    return state.products.length > 0 && state.products.every(function (item) { return item.createdType === 'temporary'; });
+  }
+
+  function refundUsesPrivateOnly() {
+    return !state.customer || orderAllTemporary();
+  }
+
+  function normalizeReturnDelivery() {
+    if (!isPureReturnOrder()) return;
+    state.freight = 0;
+    state.delivery = 'none';
+  }
+
+  function returnTag(qty) {
+    return '<span class="tag tag--business-stroke tag--business-16 order-return-tag" data-component="tag" data-variant-name="Tag_Business_RedStroke_16"' + (Number(qty) < 0 ? '' : ' hidden') + '><span class="tag__label">退</span></span>';
+  }
+
+  function orderSpecLabel(spec, qty) {
+    return '<span class="order-spec-label" data-order-spec-label="' + encodeURIComponent(spec) + '"><span class="order-spec-label__text" title="' + escapeHtml(spec) + '">' + escapeHtml(spec) + '</span>' + returnTag(qty) + '</span>';
   }
 
   function orderPriceEntries() {
@@ -1376,6 +1764,7 @@
   }
 
   function markDirty(ctx, preserveCatalogScroll) {
+    normalizeReturnDelivery();
     state.saveStatus = '保存中…';
     if (preserveCatalogScroll) renderCatalogPreservingScroll(activeContext && activeContext.root);
     else renderActive();
@@ -1469,7 +1858,7 @@
     '.order-catalog-history__list',
     '.order-desktop-modal--checkout .order-desktop-modal__body',
     '.order-v2-modal .order-v2-modal__body',
-    '.order-reference-payment__sheet',
+    '.order-refund-sync-dialog__body', '.order-refund-sync-problems', '.order-reference-payment__sheet',
     '.order-remark-modal .order-note-modal__body',
     '.order-remark-modal textarea',
     '.order-delivery-panel__scroll',
@@ -1914,6 +2303,7 @@
   }
 
   function deliverySummaryText() {
+    if (isPureReturnOrder()) return '其他 · 纯退货无需收货信息';
     var label = ({ express: '快递', freight: '快运', pickup: '自提', none: '现场取货' })[state.delivery] || '发货方式 无';
     if ((state.delivery === 'express' || state.delivery === 'freight') && state.address) {
       return label + ' · ' + state.address.name + ' ' + state.address.phone + ' · ' + state.address.detail;
@@ -1930,6 +2320,7 @@
   }
 
   function deliverySummaryParts() {
+    if (isPureReturnOrder()) return { label: '其他', primary: '纯退货，无需收货信息', secondary: '' };
     var label = ({ express: '快递', freight: '快运', pickup: '自提', none: '现场取货' })[state.delivery] || '发货方式';
     var requiresRealName = orderRequiresRealName() && (state.delivery === 'express' || state.delivery === 'freight');
     var realNameText = requiresRealName
@@ -1961,6 +2352,7 @@
   }
 
   function mobileDeliveryControl() {
+    if (isPureReturnOrder()) return '';
     var needsInlineAddress = (state.delivery === 'express' || state.delivery === 'freight') && !state.address;
     if (needsInlineAddress) {
       return ''
@@ -2077,12 +2469,12 @@
 
   function desktopQuantityCounter(itemIndex, qty, spec, hint) {
     var specAttr = spec ? ' data-qty-spec="' + encodeURIComponent(spec) + '"' : '';
-    var minQuantity = spec && state.products[itemIndex] && isSkuMode(state.products[itemIndex].mode) ? -9999 : 1;
+    var minQuantity = QUANTITY_MIN;
     return ''
       + '<div class="counter is-hint" data-component-slug="counter" data-counter data-counter-min="' + minQuantity + '">'
       +   '<div class="counter__body">'
       +     '<button type="button" class="counter__btn counter__btn--minus" data-row-qty-delta="-1" data-item-index="' + itemIndex + '"' + specAttr + ' aria-label="减少"><i class="counter__icon icon-jian16"></i></button>'
-      +     '<input class="counter__value" type="text" inputmode="numeric" maxlength="7" value="' + qty + '" data-row-qty data-item-index="' + itemIndex + '"' + specAttr + ' aria-label="商品数量">'
+      +     '<input class="counter__value" type="text" inputmode="numeric" maxlength="8" value="' + qty + '" data-row-qty data-item-index="' + itemIndex + '"' + specAttr + ' aria-label="商品数量">'
       +     '<button type="button" class="counter__btn counter__btn--plus" data-row-qty-delta="1" data-item-index="' + itemIndex + '"' + specAttr + ' aria-label="增加"><i class="counter__icon icon-jia16"></i></button>'
       +   '</div>'
       +   '<div class="counter__message counter__hint">' + escapeHtml(hint) + '</div>'
@@ -2121,7 +2513,7 @@
     if (grouped) {
       var groupedSkuCountClass = specs.length > 1 ? ' order-desktop-product-row--multi-sku' : ' order-desktop-product-row--single-sku';
       var groupedSpecs = specs.map(function (entry) {
-        return '<span class="order-desktop-grouped-sku-line" title="' + escapeHtml(entry.spec) + '">' + escapeHtml(entry.spec) + '</span>';
+        return '<span class="order-desktop-grouped-sku-line" title="' + escapeHtml(entry.spec) + '">' + orderSpecLabel(entry.spec, entry.qty) + '</span>';
       }).join('');
       var groupedPrices = specs.map(function (entry) {
         return '<span class="order-desktop-grouped-sku-line">' + desktopSkuUnitPrice(item, itemIndex, entry.spec) + '</span>';
@@ -2151,7 +2543,7 @@
       + '<article class="order-desktop-product-row' + (isRowSelected(itemIndex, row.spec) ? ' is-selected' : '') + '" data-item-index="' + itemIndex + '" data-row-select="' + itemIndex + '" data-row-spec="' + encodeURIComponent(row.spec) + '">'
       +   desktopProductName(item)
       +   clickableImage(item, 'order-desktop-product-image', 'data-preview-image="' + itemIndex + '"')
-      +   '<span class="order-desktop-product-spec" title="' + escapeHtml(specText) + '">' + escapeHtml(specText) + '</span>'
+      +   '<span class="order-desktop-product-spec" title="' + escapeHtml(specText) + '">' + orderSpecLabel(specText, qty) + '</span>'
       +   desktopSkuUnitPrice(item, itemIndex, specKey)
       +   '<div class="order-desktop-product-qty">' + desktopQuantityCounter(itemIndex, qty, specKey, hint) + '</div>'
       +   '<strong class="order-desktop-product-total"><span class="order-desktop-product-total__value' + (itemSkuPrice(item, specKey) * qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(itemSkuPrice(item, specKey) * qty) + '</span></strong>'
@@ -2251,6 +2643,7 @@
       +     entryTools()
       +     mobileLines()
       +     orderNoteEntry()
+      +     refundSyncEntry()
       +   '</main>'
       +   mobileFooter()
       + '</section>';
@@ -3247,7 +3640,7 @@
       productBody = '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component="layout-grid" data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + '</div>';
     }
     return ''
-      +   '<header class="order-catalog-header"><div class="order-catalog-header__title"><strong>商品库</strong><div class="order-catalog-view-switch" aria-label="商品库显示模式"><button type="button" class="' + (state.catalogViewMode === 'grid' ? 'is-active' : '') + '" data-catalog-view="grid">大图</button><button type="button" class="' + (state.catalogViewMode === 'list' ? 'is-active' : '') + '" data-catalog-view="list">列表</button></div></div><div class="order-catalog-create-anchor"><button type="button" class="btn btn--weak btn--sm order-catalog-publish" data-component-slug="button" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="btn__icon icon-yuanjia" aria-hidden="true"></i>创建</button></div></header>'
+      +   '<header class="order-catalog-header"><div class="order-catalog-header__title"><strong>商品库</strong>' + segmentControlMarkup('catalog', state.catalogViewMode, [['grid', '大图'], ['list', '列表']], 'data-catalog-view', 'order-catalog-view-switch', '商品库显示模式') + '</div><div class="order-catalog-create-anchor"><button type="button" class="btn btn--weak btn--sm order-catalog-publish" data-component-slug="button" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="btn__icon icon-yuanjia" aria-hidden="true"></i>创建</button></div></header>'
       +   desktopProductSearch(true)
       +   '<div class="order-desktop__catalog-scroll">'
       +   (!showingResultMode && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component="layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
@@ -3266,7 +3659,7 @@
     var checkoutBlocked = !state.products.length;
     return ''
       + '<main class="order-desktop__order' + (state.desktopOrderFullscreen ? ' order-desktop__order--fullscreen' : '') + '">'
-      +   '<div class="order-desktop__context' + (state.panel === 'customer' ? ' order-desktop__context--customer-open' : '') + '">'
+      +   '<div class="order-desktop__context' + (isPureReturnOrder() ? ' order-desktop__context--pure-return' : '') + (state.panel === 'customer' ? ' order-desktop__context--customer-open' : '') + '">'
       +     desktopCustomerAnchor()
       +     desktopDeliveryCard()
       +     (effectiveCatalogCollapsed() ? desktopProductSearch(false) : '')
@@ -3331,7 +3724,7 @@
   function desktopSummaryDetails() {
     var t = totals();
     var discountText = discountDetailText(t);
-    var showFreight = state.delivery === 'express' || state.delivery === 'freight';
+    var showFreight = !isPureReturnOrder() && (state.delivery === 'express' || state.delivery === 'freight');
     return ''
       + '<div class="order-desktop__summary-details" aria-label="本单金额明细">'
       +   summaryDetailRow('商品总价', '<em class="order-summary-row__meta" data-summary-meta>' + quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces }) + '</em><strong data-summary-product-amount>' + money(t.productAmount) + '</strong>')
@@ -3343,12 +3736,15 @@
       +     '</span>'
       +   '</div>'
       +   (showFreight ? summaryDetailRow('运费', '<strong data-summary-freight>' + money(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>') : '')
-      +   summaryDetailRow('订单总价', '<button type="button" class="order-summary-total-edit" data-edit-total aria-label="修改订单总价"><strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>', 'order-summary-row--total')
+      +   summaryDetailRow('订单总价', (orderHasReturnSku() ? '<strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong>' : '<button type="button" class="order-summary-total-edit" data-edit-total aria-label="修改订单总价"><strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>'), 'order-summary-row--total')
+      +   refundSyncEntry()
       + '</div>';
   }
 
   function refreshDesktopSummary(root, t) {
     t = t || totals();
+    var summary = root.querySelector('.order-desktop__summary-details');
+    if (summary) { summary.outerHTML = desktopSummaryDetails(); return; }
     var nodes = {
       meta: root.querySelector('[data-summary-meta]'),
       product: root.querySelector('[data-summary-product-amount]'),
@@ -3368,6 +3764,20 @@
     if (nodes.payable) {
       nodes.payable.textContent = money(t.payable);
       nodes.payable.classList.toggle('is-negative', t.payable < 0);
+    }
+  }
+
+  function refreshReturnContext(root) {
+    var context = root.querySelector('.order-desktop__context');
+    if (!context) return;
+    var pure = isPureReturnOrder();
+    context.classList.toggle('order-desktop__context--pure-return', pure);
+    var delivery = context.querySelector('.order-desktop-delivery-card');
+    if (pure && delivery) delivery.remove();
+    if (!pure && !delivery) {
+      var search = context.querySelector('.order-desktop-product-search');
+      if (search) search.insertAdjacentHTML('beforebegin', desktopDeliveryCard());
+      else context.insertAdjacentHTML('beforeend', desktopDeliveryCard());
     }
   }
 
@@ -3439,6 +3849,7 @@
   }
 
   function desktopDeliveryCard() {
+    if (isPureReturnOrder()) return '';
     return '<div class="order-desktop-delivery-card">' + desktopDeliveryControl() + '</div>';
   }
 
@@ -3642,22 +4053,23 @@
     applyPaymentFeatureVisibility(draft);
     var t = totals();
     if (!draft) return '';
-    if (t.payable < 0) return refundCheckoutPanel(draft, t);
+    if (t.payable < 0 || isPureReturnOrder()) return refundCheckoutPanel(draft, t);
     var isCollecting = draft.kind === 'online' || draft.kind === 'private';
     var balanceCents = paymentBalanceCents(draft, t.payable);
     var targetCents = Math.max(0, toCents(t.payable) - balanceCents);
     var confirmState = paymentConfirmState(draft, t.payable);
+    if (refundSyncState().checking) confirmState.enabled = false;
     var collectionContent = '';
     if (targetCents > 0) {
       collectionContent = '<div class="order-reference-payment__status-row' + (isCollecting ? ' is-guided' : '') + '">'
         + '<div class="order-payment-kind" role="radiogroup" aria-label="收款状态">'
-        + paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid')
+        + paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid', orderHasReturnSku())
         + (featureEnabled('onlinePayment') ? paymentKindOption('online', '在线收款', draft.kind === 'online') : '')
         + paymentKindOption('private', '已私下收款', draft.kind === 'private')
-        + paymentKindOption('debt', '记欠款', draft.kind === 'debt', !state.customer)
+        + (orderHasReturnSku() ? (state.customer ? paymentKindOption('debt', '记欠款', draft.kind === 'debt', !returnDebtAllowed()) : '') : paymentKindOption('debt', '记欠款', draft.kind === 'debt', !state.customer))
         + '</div></div>'
         + (isCollecting ? paymentReferenceMethods(draft, targetCents) : '')
-        + (draft.kind === 'debt' ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span></div>' : '');
+        + (draft.kind === 'debt' && t.payable !== 0 ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span></div>' : '');
     }
     var overlay = '';
     if (draft.showShortageDialog) overlay = paymentShortageDialog(draft, t.payable);
@@ -3672,13 +4084,14 @@
       +   '<section class="order-reference-payment__sheet">'
       +     '<div class="order-reference-payment__remaining"><span>还需收款</span>' + paymentAmountMetric(targetCents / 100, 24, 'black') + '</div>'
       +     collectionContent
+      +     returnInventoryPanel(draft)
       +     paymentNoteEntry(draft)
       +     (state.paymentScrollSpacer ? '<div class="order-payment-scroll-spacer" style="height:' + state.paymentScrollSpacer + 'px" aria-hidden="true"></div>' : '')
       +   '</section>'
       +   '<footer class="order-reference-payment__footer">'
       +     '<div class="order-payment-options">'
       +       paymentCheckoutOption(draft.autoPrintReceipt, 'auto-print-receipt', '打印小票', 'MJJS-2BIUI')
-      +       paymentCheckoutOption(draft.autoDispatch, 'auto-dispatch', '快递打单发货', '申通快递')
+      +       courierCheckoutOption(draft)
       +     '</div>'
       +     '<button type="button" class="btn btn--strong btn--lg order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '>' + paymentConfirmContent(draft, t.payable, confirmState) + '</button>'
       +   '</footer>'
@@ -3687,8 +4100,8 @@
   }
 
   function refundCheckoutPanel(draft, t) {
-    var hasReturns = quantityBreakdown(state.products).returns > 0;
     var confirmState = paymentConfirmState(draft, t.payable);
+    if (refundSyncState().checking) confirmState.enabled = false;
     var privateMethods = paymentMethodsForKind('private');
     var refundMethod = paymentMethodById(draft.refundMethod);
     var methodContent = draft.refundStatus === 'private'
@@ -3698,20 +4111,14 @@
           '<i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span class="stack__label"><strong>' + method.label + '</strong></span>', Boolean(active));
       }).join('') + '</div></section>'
       : '';
-    var inventoryContent = hasReturns
-      ? '<section class="order-refund-payment__field" aria-labelledby="order-refund-inventory-title"><header><strong id="order-refund-inventory-title">退货商品库存退回方式</strong></header><div class="order-refund-payment__option-grid order-refund-payment__option-grid--inventory" role="radiogroup" aria-label="退货商品库存退回方式">'
-        + refundRadioOption('inventory', 'none', '不退回仓库', draft.inventoryReturnMode === 'none')
-        + refundRadioOption('inventory', 'origin', '原路退回', draft.inventoryReturnMode === 'origin')
-        + refundRadioOption('inventory', 'specified', '退回指定仓库', draft.inventoryReturnMode === 'specified', draft.refundWarehouseId)
-        + '</div></section>'
-      : '';
+    var inventoryContent = returnInventoryPanel(draft);
     return ''
       + '<div class="order-reference-payment order-reference-payment--refund">'
       +   '<section class="order-reference-payment__hero" aria-label="订单金额"><span>订单金额</span>' + paymentAmountMetric(t.payable, 32, 'danger', true) + '</section>'
       +   '<section class="order-reference-payment__sheet order-refund-payment__sheet">'
       +     '<section class="order-refund-payment__field" aria-labelledby="order-refund-status-title"><header><strong id="order-refund-status-title">退款状态</strong></header><div class="order-refund-payment__option-grid' + (state.customer ? '' : ' is-single') + '" role="radiogroup" aria-label="退款状态">'
       +       refundRadioOption('status', 'private', '已私下退款', draft.refundStatus === 'private')
-      +       (state.customer ? refundRadioOption('status', 'balance', '退至客户余额', draft.refundStatus === 'balance') : '')
+      +       (!refundUsesPrivateOnly() ? refundRadioOption('status', 'balance', '退至客户余额', draft.refundStatus === 'balance') : '')
       +     '</div></section>'
       +     methodContent
       +     inventoryContent
@@ -3721,7 +4128,7 @@
       +   '<footer class="order-reference-payment__footer">'
       +     '<div class="order-payment-options">'
       +       paymentCheckoutOption(draft.autoPrintReceipt, 'auto-print-receipt', '打印小票', 'MJJS-2BIUI')
-      +       paymentCheckoutOption(draft.autoDispatch, 'auto-dispatch', '快递打单发货', '申通快递')
+      +       courierCheckoutOption(draft)
       +     '</div>'
       +     '<button type="button" class="btn btn--strong btn--lg order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component="button" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '>' + paymentConfirmContent(draft, t.payable, confirmState) + '</button></footer>'
       + '</div>';
@@ -3738,7 +4145,7 @@
     var content = '<strong>' + label + '</strong>';
     var classes = 'order-refund-payment__option';
     var attributes = 'role="radio" aria-checked="' + selected + '" data-refund-' + group + '="' + value + '"';
-    if (group === 'inventory' && value === 'specified') {
+    if (group === 'inventory' && normalizeInventoryType(value) === 'returnSpecificWarehouse') {
       var selectedWarehouse = WAREHOUSES.filter(function (warehouse) { return warehouse.id === warehouseId; })[0];
       var displayLabel = selectedWarehouse ? '退回' + selectedWarehouse.name : label;
       content = '<strong title="' + escapeHtml(displayLabel) + '">' + escapeHtml(displayLabel) + '</strong><i class="wego-iconfont-s icon-youjiantou16 order-refund-payment__warehouse-arrow" aria-hidden="true"></i>';
@@ -3879,7 +4286,11 @@
   }
 
   function paymentSmallCheckbox(checked) {
-    return '<div class="checkbox checkbox--sm' + (checked ? ' checkbox--checked' : '') + '" data-component="checkbox" data-component-slug="checkbox" data-variant-name="Checkbox_Small"><div class="checkbox__inner"></div>' + (checked ? '<div class="checkbox__icon"><img class="checkbox__asset" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></div>' : '') + '</div>';
+    return paymentSelectionCheckboxControl(checked, true);
+  }
+
+  function paymentSelectionCheckboxControl(checked, small, disabled) {
+    return '<div class="checkbox' + (small ? ' checkbox--sm' : '') + (checked ? ' checkbox--checked' : '') + (disabled ? ' checkbox--disabled' : '') + '" data-component="checkbox" data-component-slug="checkbox"' + (small ? ' data-variant-name="Checkbox_Small"' : '') + '><div class="checkbox__inner"></div>' + (checked ? '<div class="checkbox__icon"><img class="checkbox__asset" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></div>' : '') + '</div>';
   }
 
   function paymentReferenceBalance(draft, payable) {
@@ -3945,6 +4356,15 @@
     return '<label class="checkbox-field order-reference-payment__post-option" role="checkbox" tabindex="0" aria-checked="' + (checked ? 'true' : 'false') + '" data-clickable data-' + attr + '>'
       + paymentSmallCheckbox(checked)
       + '<strong class="checkbox-field__text order-reference-payment__post-title">' + label + '</strong><small class="order-reference-payment__post-detail">' + detail + '</small><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></label>';
+  }
+
+  function courierCheckoutOption(draft) {
+    var disabled = orderHasReturnSku();
+    var checked = !disabled && Boolean(draft.autoDispatch);
+    return '<div class="order-reference-payment__post-option order-reference-payment__post-option--courier">'
+      + '<button type="button" class="checkbox-field order-reference-payment__post-toggle" role="checkbox" aria-checked="' + checked + '" aria-disabled="' + disabled + '" data-auto-dispatch>'
+      + paymentSelectionCheckboxControl(checked, true, disabled) + '<strong class="checkbox-field__text order-reference-payment__post-title">快递打单发货</strong></button>'
+      + '<button type="button" class="order-reference-payment__courier-printer" data-open-courier-printer aria-label="设置快递单打印机"><span>申通快递</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button></div>';
   }
 
   function paymentNoteEntry(draft, isRefund) {
@@ -4044,6 +4464,7 @@
 
   function paymentConfirmContent(draft, payable, confirmState) {
     var stateValue = confirmState || paymentConfirmState(draft, payable);
+    if (!isPureReturnOrder() && Number(payable) >= 0 && toCents(payable) - paymentBalanceCents(draft, payable) <= 0) return '<span>' + stateValue.label + '</span>';
     var detail = stateValue.detail || paymentConfirmDetail(draft, payable);
     if (!detail) return '<span>' + stateValue.label + '</span>';
     return '<span>' + stateValue.label + '</span><small>' + (stateValue.plainDetail ? detail : '(' + detail + ')') + '</small>';
@@ -4183,7 +4604,7 @@
   }
 
   function paymentConfirmState(draft, payable) {
-    if (Number(payable || 0) < 0) {
+    if (Number(payable || 0) < 0 || isPureReturnOrder()) {
       if (state.paymentStatus === 'processing') return { enabled: false, label: '正在确认…' };
       return { enabled: true, label: '确认开单' };
     }
@@ -4193,6 +4614,7 @@
       return { enabled: false, label: '扫码支付中' };
     }
     if (state.paymentStatus === 'processing') return { enabled: false, label: '正在确认…' };
+    if (targetCents === 0) return { enabled: true, label: '确认开单' };
     if (draft.kind === 'unpaid') return { enabled: true, label: '确认开单' };
     if (draft.kind === 'debt') return { enabled: Boolean(state.customer), label: '确认开单' };
     if (targetCents > 0 && isSingleQrCodePayment(draft)) {
@@ -4966,15 +5388,37 @@
       + '<div class="order-side-actions">' + button('保存地址', 'strong', 'md', 'data-save-delivery') + '</div></div>';
   }
 
-  // seg_32 HUG scene adapter: content width + 6px each side, per browser review; no registered H5 canonical component yet.
+  // Seg 分段控制器：候选组件资源，业务状态仍由宿主管理。
+  function segmentControlMarkup(scope, value, choices, attr, extraClass, label) {
+    return '<div class="segment-control wg-segment-control ' + extraClass + '" data-component="segment-control" data-variant-name="Seg_32_HUG" data-layout="hug" data-order-segment="' + scope + '" role="radiogroup" aria-label="' + label + '"><div class="wg-segment-control__track">'
+      + choices.map(function (choice) {
+        return '<button type="button" class="wg-segment-control__item" role="radio" aria-checked="' + (value === choice[0]) + '" tabindex="' + (value === choice[0] ? '0' : '-1') + '" data-value="' + choice[0] + '" ' + attr + '="' + choice[0] + '"><span class="wg-segment-control__label">' + choice[1] + '</span></button>';
+      }).join('') + '<span class="wg-segment-control__indicator" aria-hidden="true"></span></div></div>';
+  }
+
+  var segmentControlHandles = [];
+  function destroySegmentControls() {
+    segmentControlHandles.forEach(function (handle) { handle.destroy(); });
+    segmentControlHandles = [];
+  }
+  function bindSegmentControls(root, ctx) {
+    if (!window.WegoSegmentControl) return;
+    root.querySelectorAll('[data-order-segment]').forEach(function (node) {
+      segmentControlHandles.push(window.WegoSegmentControl.bind(node, {
+        value: node.dataset.orderSegment === 'catalog' ? state.catalogViewMode : state.addDraft.mode,
+        onChange: function (detail) {
+          var button = Array.from(node.querySelectorAll('[data-value]')).find(function (item) { return item.dataset.value === detail.value; });
+          if (button) handleClick({ target: button }, root, ctx);
+        }
+      }));
+    });
+  }
+
   function addViewSelector(draft) {
     var matrix = addProductMatrix(draft.product);
     if (!matrix.hasColor && !matrix.hasSize) return '';
     return '<div class="order-add-selection-head order-add-view-head"><small>选择规格</small>'
-      + '<div class="order-add-view-seg" role="group" aria-label="规格展示方式" data-scenario-component="seg_32" data-kuikly-component="SegmentControl" data-layout="hug">'
-      + ['single', 'batch'].map(function (mode, index) {
-        return '<button type="button" class="' + (draft.mode === mode ? 'is-active' : '') + '" data-add-mode="' + mode + '" aria-pressed="' + (draft.mode === mode) + '">' + (index ? '表格' : '列表') + '</button>';
-      }).join('') + '</div>'
+      + segmentControlMarkup('add-mode', draft.mode, [['single', '列表'], ['batch', '表格']], 'data-add-mode', 'order-add-view-seg', '规格展示方式')
       + '<button type="button" class="link link--14 order-add-spec-link" data-component="link" data-component-slug="link" data-variant-name="Link_14" data-add-spec>添加规格</button></div>';
   }
 
@@ -4984,14 +5428,14 @@
     var values = draft.listBulkValues || {};
     var value = Number(values[color] || 0);
     // A common stock ceiling preserves a single value across every valid SKU.
-    var limit = specs.reduce(function (min, spec) { return Math.min(min, singleQuantityLimit(draft.product, spec)); }, 9999);
+    var limit = specs.reduce(function (min, spec) { return Math.min(min, singleQuantityLimit(draft.product, spec)); }, QUANTITY_MAX);
     return { color: color, specs: specs, value: value, limit: limit };
   }
 
   function addListBulkCounter(draft) {
     var bulk = listBulkState(draft);
     return '<div class="counter" data-component="counter" data-component-slug="counter" data-variant-name="Counter_32"><div class="counter__body">'
-      + '<button type="button" class="counter__btn counter__btn--minus" data-list-bulk-delta="-1" aria-label="减少批量数量" ' + (!bulk.specs.length || bulk.value <= -9999 ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
+      + '<button type="button" class="counter__btn counter__btn--minus" data-list-bulk-delta="-1" aria-label="减少批量数量" ' + (!bulk.specs.length || bulk.value <= QUANTITY_MIN ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
       + '<input class="counter__value" aria-label="批量设定数量" value="' + bulk.value + '" readonly>'
       + '<button type="button" class="counter__btn counter__btn--plus" data-list-bulk-delta="1" aria-label="增加批量数量" ' + (!bulk.specs.length || bulk.value >= bulk.limit ? 'disabled' : '') + '><i class="counter__icon icon-jia16"></i></button>'
       + '</div></div>';
@@ -5027,8 +5471,8 @@
         + '<div class="order-add-sku-operation">'
         + '<div class="counter' + (counterDisabled ? ' is-disabled' : '') + '" data-component="counter" data-component-slug="counter" data-variant-name="Counter_32">'
         +   '<div class="counter__body">'
-        +     '<button type="button" class="counter__btn counter__btn--minus" data-single-qty-delta="-1" data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="减少' + escapeHtml(size) + '数量" ' + (counterDisabled || rowQuantity <= -9999 ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
-        +     '<input class="counter__value' + (rowState && rowState.isOverStock ? ' is-overstock-value' : '') + '" type="text" inputmode="numeric" maxlength="5" value="' + rowQuantity + '" data-single-qty-input data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="' + escapeHtml(size) + '数量" ' + (rowState && rowState.isOverStock ? 'aria-invalid="true" ' : '') + (counterDisabled ? 'disabled' : '') + '>'
+        +     '<button type="button" class="counter__btn counter__btn--minus" data-single-qty-delta="-1" data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="减少' + escapeHtml(size) + '数量" ' + (counterDisabled || rowQuantity <= QUANTITY_MIN ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
+        +     '<input class="counter__value' + (rowState && rowState.isOverStock ? ' is-overstock-value' : '') + '" type="text" inputmode="numeric" maxlength="8" value="' + rowQuantity + '" data-single-qty-input data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="' + escapeHtml(size) + '数量" ' + (rowState && rowState.isOverStock ? 'aria-invalid="true" ' : '') + (counterDisabled ? 'disabled' : '') + '>'
         +     '<button type="button" class="counter__btn counter__btn--plus" data-single-qty-delta="1" data-single-spec="' + encodeURIComponent(rowSpec) + '" data-single-size="' + encodeURIComponent(size) + '" aria-label="增加' + escapeHtml(size) + '数量" ' + (counterDisabled || rowQuantity >= rowStock ? 'disabled' : '') + '><i class="counter__icon icon-jia16"></i></button>'
         +   '</div><div class="counter__message counter__hint"></div><div class="counter__message counter__error"></div>'
         + '</div>'
@@ -5053,8 +5497,8 @@
       +   (desktop ? '' : '<section class="order-single-qty">'
       +     '<small>购买数量</small>'
       +     '<div class="counter" data-component-slug="counter"><div class="counter__body">'
-      +       '<button type="button" class="counter__btn counter__btn--minus" data-single-qty-delta="-1" data-single-spec="' + encodeURIComponent(spec) + '" aria-label="减少购买数量" ' + (spec && quantity <= -9999 ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
-      +       '<input class="counter__value" type="text" inputmode="numeric" maxlength="5" value="' + quantity + '" data-single-qty-input aria-label="购买数量">'
+      +       '<button type="button" class="counter__btn counter__btn--minus" data-single-qty-delta="-1" data-single-spec="' + encodeURIComponent(spec) + '" aria-label="减少购买数量" ' + (spec && quantity <= QUANTITY_MIN ? 'disabled' : '') + '><i class="counter__icon icon-jian16"></i></button>'
+      +       '<input class="counter__value" type="text" inputmode="numeric" maxlength="8" value="' + quantity + '" data-single-qty-input aria-label="购买数量">'
       +       '<button type="button" class="counter__btn counter__btn--plus" data-single-qty-delta="1" data-single-spec="' + encodeURIComponent(spec) + '" aria-label="增加购买数量" ' + (spec && quantity >= stock ? 'disabled' : '') + '><i class="counter__icon icon-jia16"></i></button>'
       +     '</div><div class="counter__message counter__hint"></div><div class="counter__message counter__error"></div></div>'
       +   '</section>')
@@ -5085,7 +5529,7 @@
                 var stock = specStock(product, spec);
                 var qty = Number(draft.skuQty[spec] || 0);
                 var cellClasses = batchSelectionCellClasses(selection, color, size, colorIndex, matrix.sizes.indexOf(size), matrix.colors.length, matrix.sizes.length);
-                return '<td class="' + cellClasses + '">' + (spec ? '<div class="number-input number-input--surface-white" data-component-slug="input"><input class="number-input__field" type="text" inputmode="numeric" maxlength="5" value="' + (qty === 0 ? '' : qty) + '" data-batch-qty="' + encodeURIComponent(spec) + '" data-batch-column="' + escapeHtml(color) + '" aria-label="' + escapeHtml(color + ' ' + size) + '数量"></div>' : '<span class="order-batch-unavailable">—</span>') + (showInventory ? '<small>库存' + (spec && stock > 0 ? stock : '--') + '</small>' : '') + '</td>';
+                return '<td class="' + cellClasses + '">' + (spec ? '<div class="number-input number-input--surface-white" data-component-slug="input"><input class="number-input__field" type="text" inputmode="numeric" maxlength="8" value="' + (qty === 0 ? '' : qty) + '" data-batch-qty="' + encodeURIComponent(spec) + '" data-batch-column="' + escapeHtml(color) + '" aria-label="' + escapeHtml(color + ' ' + size) + '数量"></div>' : '<span class="order-batch-unavailable">—</span>') + (showInventory ? '<small>库存' + (spec && stock > 0 ? stock : '--') + '</small>' : '') + '</td>';
               }).join('');
               var sizeSelected = selection && (selection.type === 'all' || selection.type === 'column' || (selection.type === 'row' && selection.value === size) || (selection.type === 'cell' && selection.size === size));
               return '<tr data-batch-row="' + escapeHtml(size) + '"><th class="' + (sizeSelected ? 'is-selected' : '') + '"><button type="button" data-batch-select-row="' + encodeURIComponent(size) + '">' + escapeHtml(size) + '</button></th>' + cells + '</tr>';
@@ -5115,9 +5559,9 @@
       + (!desktop && draft.lastDiscountTipVisible ? '<div class="order-add-last-price">上次优惠价 ' + money(lastDiscountPrice) + '<button type="button" data-use-last-discount>使用</button></div>' : '')
       + '</div></div>';
     var priceModes = '<fieldset class="order-add-price-modes" aria-label="开单价格">'
-      + '<span class="order-add-price-option tag tag--28 ' + (draft.priceMode === 'cost' ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag"><button type="button" class="order-add-cost-visibility" data-toggle-cost-price aria-label="' + (draft.costPriceVisible ? '隐藏拿货价' : '显示拿货价') + '"><i class="wego-iconfont-s ' + (draft.costPriceVisible ? 'icon-xianshi' : 'icon-yincang') + '" aria-hidden="true"></i></button><button type="button" class="order-add-price-select" data-add-price-mode="cost" aria-pressed="' + String(draft.priceMode === 'cost') + '"><span class="tag__label">拿货价 ' + (draft.costPriceVisible ? money(productCostPrice(product)) : '***') + '</span></button></span>'
-      + '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'retail' || draft.priceMode === 'discount' ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag" data-add-price-mode="retail" aria-pressed="' + String(draft.priceMode === 'retail' || draft.priceMode === 'discount') + '"><span class="tag__label">' + (draft.priceMode === 'discount' ? '优惠价 ' + money(unitPrice) : '售价 ' + money(customerPrice(product))) + '</span></button>'
-      + (state.customer && Number(state.memberDiscount) < 100 ? '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'member' ? 'tag--brand tag--selected' : 'tag--white tag--normal') + '" data-component-slug="tag" data-add-price-mode="member" aria-pressed="' + String(draft.priceMode === 'member') + '"><span class="tag__label">会员价 ' + money(memberPrice(product.listPrice)) + '</span></button>' : '')
+      + '<span class="order-add-price-option tag tag--28 ' + (draft.priceMode === 'cost' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag"><button type="button" class="order-add-cost-visibility" data-toggle-cost-price aria-label="' + (draft.costPriceVisible ? '隐藏拿货价' : '显示拿货价') + '"><i class="wego-iconfont-s ' + (draft.costPriceVisible ? 'icon-xianshi' : 'icon-yincang') + '" aria-hidden="true"></i></button><button type="button" class="order-add-price-select" data-add-price-mode="cost" aria-pressed="' + String(draft.priceMode === 'cost') + '"><span class="tag__label">拿货价 ' + (draft.costPriceVisible ? money(productCostPrice(product)) : '***') + '</span></button></span>'
+      + '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'retail' || draft.priceMode === 'discount' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="retail" aria-pressed="' + String(draft.priceMode === 'retail' || draft.priceMode === 'discount') + '"><span class="tag__label">' + (draft.priceMode === 'discount' ? '优惠价 ' + money(unitPrice) : '售价 ' + money(customerPrice(product))) + '</span></button>'
+      + (state.customer && Number(state.memberDiscount) < 100 ? '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'member' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="member" aria-pressed="' + String(draft.priceMode === 'member') + '"><span class="tag__label">会员价 ' + money(memberPrice(product.listPrice)) + '</span></button>' : '')
       + '</fieldset>';
     var selectorContent = (desktop ? '' : '<div class="order-segment order-add-mode-switch"><button class="' + (draft.mode === 'single' ? 'is-active' : '') + '" data-add-mode="single">单买</button><button class="' + (draft.mode === 'batch' ? 'is-active' : '') + '" data-add-mode="batch">多买</button></div>')
       + (draft.mode === 'batch' ? addBatchPicker(draft, desktop) : addSinglePicker(draft, desktop))
@@ -5618,6 +6062,7 @@
   }
 
   function desktopModal() {
+    if (shouldHideCheckoutForRefundSync()) return '';
     if (state.panel === 'product-edit') return productEditModal();
     if (state.panel === 'product-create' || state.panel === 'product-temp-create') return productCreateModal();
     if (state.panel === 'fan-profile') return fanProfileModal();
@@ -5627,11 +6072,11 @@
     var isNote = state.panel === 'note';
     var isCheckout = state.panel === 'checkout' || state.panel === 'payment';
     var isQuick = state.panel === 'quick';
-    var checkoutTitle = totals().payable < 0 ? '退款处理' : '支付结算';
+    var checkoutTitle = (totals().payable < 0 || isPureReturnOrder()) ? '退款处理' : '支付结算';
     var modalTitle = isQuick && QUICK_OP_DEFS[state.quickOp] ? QUICK_OP_DEFS[state.quickOp].title : (isCustomerCreate ? '新建客户' : (isDelivery ? '选择发货方式' : (isNote ? '商品备注' : (isCheckout ? checkoutTitle : '添加商品'))));
     // Exception: 宿主 modal 当前只有全宽面板，无法承载 PC 中宽新建客户、发货方式与商品录入；此处仅回退承载层，内容仍消费正式组件。
     return ''
-      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
+      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 || isPureReturnOrder() ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
       +   '<div class="order-desktop-modal__panel">'
       +     '<div class="order-desktop-modal__head"><strong id="order-desktop-modal-title">' + modalTitle + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon ' + (isDelivery ? 'icon-cha' : 'icon-cha16') + '" aria-hidden="true"></i></button></div>'
       +     '<div class="order-desktop-modal__body">' + (isQuick ? quickOpPanel(true) : (isCustomerCreate ? desktopNewCustomerModalContent() : (isDelivery ? deliveryPanel() : (isNote ? spuNotePanel() : (isCheckout ? checkoutPanel() : addPanel(true)))))) + '</div>'
@@ -5769,6 +6214,7 @@
   }
 
   function mobileModal() {
+    if (shouldHideCheckoutForRefundSync()) return '';
     if (!state.panel) return '';
     if (state.panel === 'clipboard-address') return '';
     // Exception: 现有开单面板依赖场景内统一状态重绘，宿主 overlay 暂不支持该状态回灌；本轮沿用原承载层并补齐全屏与关闭行为。
@@ -5822,11 +6268,25 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
+    var focusedSegment = root.contains(document.activeElement) && document.activeElement.closest('[data-order-segment]');
+    var focusScope = focusedSegment && focusedSegment.dataset.orderSegment;
+    var focusValue = focusScope && document.activeElement.dataset.value;
+    destroySegmentControls();
     root.innerHTML = rootTemplate();
+    bindSegmentControls(root, ctx);
+    if (focusScope && focusValue) {
+      var nextFocus = root.querySelector('[data-order-segment="' + focusScope + '"] [data-value="' + focusValue + '"]');
+      if (nextFocus) nextFocus.focus({ preventScroll: true });
+    }
+    if (refundSyncState().dialog) {
+      root.querySelectorAll('.order-v2-page > :not(.order-refund-sync-dialog)').forEach(function (node) { node.setAttribute('inert', ''); });
+      var firstSyncButton = root.querySelector('.order-refund-sync-dialog button:not([disabled])');
+      if (firstSyncButton) firstSyncButton.focus({ preventScroll: true });
+    }
     if (state.skuPriceDraft) root.querySelectorAll('.order-desktop-modal--add, .order-v2-modal--add').forEach(function (modal) {
       modal.setAttribute('inert', '');
       modal.setAttribute('aria-hidden', 'true');
@@ -6386,10 +6846,12 @@
   }
 
   function validateCheckout(ctx) {
+    normalizeReturnDelivery();
     if (!state.products.length) {
       ctx.toast('请先添加商品');
       return false;
     }
+    if (isPureReturnOrder()) return true;
     if (!state.delivery && state.customer) {
       state.panel = 'delivery';
       renderActive();
@@ -6415,6 +6877,12 @@
   }
 
   function applyPaymentFeatureVisibility(draft) {
+    if (draft && orderHasReturnSku()) {
+      if (draft.kind === 'unpaid') draft.kind = 'private';
+      if (draft.kind === 'debt' && !returnDebtAllowed()) draft.kind = 'private';
+      draft.autoDispatch = false;
+      if (refundUsesPrivateOnly()) draft.refundStatus = 'private';
+    }
     if (draft && !featureEnabled('onlinePayment') && draft.kind === 'online') {
       // 隐藏功能不能从旧状态继续扣款；保留在线金额字段，但不转换为私下收款。
       draft.kind = 'unpaid';
@@ -6433,7 +6901,7 @@
 
   function createPaymentDraft() {
     var draft = {
-      kind: 'unpaid',
+      kind: orderHasReturnSku() ? 'private' : 'unpaid',
       mode: 'single',
       method: '',
       singleAmount: '',
@@ -6450,7 +6918,7 @@
       note: '',
       noteEditorValue: '',
       noteEditorOpen: false,
-      refundStatus: state.customer ? '' : 'private',
+      refundStatus: refundUsesPrivateOnly() ? 'private' : '',
       refundMethod: '',
       refundImages: [],
       refundImagesEditor: null,
@@ -6466,11 +6934,26 @@
       showShortageDialog: false
     };
     PAYMENT_METHODS.forEach(function (method) { draft[method.id] = ''; });
+    if (orderHasReturnSku()) {
+      draft.inventoryConfigExistSend = !isHistoryRefundSync() || refundSyncState().choices.indexOf('syncSend') >= 0;
+      var config = refundPrototypeConfig();
+      var type = normalizeInventoryType(config.rememberType);
+      if (returnInventoryTypes().indexOf(type) >= 0 && !config.inventoryFailed && (type !== 'returnSpecificWarehouse' || WAREHOUSES.some(function (warehouse) { return warehouse.id === config.rememberWarehouseId; }))) {
+        draft.inventoryReturnMode = type;
+        draft.refundWarehouseId = type === 'returnSpecificWarehouse' ? config.rememberWarehouseId : '';
+        draft.rememberInventory = true;
+      }
+    }
     return draft;
   }
 
   function beginPayment(ctx) {
+    if (state.paymentStatus === 'processing' || refundSyncState().checking) return;
     if (!validateCheckout(ctx)) return;
+    validateRefundSync(ctx, function () { enterPayment(); });
+  }
+
+  function enterPayment() {
     state.paymentDraft = createPaymentDraft();
     state.paymentStatus = 'idle';
     state.paymentScrollSpacer = 0;
@@ -6478,11 +6961,18 @@
     renderActive();
   }
 
+  function resumeRefundCheckout() {
+    if (state.panel === 'checkout' && state.paymentDraft) {
+      state.paymentStatus = 'idle';
+      renderActive();
+    } else enterPayment();
+  }
+
   function applyPrototypeReviewState() {
     // Prototype-only direct entry used by tour and review automation.
     var reviewState = '';
     try { reviewState = new URLSearchParams(window.location.search).get('state') || ''; } catch (error) {}
-    if (reviewState !== 'refund-checkout' && reviewState !== 'refund-checkout-guest') return;
+    if (['refund-checkout', 'refund-checkout-guest', 'refund-sync-prompt', 'return-list', 'return-mixed-positive', 'return-mixed-zero', 'return-mixed-negative', 'refund-sync', 'refund-sync-quantity', 'refund-sync-amount', 'refund-sync-many', 'refund-sync-remembered', 'refund-sync-skip', 'refund-sync-refund-failed', 'refund-no-sync-refund-failed', 'refund-temporary'].indexOf(reviewState) < 0) return;
     state.products = [{
       id: 'refund-review-product',
       code: PRODUCTS[0].code,
@@ -6497,12 +6987,47 @@
       orderSpecs: ['白色/M'],
       note: ''
     }];
-    state.customer = reviewState === 'refund-checkout' ? CUSTOMERS[0] : null;
+    state.customer = reviewState === 'refund-checkout-guest' ? null : CUSTOMERS[0];
+    if (reviewState === 'refund-temporary') state.products[0].createdType = 'temporary';
     state.delivery = 'none';
+    if (reviewState === 'return-list' || reviewState.indexOf('return-mixed-') === 0) {
+      state.products[0].price = state.products[0].listPrice = reviewState === 'return-mixed-positive' ? 40 : 100;
+      var sale = Object.assign({}, state.products[0], { id: 'sale-review-product', qty: 1, price: reviewState === 'return-mixed-negative' ? 40 : 100, listPrice: reviewState === 'return-mixed-negative' ? 40 : 100, skuQty: { '白色/M': 1 } });
+      state.products.push(sale);
+    }
+    var config = refundPrototypeConfig();
+    if (reviewState === 'refund-sync-quantity' || reviewState === 'refund-sync-many') config.syncResult = 'quantity';
+    if (reviewState === 'refund-sync-many') {
+      var example = state.products[0];
+      state.products = Array.from({ length: 12 }, function (_, index) {
+        var product = PRODUCTS[index % PRODUCTS.length];
+        return Object.assign({}, example, { id: 'abnormal-review-' + index, name: product.name, code: product.code, image: product.image, skuQty: { '白色/M': -1 }, orderSpecs: ['白色/M'] });
+      });
+    }
+    if (reviewState === 'refund-sync-amount') config.syncResult = 'amount';
+    if (reviewState === 'refund-sync-remembered') { config.syncChoices = ['syncWait', 'syncSend']; config.syncRangeRemember = true; }
+    if (reviewState === 'refund-sync-skip' || reviewState === 'refund-no-sync-refund-failed') { config.syncChoices = ['unSync']; config.syncRangeRemember = true; }
+    if (reviewState === 'refund-sync-refund-failed') config.syncChoices = ['syncSend'];
+    if (reviewState.indexOf('refund-failed') >= 0) config.refundResult = 'failed';
     state.paymentDraft = createPaymentDraft();
     state.paymentStatus = 'idle';
     state.paymentScrollSpacer = 0;
-    state.panel = 'checkout';
+    state.panel = reviewState === 'return-list' || reviewState === 'refund-sync-prompt' ? null : 'checkout';
+    if (reviewState === 'refund-sync-prompt') {
+      var prompt = refundSyncState(); prompt.dialog = 'prompt'; prompt.draftNoRemind = false;
+      prompt.continuation = function () { enterPayment(); };
+    }
+    if (reviewState === 'refund-sync' || reviewState === 'refund-sync-quantity' || reviewState === 'refund-sync-amount' || reviewState === 'refund-sync-many') {
+      var sync = refundSyncState();
+      sync.dialog = 'range'; sync.draftChoices = []; sync.draftNoRemind = false;
+      // 原型能力：演示预览一键展示响应示例，正常范围确认流程保持原有程序校验。
+      if (new URLSearchParams(window.location.search).get('syncPreview') === '1' && reviewState !== 'refund-sync') {
+        var response = prototypeSyncResponse();
+        sync.choices = ['syncSend']; sync.hasRecord = true;
+        sync.blockedItems = response.items; sync.blockedSyncType = response.syncType;
+        sync.dialog = 'blocked';
+      }
+    }
   }
 
   function paymentReceivedAmount(draft) {
@@ -6552,10 +7077,16 @@
   }
 
   function confirmPayment(ctx) {
+    if (state.paymentStatus === 'processing' || state.paymentStatus === 'success' || refundSyncState().checking) return;
+    if (!validateCheckout(ctx)) return;
+    validateRefundSync(ctx, function () { confirmPaymentAfterSync(ctx); }, true);
+  }
+
+  function confirmPaymentAfterSync(ctx) {
     var draft = state.paymentDraft;
     applyPaymentFeatureVisibility(draft);
     var payable = totals().payable;
-    if (payable < 0) {
+    if (payable < 0 || isPureReturnOrder()) {
       confirmRefund(ctx, draft);
       return;
     }
@@ -6563,6 +7094,17 @@
       ctx.toast('请选择结算方式');
       return;
     }
+    if (!validateReturnInventory(ctx, draft)) return;
+    var coveredBalanceCents = paymentBalanceCents(draft, payable);
+    if (toCents(payable) - coveredBalanceCents <= 0) {
+      draft.kind = 'private';
+      draft.receivedAmount = 0; draft.balanceAmount = coveredBalanceCents / 100;
+      draft.shortage = 0; draft.excess = 0;
+      state.paymentStatus = 'processing'; renderActive(); scheduleOrderCompletion(ctx, 350);
+      return;
+    }
+    if (orderHasReturnSku() && draft.kind === 'unpaid') { ctx.toast('含退货商品，不能选择未收款'); return; }
+    if (draft.kind === 'debt' && orderHasReturnSku() && !returnDebtAllowed()) { ctx.toast('暂无记欠款权限或余额功能未开通'); return; }
     if (draft.kind === 'debt' && !state.customer) {
       ctx.toast('请先选择客户');
       return;
@@ -6570,7 +7112,7 @@
     if (draft.kind === 'unpaid' || draft.kind === 'debt') {
       state.paymentStatus = 'processing';
       renderActive();
-      setTimeout(function () { finishOrder(ctx); }, 350);
+      scheduleOrderCompletion(ctx, 350);
       return;
     }
     var selected = selectedPaymentMethods(draft);
@@ -6605,11 +7147,10 @@
     }
     state.paymentStatus = 'processing';
     renderActive();
-    setTimeout(function () { finishOrder(ctx); }, 650);
+    scheduleOrderCompletion(ctx, 650);
   }
 
   function confirmRefund(ctx, draft) {
-    var breakdown = quantityBreakdown(state.products);
     if (!draft || !draft.refundStatus) {
       ctx.toast('请选择退款方式');
       return;
@@ -6619,6 +7160,7 @@
       return;
     }
     if (draft.refundStatus === 'balance') {
+      if (refundUsesPrivateOnly()) { ctx.toast('本单仅支持已私下退款'); return; }
       if (!state.customer) {
         ctx.toast('请先选择客户');
         return;
@@ -6633,21 +7175,14 @@
       ctx.toast('请选择退款方式');
       return;
     }
-    if (breakdown.returns > 0 && !draft.inventoryReturnMode) {
-      ctx.toast('请先选择库存退回方式');
-      return;
-    }
-    if (draft.inventoryReturnMode === 'specified' && !draft.refundWarehouseId) {
-      ctx.toast('请先选择退回仓库');
-      return;
-    }
+    if (!validateReturnInventory(ctx, draft)) return;
     draft.processedStatus = 'processed';
-    draft.orderBusinessStatus = breakdown.sales === 0 && breakdown.returns > 0 ? 'returned' : 'refund-processed';
+    draft.orderBusinessStatus = orderDeliveryStatus();
     draft.submittedRefundMethod = draft.refundStatus === 'private' ? draft.refundMethod : 'customer-balance';
-    draft.submittedRefundWarehouseId = draft.inventoryReturnMode === 'specified' ? draft.refundWarehouseId : '';
+    draft.submittedRefundWarehouseId = draft.inventoryReturnMode === 'returnSpecificWarehouse' ? draft.refundWarehouseId : '';
     state.paymentStatus = 'processing';
     renderActive();
-    setTimeout(function () { finishOrder(ctx); }, 350);
+    scheduleOrderCompletion(ctx, 350);
   }
 
   function startOnlinePayment() {
@@ -6837,7 +7372,8 @@
   function finishOrder(ctx) {
     state.paymentStatus = 'success';
     state.orderNo = 'SO' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 9000) + 1000);
-    var isRefundOrder = totals().payable < 0;
+    var isRefundOrder = totals().payable < 0 || isPureReturnOrder();
+    if (state.paymentDraft) state.paymentDraft.orderBusinessStatus = orderDeliveryStatus();
     var paymentKind = state.paymentDraft ? state.paymentDraft.kind : 'private';
     if (!isRefundOrder) {
       applyPaymentLedger(state.paymentDraft);
@@ -6852,7 +7388,7 @@
         ? '记欠款'
         : (state.paymentDraft && state.paymentDraft.shortage > 0
           ? '部分收款 · 记欠款 ' + money(state.paymentDraft.shortage)
-          : (state.paymentDraft && state.paymentDraft.balanceAmount >= totals().payable
+          : (state.paymentDraft && state.paymentDraft.balanceAmount > 0 && state.paymentDraft.balanceAmount >= totals().payable
             ? '余额全额收款'
             : (state.paymentDraft && state.paymentDraft.mode === 'combo' ? '组合收款' : ((paymentMethodById(state.paymentDraft.method) || {}).label || '已收款')))));
     if (isRefundOrder && state.paymentDraft) {
@@ -6869,7 +7405,7 @@
     }
     state.paymentPostActions = {
       print: Boolean(state.paymentDraft && state.paymentDraft.autoPrintReceipt),
-      dispatch: Boolean(state.paymentDraft && state.paymentDraft.autoDispatch)
+      dispatch: Boolean(!orderHasReturnSku() && state.paymentDraft && state.paymentDraft.autoDispatch)
     };
     state.panel = null;
     renderActive();
@@ -6881,8 +7417,7 @@
     if (!item) return;
     var requestedQuantity = Number(nextQty);
     if (!Number.isFinite(requestedQuantity)) requestedQuantity = 1;
-    var signedSkuQuantity = isSkuMode(item.mode) && Boolean(spec);
-    var value = Math.max(signedSkuQuantity ? -9999 : 1, Math.min(9999999, requestedQuantity));
+    var value = Math.max(QUANTITY_MIN, Math.min(QUANTITY_MAX, Math.trunc(requestedQuantity)));
     if (isSkuMode(item.mode) && spec) {
       if (!Array.isArray(item.orderSpecs)) {
         item.orderSpecs = itemOrderSpecs(item);
@@ -6893,11 +7428,11 @@
       return;
     }
     if (isSkuMode(item.mode)) {
-      var activeSpecs = Object.keys(item.skuQty).filter(function (key) { return item.skuQty[key] > 0; });
+      var activeSpecs = Object.keys(item.skuQty).filter(function (key) { return item.skuQty[key] !== 0; });
       var primarySpec = activeSpecs[0] || Object.keys(item.skuQty)[0];
       if (primarySpec) {
         var otherQty = activeSpecs.reduce(function (sum, key) { return key === primarySpec ? sum : sum + Number(item.skuQty[key] || 0); }, 0);
-        item.skuQty[primarySpec] = Math.max(1, value - otherQty);
+        item.skuQty[primarySpec] = signedQuantity(value - otherQty);
         item.qty = Object.keys(item.skuQty).reduce(function (sum, key) { return sum + Number(item.skuQty[key] || 0); }, 0);
         return;
       }
@@ -6908,6 +7443,85 @@
   function handleClick(event, root, ctx) {
     if (state.paymentDraft && state.paymentDraft.refundWarehouseMenuOpen && !event.target.closest('.order-refund-warehouse-popmenu')) closeRefundWarehouseMenu(root);
     var target = event.target.closest('button, [data-clickable]');
+    if (target && target.matches('[data-open-refund-sync]')) {
+      if (canSyncRefund()) openRefundSync();
+      return;
+    }
+    if (target && target.matches('[data-close-refund-sync]')) { closeRefundSync(); return; }
+    if (refundSyncState().checking && refundSyncState().dialog === 'range') return;
+    if (target && target.matches('[data-refund-sync-prompt]')) {
+      var promptSync = refundSyncState();
+      if (promptSync.dialog !== 'prompt') return;
+      var intent = target.dataset.refundSyncPrompt;
+      if (intent !== 'skip' && intent !== 'sync') return;
+      promptSync.promptIntent = promptSync.draftNoRemind ? intent : '';
+      promptSync.hasRecord = promptSync.choices.length > 0 || Boolean(promptSync.promptIntent);
+      persistRefundSync();
+      var afterPrompt = promptSync.continuation;
+      if (intent === 'sync') { openRefundSync(afterPrompt); return; }
+      promptSync.choices = ['unSync']; promptSync.hasRecord = true;
+      promptSync.dialog = ''; promptSync.continuation = null;
+      if (afterPrompt) afterPrompt(); else renderActive();
+      return;
+    }
+    if (target && target.matches('[data-sync-range]')) {
+      var rangeSync = refundSyncState();
+      var type = target.dataset.syncRange;
+      if (rangeSync.dialog !== 'range' || ['syncWait', 'syncSend', 'syncUnSend', 'unSync'].indexOf(type) < 0 || (type === 'unSync' && !rangeSync.hasRecord)) return;
+      var selected = rangeSync.draftChoices.indexOf(type) >= 0;
+      if (type === 'unSync') rangeSync.draftChoices = selected ? [] : ['unSync'];
+      else {
+        rangeSync.draftChoices = rangeSync.draftChoices.filter(function (choice) { return choice !== 'unSync' && choice !== type; });
+        if (!selected) rangeSync.draftChoices.push(type);
+      }
+      renderActive();
+      var nextRange = root.querySelector('[data-sync-range="' + type + '"]');
+      if (nextRange) nextRange.focus({ preventScroll: true });
+      return;
+    }
+    if (target && target.matches('[data-sync-no-remind]')) {
+      if (refundSyncState().dialog !== 'prompt') return;
+      refundSyncState().draftNoRemind = !refundSyncState().draftNoRemind;
+      renderActive();
+      var nextRemember = root.querySelector('[data-sync-no-remind]');
+      if (nextRemember) nextRemember.focus({ preventScroll: true });
+      return;
+    }
+    if (target && target.matches('[data-sync-remember-range]')) {
+      if (refundSyncState().dialog !== 'range') return;
+      refundSyncState().draftRememberRange = !refundSyncState().draftRememberRange;
+      renderActive();
+      var nextRangeRemember = root.querySelector('[data-sync-remember-range]');
+      if (nextRangeRemember) nextRangeRemember.focus({ preventScroll: true });
+      return;
+    }
+    if (target && target.matches('[data-confirm-refund-sync]')) {
+      var confirmedSync = refundSyncState();
+      if (confirmedSync.dialog !== 'range' || !confirmedSync.draftChoices.length) return;
+      confirmedSync.choices = confirmedSync.draftChoices.slice();
+      confirmedSync.rememberRange = confirmedSync.draftRememberRange;
+      confirmedSync.hasRecord = true;
+      persistRefundSync();
+      var afterSync = function () { if (validateCheckout(ctx)) resumeRefundCheckout(); };
+      validateRefundSync(ctx, afterSync, true);
+      return;
+    }
+    if (target && target.matches('[data-reselect-refund-sync]')) {
+      openRefundSync(refundSyncState().continuation); return;
+    }
+    if (target && target.matches('[data-skip-refund-sync]')) {
+      var skippedSync = refundSyncState();
+      if (skippedSync.dialog !== 'blocked' && skippedSync.dialog !== 'failed') return;
+      skippedSync.requestId += 1;
+      skippedSync.choices = ['unSync'];
+      skippedSync.hasRecord = true;
+      persistRefundSync();
+      skippedSync.dialog = '';
+      skippedSync.continuation = null;
+      if (validateCheckout(ctx)) resumeRefundCheckout();
+      return;
+    }
+    if (refundSyncState().dialog || (orderHasReturnSku() && state.paymentStatus === 'processing')) return;
     if (!target || !root.contains(target)) return;
     if (state.orderPromotionDraft) {
       if (!target.closest('.order-promotion-modal')) return;
@@ -7787,6 +8401,8 @@
       return;
     }
     if (target.matches('[data-close-panel]')) {
+      if (refundSyncState().checking) closeRefundSync();
+      if (state.paymentStatus === 'processing') { ctx.toast('正在确认，请稍候'); return; }
       if ((state.panel === 'checkout' || state.panel === 'payment') && state.paymentStatus === 'processing') {
         ctx.toast('正在确认收款结果，请稍候');
         return;
@@ -8275,7 +8891,7 @@
       var bulkDraft = state.addDraft;
       var bulk = listBulkState(bulkDraft);
       if (!bulk.specs.length) return;
-      var bulkValue = Math.max(-9999, Math.min(bulk.limit, bulk.value + Number(target.dataset.listBulkDelta)));
+      var bulkValue = Math.max(QUANTITY_MIN, Math.min(bulk.limit, bulk.value + Number(target.dataset.listBulkDelta)));
       bulkDraft.listBulkActive = true;
       if (!bulkDraft.listBulkValues) bulkDraft.listBulkValues = {};
       bulkDraft.listBulkValues[bulk.color] = bulkValue;
@@ -8385,7 +9001,7 @@
       var singleDelta = Number(target.dataset.singleQtyDelta);
       var currentSingleQuantity = Number(draftNow.skuQty[singleSpec] || 0);
       var nextSingleQuantity = singleDelta < 0
-        ? Math.max(-9999, currentSingleQuantity + singleDelta)
+        ? Math.max(QUANTITY_MIN, currentSingleQuantity + singleDelta)
         : Math.min(singleStock, currentSingleQuantity + singleDelta);
       setSingleSkuQuantity(draftNow, singleSpec, nextSingleQuantity);
       if (draftNow.confirmedOverstock && nextSingleQuantity <= singleStock) delete draftNow.confirmedOverstock[singleSpec];
@@ -8440,6 +9056,7 @@
       return;
     }
     if (target.matches('[data-edit-freight]')) {
+      if (isPureReturnOrder()) { ctx.toast('纯退货单运费为 0'); return; }
       state.freightEditOpen = true;
       renderActive();
       var freightField = activeContext.root.querySelector('[data-freight-edit-value]');
@@ -8721,6 +9338,7 @@
       var nextRefundStatus = target.dataset.refundStatus;
       var previousRefundStatus = state.paymentDraft.refundStatus;
       if (nextRefundStatus === 'balance') {
+        if (refundUsesPrivateOnly()) return;
         if (!state.customer) {
           ctx.toast('请先选择客户');
           return;
@@ -8744,7 +9362,8 @@
       return;
     }
     if (target.matches('[data-refund-inventory]')) {
-      if (target.dataset.refundInventory === 'specified') {
+      if (!state.paymentDraft || returnInventoryTypes().indexOf(normalizeInventoryType(target.dataset.refundInventory)) < 0) return;
+      if (normalizeInventoryType(target.dataset.refundInventory) === 'returnSpecificWarehouse') {
         state.paymentDraft.refundWarehouseMenuOpen = true;
         var menuHost = root.querySelector('.order-v2-page');
         if (menuHost) {
@@ -8756,13 +9375,18 @@
         }
         return;
       }
-      state.paymentDraft.inventoryReturnMode = target.dataset.refundInventory;
+      state.paymentDraft.inventoryReturnMode = normalizeInventoryType(target.dataset.refundInventory);
       state.paymentDraft.refundWarehouseId = '';
       renderPaymentPreservingScroll(root);
       return;
     }
+    if (target.matches('[data-remember-return-inventory]') && state.paymentDraft) {
+      state.paymentDraft.rememberInventory = !state.paymentDraft.rememberInventory;
+      renderPaymentPreservingScroll(root); return;
+    }
     if (target.matches('[data-select-refund-warehouse]')) {
-      state.paymentDraft.inventoryReturnMode = 'specified';
+      if (!WAREHOUSES.some(function (warehouse) { return warehouse.id === target.dataset.selectRefundWarehouse; })) return;
+      state.paymentDraft.inventoryReturnMode = 'returnSpecificWarehouse';
       state.paymentDraft.refundWarehouseId = target.dataset.selectRefundWarehouse;
       state.paymentDraft.refundWarehouseMenuOpen = false;
       renderPaymentPreservingScroll(root);
@@ -8798,6 +9422,8 @@
       return;
     }
     if (target.matches('[data-payment-kind]')) {
+      if (orderHasReturnSku() && target.dataset.paymentKind === 'unpaid') return;
+      if (target.dataset.paymentKind === 'debt' && orderHasReturnSku() && !returnDebtAllowed()) { ctx.toast('暂无记欠款权限或余额功能未开通'); return; }
       if (target.dataset.paymentKind === 'online' && !featureEnabled('onlinePayment')) return;
       if (target.dataset.paymentKind === 'debt' && !state.customer) {
         ctx.toast('请先选择客户');
@@ -8928,7 +9554,12 @@
       return;
     }
     if (target.matches('[data-auto-dispatch]')) {
+      if (orderHasReturnSku()) { ctx.toast('退货商品不支持打印快递单'); return; }
       if (state.paymentDraft) { state.paymentDraft.autoDispatch = !state.paymentDraft.autoDispatch; renderPaymentPreservingScroll(root); }
+      return;
+    }
+    if (target.matches('[data-open-courier-printer]')) {
+      ctx.toast('打印快递单设置弹窗暂未实现');
       return;
     }
     if (target.matches('[data-reference-recharge]')) {
@@ -8952,7 +9583,7 @@
       state.paymentDraft.shortage = Math.max(0, totals().payable - state.paymentDraft.receivedAmount - state.paymentDraft.balanceAmount);
       state.paymentStatus = 'processing';
       renderActive();
-      setTimeout(function () { finishOrder(ctx); }, 350);
+      scheduleOrderCompletion(ctx, 350);
       return;
     }
     if (target.matches('[data-simulate-qr-success]')) {
@@ -9028,6 +9659,7 @@
   }
 
   function handleInput(event, root, ctx) {
+    if (refundSyncState().dialog || (orderHasReturnSku() && state.paymentStatus === 'processing')) return;
     var target = event.target;
     if (target.matches('[data-order-promotion-input]') && state.orderPromotionDraft) {
       state.orderPromotionDraft.input = target.value;
@@ -9234,20 +9866,20 @@
       return;
     }
     if (target.matches('[data-row-qty]')) {
-      var rawQuantity = target.value.replace(/\D/g, '').slice(0, 7);
+      var rawQuantity = target.value.replace(/\D/g, '');
       var directItemIndex = Number(target.dataset.itemIndex);
       var directItem = state.products[directItemIndex];
       var directQtySpec = target.dataset.qtySpec ? decodeURIComponent(target.dataset.qtySpec) : '';
-      var isSignedSkuInput = Boolean(directItem && isSkuMode(directItem.mode) && directQtySpec);
+      var isSignedSkuInput = Boolean(directItem);
       if (isSignedSkuInput) {
         var signedRaw = String(target.value || '').replace(/[^\d-]/g, '');
         var negativePrefix = signedRaw.charAt(0) === '-' ? '-' : '';
-        var signedDigits = signedRaw.replace(/-/g, '').slice(0, negativePrefix ? 4 : 7);
+        var signedDigits = signedRaw.replace(/-/g, '');
         if (!signedDigits && negativePrefix && event.type === 'input') {
           target.value = '-';
           return;
         }
-        rawQuantity = signedDigits ? negativePrefix + signedDigits : (event.type === 'input' ? '' : '0');
+        rawQuantity = signedDigits ? String(signedQuantity(negativePrefix + signedDigits)) : (event.type === 'input' ? '' : '0');
       }
       target.value = rawQuantity;
       if (rawQuantity || isSignedSkuInput) {
@@ -9263,8 +9895,14 @@
         }
         var directProductQty = directProductRow?.querySelector('[data-product-quantity-summary]');
         if (directProductQty) directProductQty.innerHTML = groupedQuantitySummary(directItem);
+        directProductRow.querySelectorAll('[data-order-spec-label]').forEach(function (label) {
+          var tag = label.querySelector('.order-return-tag');
+          var labelSpec = decodeURIComponent(label.dataset.orderSpecLabel || '');
+          if (tag) tag.hidden = Number(isSkuMode(directItem.mode) ? directItem.skuQty[labelSpec] : directItem.qty) >= 0;
+        });
         var liveTotals = totals();
         refreshDesktopSummary(root, liveTotals);
+        refreshReturnContext(root);
       }
       if (event.type === 'change') {
         if (!rawQuantity) setProductQuantity(directItemIndex, directQtySpec, isSignedSkuInput ? 0 : 1);
@@ -9350,9 +9988,9 @@
       var inputMatrix = addProductMatrix(singleDraft.product);
       var singleRaw = String(target.value || '').replace(/[^\d-]/g, '');
       var singleNegative = singleRaw.charAt(0) === '-' ? '-' : '';
-      var singleDigits = singleRaw.replace(/-/g, '').slice(0, 4);
+      var singleDigits = singleRaw.replace(/-/g, '');
       var singleParsed = (singleNegative || singleDigits) ? Number(singleNegative + singleDigits) : 0;
-      if (Number.isNaN(singleParsed)) singleParsed = 0;
+      singleParsed = signedQuantity(singleParsed);
       var desktopPendingInput = desktopSpecInput && !singleDraft.selectedColor;
       if (desktopPendingInput) {
         var pendingInputStock = pendingSizeStock(singleDraft.product, desktopInputSize);
@@ -9385,7 +10023,7 @@
       }
       var singleInputStock = singleQuantityLimit(singleDraft.product, singleInputSpec);
       if (desktopSpecInput) {
-        singleParsed = Math.max(-9999, Math.min(9999, singleParsed));
+        singleParsed = Math.max(QUANTITY_MIN, Math.min(QUANTITY_MAX, singleParsed));
         target.value = singleParsed;
         var desktopSkuState = resolveSkuRowState(singleDraft.product, singleInputSpec, singleParsed, false);
         if (desktopSkuState.hasStockValue && !desktopSkuState.negativeStock && singleParsed > Math.max(0, Number(desktopSkuState.stock))) return;
@@ -9397,12 +10035,12 @@
           var desktopSinglePickerNode = target.closest('.order-add-spec-counter-row');
           var desktopSingleMinus = desktopSinglePickerNode && desktopSinglePickerNode.querySelector('[data-single-qty-delta="-1"]');
           var desktopSinglePlus = desktopSinglePickerNode && desktopSinglePickerNode.querySelector('[data-single-qty-delta="1"]');
-          if (desktopSingleMinus) desktopSingleMinus.disabled = singleParsed <= -9999;
+          if (desktopSingleMinus) desktopSingleMinus.disabled = singleParsed <= QUANTITY_MIN;
           if (desktopSinglePlus) desktopSinglePlus.disabled = singleParsed >= singleInputStock;
         }
         return;
       }
-      singleParsed = Math.max(-9999, Math.min(singleInputStock, singleParsed));
+      singleParsed = Math.max(QUANTITY_MIN, Math.min(singleInputStock, singleParsed));
       target.value = singleParsed;
       setSingleSkuQuantity(singleDraft, singleInputSpec, singleParsed);
       updateAddDraftTotals(root);
@@ -9411,7 +10049,7 @@
         if (singlePickerNode) {
           var singleMinusNode = singlePickerNode.querySelector('[data-single-qty-delta="-1"]');
           var singlePlusNode = singlePickerNode.querySelector('[data-single-qty-delta="1"]');
-          if (singleMinusNode) singleMinusNode.disabled = singleParsed <= -9999;
+          if (singleMinusNode) singleMinusNode.disabled = singleParsed <= QUANTITY_MIN;
           if (singlePlusNode) singlePlusNode.disabled = singleParsed >= singleInputStock;
         }
       }
@@ -9421,10 +10059,10 @@
       var batchSpec = decodeURIComponent(target.dataset.batchQty);
       var batchRaw = String(target.value || '').replace(/[^\d-]/g, '');
       var batchNegative = batchRaw.charAt(0) === '-' ? '-' : '';
-      var batchDigits = batchRaw.replace(/-/g, '').slice(0, 4);
+      var batchDigits = batchRaw.replace(/-/g, '');
       var batchHasValue = batchDigits.length > 0;
       var batchQuantity = Number((batchNegative + batchDigits) || 0);
-      batchQuantity = Math.max(-9999, Math.min(batchQuantityLimit(state.addDraft.product, batchSpec), batchQuantity));
+      batchQuantity = Math.max(QUANTITY_MIN, Math.min(batchQuantityLimit(state.addDraft.product, batchSpec), signedQuantity(batchQuantity)));
       target.value = batchHasValue ? batchQuantity : '';
       state.addDraft.batchRecordTouched = true;
       var batchSelection = state.addDraft.batchSelection;
@@ -9607,6 +10245,8 @@
       openOrderRowContextMenu(Number(row.dataset.rowSelect), row.dataset.rowSpec ? decodeURIComponent(row.dataset.rowSpec) : '', x, y);
     });
     root.addEventListener('click', function (event) {
+      // Seg 已由组件回调进入 handleClick；不再走冒泡委托，避免一次点击重复更新。
+      if (event.target.closest('[data-order-segment]')) return;
       var clickedBatchInput = event.target.closest('[data-batch-qty]');
       if (clickedBatchInput && state.addDraft && state.addDraft.mode === 'batch') {
         var selectedBatchSpec = decodeURIComponent(clickedBatchInput.dataset.batchQty);
@@ -9767,8 +10407,8 @@
         if (!blurredSpec) return;
         var blurredRaw = String(event.target.value || '').replace(/[^\d-]/g, '');
         var blurredNegative = blurredRaw.charAt(0) === '-' ? '-' : '';
-        var blurredDigits = blurredRaw.replace(/-/g, '').slice(0, 4);
-        var proposedQuantity = blurredDigits ? Math.max(-9999, Math.min(9999, Number(blurredNegative + blurredDigits))) : 0;
+        var blurredDigits = blurredRaw.replace(/-/g, '');
+        var proposedQuantity = blurredDigits ? Math.max(QUANTITY_MIN, Math.min(QUANTITY_MAX, Number(blurredNegative + blurredDigits))) : 0;
         var committedQuantity = Number(state.addDraft.skuQty[blurredSpec] || 0);
         var wasErrorValue = event.target.matches('.counter__value.is-overstock-value');
         var blurredSkuState = resolveSkuRowState(state.addDraft.product, blurredSpec, proposedQuantity, false);
@@ -9811,6 +10451,15 @@
       markDirty(ctx);
     }, true);
     root.addEventListener('keydown', function (event) {
+      if (refundSyncState().dialog && event.key === 'Tab') {
+        var syncControls = Array.from(root.querySelectorAll('.order-refund-sync-dialog button:not([disabled]), .order-refund-sync-dialog [tabindex="0"]'));
+        var firstControl = syncControls[0], lastControl = syncControls[syncControls.length - 1];
+        if (firstControl && ((event.shiftKey && document.activeElement === firstControl) || (!event.shiftKey && document.activeElement === lastControl))) {
+          event.preventDefault(); (event.shiftKey ? lastControl : firstControl).focus({ preventScroll: true });
+        }
+        return;
+      }
+      if (event.key === 'Escape' && refundSyncState().dialog) { if (refundSyncState().dialog !== 'prompt') closeRefundSync(); return; }
       if (handlePaymentControlKeydown(event)) return;
       if (event.key === 'Tab' && (state.skuPriceDraft || state.orderPromotionDraft || state.freightEditOpen)) {
         var priceModal = root.querySelector(state.orderPromotionDraft ? '.order-promotion-modal' : state.skuPriceDraft ? '.order-sku-price-modal' : '.order-freight-edit-modal');
@@ -10023,6 +10672,7 @@
       }
     });
     ctx.onDestroy(function () {
+      destroySegmentControls();
       window.clearTimeout(imageSearchPermissionTimer);
       if (state.imageSearch) {
         state.imageSearch.enabling = false;
@@ -10036,7 +10686,7 @@
 
   function successTemplate() {
     var t = totals();
-    var isRefund = t.payable < 0;
+    var isRefund = t.payable < 0 || isPureReturnOrder();
     var isUnpaid = state.paymentSummary === '未收款';
     var isDebt = state.paymentSummary === '记欠款';
     var isPureReturn = Boolean(isRefund && state.paymentDraft && state.paymentDraft.orderBusinessStatus === 'returned');
@@ -10049,7 +10699,7 @@
       +     '<div class="order-success-v2__icon" aria-hidden="true">✓</div>'
       +     '<h1 id="order-success-title">' + resultTitle + '</h1>'
       +     '<p>' + escapeHtml(state.paymentSummary || '已收款') + ' · ' + money(t.payable) + '</p>'
-      +     '<dl><div><dt>订单号</dt><dd>' + escapeHtml(state.orderNo) + '</dd></div><div><dt>客户</dt><dd>' + escapeHtml(state.customer ? state.customer.name : '散客') + '</dd></div><div><dt>仓库</dt><dd>' + escapeHtml(state.warehouse.name) + '</dd></div><div><dt>商品</dt><dd>' + t.styles + '款 ' + t.pieces + '件</dd></div>' + (isPureReturn ? '<div><dt>订单状态</dt><dd>退货</dd></div>' : '') + '<div><dt>' + statusLabel + '</dt><dd>' + paymentState + '</dd></div></dl>'
+      +     '<dl><div><dt>订单号</dt><dd>' + escapeHtml(state.orderNo) + '</dd></div><div><dt>客户</dt><dd>' + escapeHtml(state.customer ? state.customer.name : '散客') + '</dd></div><div><dt>仓库</dt><dd>' + escapeHtml(state.warehouse.name) + '</dd></div><div><dt>商品</dt><dd>' + t.styles + '款 ' + t.pieces + '件</dd></div>' + (isPureReturn ? '<div><dt>订单状态</dt><dd>已退款</dd></div>' : '') + '<div><dt>' + statusLabel + '</dt><dd>' + paymentState + '</dd></div></dl>'
       +     (state.paymentPostActions && (state.paymentPostActions.print || state.paymentPostActions.dispatch) ? '<div class="order-success-v2__post-actions">' + (state.paymentPostActions.print ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>小票打印任务已创建</span>' : '') + (state.paymentPostActions.dispatch ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>快递单任务已创建</span>' : '') + '<small>打印或打单失败时可在订单详情中单独重试，不影响开单结果。</small></div>' : '')
       +     '<div class="order-success-v2__actions">' + button('继续开单', 'strong', 'lg', 'data-new-order') + button('查看订单', 'weak', 'lg', 'data-view-order') + '</div>'
       +     '<small>配货、发货等后续流程不在本期原型范围内</small>'
@@ -10071,6 +10721,8 @@
     state.orderNoteBuyerImages = [];
     state.orderNoteDraft = null;
     state.refundImagePreviewIndex = null;
+    resetRefundSync();
+    state.prototypeRefundEvents = [];
     state.noteImagePreviewScope = 'payment';
     state.orderNoteOpen = false;
     state.freightEditOpen = false;

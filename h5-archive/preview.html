@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>H5 项目预览</title>
+  <link rel="stylesheet" href="../wego-design/colors_and_type.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #1c2026; }
+    #canvas { position: relative; width: 100%; height: 100vh; height: 100dvh; min-width: 0; overflow: hidden; }
+    #deviceStage, #deviceFrame, #page { width: 100%; height: 100%; }
+    #page { display: block; border: 0; background: #fff; }
+    body.device-options:not(.tablet-preview) #canvas { height: calc(100vh - 68px); height: calc(100dvh - 68px); margin-top: 68px; }
+    body.tablet-preview #canvas { display: flex; overflow: auto; padding: 68px 20px 20px; background: #e8ecf0; }
+    body.tablet-preview #deviceStage { flex: none; width: var(--tablet-outer-width); height: var(--tablet-outer-height); margin: auto; }
+    body.tablet-preview #deviceFrame { position: relative; padding: 12px; border: 2px solid #222a32; border-radius: 24px; background: #202830; box-shadow: 0 24px 52px #18232d44; }
+    body.tablet-preview #deviceFrame::before { content: ''; position: absolute; z-index: 1; top: 50%; left: 3px; width: 5px; height: 5px; border-radius: 50%; background: #5b646d; transform: translateY(-50%); pointer-events: none; }
+    body.tablet-preview #page { width: var(--tablet-width); height: var(--tablet-height); border-radius: 11px; }
+    #viewModes { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; z-index: 10; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 210px); padding: 5px 8px; border: 1px solid #d7dce2; border-radius: 9px; background: #fff; box-shadow: 0 2px 12px #0002; }
+    #viewModes button { padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: #404955; cursor: pointer; white-space: nowrap; }
+    #viewModes button[aria-pressed="true"] { background: #e5f8ef; color: #008b50; font-weight: 600; }
+    #deviceLabel { color: #626b78; font-size: 12px; white-space: nowrap; }
+    body.has-scenes { display: grid; grid-template-columns: 224px minmax(0, 1fr); height: 100dvh; overflow: hidden; }
+    #scenes { height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: 20px 12px; border-right: 1px solid #e2e5e9; background: #fff; }
+    #scenes h2 { font-size: 16px; margin: 0 8px 20px; }
+    #scenes h3 { font-size: 13px; color: #626b78; margin: 20px 8px 8px; overflow-wrap: anywhere; }
+    #scenes button { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; overflow-wrap: anywhere; }
+    #scenes button:hover { background: #f3f5f7; }
+    #scenes button[aria-current="page"] { background: #e5f8ef; color: #008b50; font-weight: 600; }
+    @media (max-width: 600px) {
+      body.has-scenes { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+      #scenes { height: auto; max-height: 180px; padding-right: 150px; border-right: 0; border-bottom: 1px solid #e2e5e9; }
+      #scenes h2 { margin-bottom: 8px; }
+      #scenes h3 { margin-top: 8px; }
+      .has-scenes #page { height: 100%; min-height: 0; }
+      #viewModes { max-width: calc(100vw - 100px); }
+      #deviceLabel { display: none; }
+    }
+    #dismiss { position: fixed; inset: 0; z-index: 5; }
+    #switcher { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 12px; z-index: 10; max-width: calc(100vw - 24px); }
+    button, select { font: inherit; }
+    #toggle { display: block; margin-left: auto; padding: 10px 14px; color: #008b50; background: #fff; border: 1px solid #00c86b; border-radius: 8px; box-shadow: 0 2px 12px #0002; cursor: pointer; }
+    #panel { width: 280px; max-width: calc(100vw - 24px); margin-top: 8px; padding: 16px; background: white; border: 1px solid #e2e5e9; border-radius: 8px; box-shadow: 0 6px 24px #0002; }
+    #panel strong { display: block; overflow-wrap: anywhere; }
+    label { display: block; margin: 12px 0 4px; color: #626b78; }
+    select { width: 100%; min-height: 40px; border: 1px solid #d7dce2; border-radius: 4px; background: white; padding: 6px; }
+    a { color: #008b50; }
+    .links { display: flex; justify-content: flex-end; margin-top: 16px; }
+    #notice { color: #737b86; margin: 10px 0 0; }
+    #error { padding: 32px; }
+    [hidden] { display: none !important; }
+    :focus-visible { outline: 2px solid #008b50; outline-offset: 3px; }
+    @media print { #switcher, #scenes, #viewModes { display: none; } body.has-scenes { display: block; } }
+  </style>
+</head>
+<body>
+  <nav id="scenes" aria-label="场景与视角切换" hidden>
+    <h2>场景与视角</h2>
+    <div id="sceneList"></div>
+  </nav>
+  <main id="canvas"><div id="deviceStage"><div id="deviceFrame"><iframe id="page" title="H5 项目页面" allow="clipboard-write" hidden></iframe></div></div></main>
+  <div id="viewModes" role="group" aria-label="预览方式" hidden>
+    <button id="tabletMode" type="button" aria-pressed="false">平板预览</button>
+    <button id="webMode" type="button" aria-pressed="false">网页版</button>
+    <span id="deviceLabel"></span>
+  </div>
+  <div id="dismiss" hidden aria-hidden="true"></div>
+  <p id="error" hidden>没有找到这个归档页面。<a href="index.html">返回项目归档</a></p>
+  <aside id="switcher" aria-label="项目版本切换" hidden>
+    <button id="toggle" type="button" aria-expanded="false" aria-controls="panel">版本</button>
+    <div id="panel" hidden>
+      <strong id="projectTitle"></strong>
+      <label for="version">历史版本</label>
+      <select id="version"></select>
+      <p id="notice" role="status"></p>
+      <div class="links"><a id="original" target="_blank" rel="noopener">打开原始页面</a></div>
+    </div>
+  </aside>
+  <script src="preview-data.js"></script>
+  <script>
+    (() => {
+      const $ = id => document.getElementById(id);
+      const source = window.wegoPreviewProjects || [];
+      const projects = Array.isArray(source) ? source : (source.projects || []);
+      let currentPage, versions, currentProject;
+      const safePath = value => typeof value === 'string' && value.startsWith('projects/') && value.endsWith('.html') && !/[\\%?#\u0000-\u001f]/.test(value) && !value.split('/').some(part => part === '..' || part === '.' || !part);
+      const pagesOf = project => (project.pages || []).filter(page => safePath(page.path));
+      const tabletOf = project => {
+        const tablet = project.preview && project.preview.tablet;
+        return tablet && Number.isInteger(tablet.width) && Number.isInteger(tablet.height)
+          && tablet.width >= 600 && tablet.width <= 2560 && tablet.height >= 400 && tablet.height <= 1600 ? tablet : null;
+      };
+      function setPreviewMode(mode, updateUrl) {
+        const tablet = tabletOf(currentProject);
+        const useTablet = Boolean(tablet && mode === 'tablet');
+        document.body.classList.toggle('device-options', Boolean(tablet));
+        document.body.classList.toggle('tablet-preview', useTablet);
+        $('viewModes').hidden = !tablet;
+        $('tabletMode').setAttribute('aria-pressed', String(useTablet));
+        $('webMode').setAttribute('aria-pressed', String(!useTablet));
+        if (tablet) {
+          document.documentElement.style.setProperty('--tablet-width', tablet.width + 'px');
+          document.documentElement.style.setProperty('--tablet-height', tablet.height + 'px');
+          document.documentElement.style.setProperty('--tablet-outer-width', (tablet.width + 28) + 'px');
+          document.documentElement.style.setProperty('--tablet-outer-height', (tablet.height + 28) + 'px');
+          $('deviceLabel').textContent = useTablet ? (tablet.label || '平板') + ' · ' + tablet.width + '×' + tablet.height + ' CSS px' : '浏览器自适应';
+        }
+        if (updateUrl) {
+          const url = new URL(location.href);
+          url.searchParams.set('mode', useTablet ? 'tablet' : 'web');
+          history.replaceState(null, '', url);
+        }
+      }
+      function renderScenes(project, selected) {
+        const pages = pagesOf(project);
+        const enabled = pages.some(page => page.view || page.scenario);
+        $('scenes').hidden = !enabled;
+        document.body.classList.toggle('has-scenes', enabled);
+        $('sceneList').replaceChildren();
+        if (!enabled) return;
+        const grouped = new Map();
+        pages.forEach(page => {
+          const view = page.view || '通用视角';
+          if (!grouped.has(view)) grouped.set(view, []);
+          grouped.get(view).push(page);
+        });
+        grouped.forEach((entries, view) => {
+          const heading = document.createElement('h3'); heading.textContent = view;
+          $('sceneList').append(heading);
+          entries.forEach(page => {
+            const button = document.createElement('button'); button.type = 'button';
+            button.textContent = [page.scenario, page.title || page.name].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' · ') || '默认页面';
+            if (page.path === selected.path) button.setAttribute('aria-current', 'page');
+            button.onclick = () => { $('notice').textContent = ''; show(project, page, true); };
+            $('sceneList').append(button);
+          });
+        });
+      }
+      function show(project, page, updateUrl) {
+        currentProject = project;
+        currentPage = page;
+        $('projectTitle').textContent = project.title;
+        document.title = project.title + ' · ' + project.version;
+        $('version').value = project.version;
+        $('original').href = page.path;
+        $('page').src = page.path;
+        $('page').hidden = false;
+        $('error').hidden = true;
+        $('switcher').hidden = false;
+        $('toggle').textContent = project.version + ' · 切换版本';
+        renderScenes(project, page);
+        const requestedMode = new URL(location.href).searchParams.get('mode');
+        setPreviewMode(requestedMode === 'web' ? 'web' : requestedMode === 'tablet' ? 'tablet' : project.preview?.defaultMode, false);
+        if (updateUrl) {
+          const url = new URL(location.href);
+          url.searchParams.set('page', page.path);
+          history.replaceState(null, '', url);
+        }
+      }
+      function initialize() {
+        const path = new URL(location.href).searchParams.get('page');
+        const project = projects.find(item => pagesOf(item).some(page => page.path === path));
+        if (!project) { $('error').hidden = false; return; }
+        versions = projects.filter(item => item.productLine === project.productLine && (item.projectSlug || item.project) === (project.projectSlug || project.project) && pagesOf(item).length)
+          .sort((a, b) => b.version.localeCompare(a.version, 'en', { numeric: true }));
+        $('version').replaceChildren(...versions.map(item => new Option(item.version, item.version)));
+        show(project, pagesOf(project).find(page => page.path === path), false);
+      }
+      function setPanelOpen(open) {
+        $('panel').hidden = !open;
+        $('dismiss').hidden = !open;
+        $('toggle').setAttribute('aria-expanded', String(open));
+      }
+      $('toggle').onclick = () => setPanelOpen($('panel').hidden);
+      $('tabletMode').onclick = () => setPreviewMode('tablet', true);
+      $('webMode').onclick = () => setPreviewMode('web', true);
+      $('dismiss').onpointerdown = () => setPanelOpen(false);
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { setPanelOpen(false); $('toggle').focus(); }
+      });
+      $('version').onchange = () => {
+        const project = versions.find(item => item.version === $('version').value);
+        const name = currentPage.path.split('/pages/')[1];
+        const match = pagesOf(project).find(page => currentPage.name && page.name === currentPage.name && page.view === currentPage.view && page.scenario === currentPage.scenario)
+          || pagesOf(project).find(page => page.path.split('/pages/')[1] === name && page.view === currentPage.view && page.scenario === currentPage.scenario);
+        $('notice').textContent = match ? '' : '此版本没有当前页面，已打开该版本首页。';
+        show(project, match || pagesOf(project)[0], true);
+      };
+      initialize();
+    })();
+  </script>
+</body>
+</html>

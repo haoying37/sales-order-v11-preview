@@ -1,0 +1,391 @@
+/**
+ * Wego design system tokens v2.
+ * Source of truth for mobile, WeChat-ecosystem, ecommerce/tool UI.
+ *
+ * Architecture:
+ * - PDF / Kuikly names are the public color and font token API.
+ * - number tokens remain separate for WegoKeyboard N9 numeric typography.
+ * - No legacy semantic color/font token layer is retained.
+ */
+
+/* WegoKeyboard N9 数字字体 */
+@font-face {
+  font-family: "WegoKeyboard N9";
+  src: url('assets/fonts/WegoKeyboardN9-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "WegoKeyboard N9";
+  src: url('assets/fonts/WegoKeyboardN9-Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "WegoKeyboard N9";
+  src: url('assets/fonts/WegoKeyboardN9-Bold.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+
+
+
+
+
+
+
+
+  /* PDF / Kuikly color tokens */
+  --text_100: #1e2028;
+  --text_80: #6e7382;
+  --text_30: #b7bec5;
+  --bg_line_08: rgba(32, 47, 100, 0.08);
+  --bg_100: #ededed;
+  --bg_white_100: #ffffff;
+  --bg_white_40: rgba(255, 255, 255, 0.40);
+  --bg_white_10: rgba(255, 255, 255, 0.10);
+  --bg_gray_03: rgba(32, 47, 100, 0.03);
+  --bg_gray_06: rgba(32, 47, 100, 0.06);
+  --bg_gray_10: rgba(32, 47, 100, 0.10);
+  --bg_gray_36: rgba(12, 33, 63, 0.36);
+  --bg_gray_03_pack: #f8f9fa;
+  --bg_gray_06_pack: #f2f3f6;
+  --bg_gray_10_pack: #e9eaef;
+  --bg_bar_80: rgba(246, 246, 246, 0.80);
+  --bg_bar_100: #f6f6f6;
+  --bg_toast_96: rgba(63, 67, 71, 0.96);
+  --bg_modal_20: rgba(30, 32, 40, 0.20);
+  --bg_modal_30: rgba(30, 32, 40, 0.30);
+  --bg_modal_40: rgba(30, 32, 40, 0.40);
+  --bg_modal_60: rgba(30, 32, 40, 0.60);
+  --bg_modal_80: rgba(30, 32, 40, 0.80);
+  --bg_shadow_04: rgba(30, 32, 40, 0.04);
+  --bg_shadow_08: rgba(30, 32, 40, 0.08);
+  --text_link_100: #285b9a;
+  --green_1_100: #03c160;
+  --green_1_80: rgba(3, 193, 96, 0.80);
+  --green_1_60: rgba(3, 193, 96, 0.60);
+  --green_1_20: rgba(3, 193, 96, 0.20);
+  --green_1_10: rgba(3, 193, 96, 0.10);
+  --yellow_1_100: #fa9d3b;
+  --yellow_1_80: rgba(250, 157, 59, 0.80);
+  --yellow_1_60: rgba(250, 157, 59, 0.60);
+  --yellow_1_20: rgba(250, 157, 59, 0.20);
+  --yellow_1_10: rgba(250, 157, 59, 0.10);
+  --red_100: #fa5051;
+  --red_80: rgba(250, 80, 81, 0.80);
+  --red_60: rgba(250, 80, 81, 0.60);
+  --red_20: rgba(250, 80, 81, 0.20);
+  --red_10: rgba(250, 80, 81, 0.10);
+  --orange_100: #ff6045;
+  --orange_80: rgba(255, 96, 69, 0.80);
+  --orange_60: rgba(255, 96, 69, 0.60);
+  --orange_20: rgba(255, 96, 69, 0.20);
+  --orange_10: rgba(255, 96, 69, 0.10);
+  --yellow_2_100: #ffc300;
+  --yellow_2_80: rgba(255, 195, 0, 0.80);
+  --yellow_2_60: rgba(255, 195, 0, 0.60);
+  --yellow_2_20: rgba(255, 195, 0, 0.20);
+  --yellow_2_10: rgba(255, 195, 0, 0.10);
+  --green_2_100: #00c777;
+  --green_2_80: rgba(0, 199, 119, 0.80);
+  --green_2_60: rgba(0, 199, 119, 0.60);
+  --green_2_20: rgba(0, 199, 119, 0.20);
+  --green_2_10: rgba(0, 199, 119, 0.10);
+  --blue_100: #208bf1;
+  --blue_80: rgba(32, 139, 241, 0.80);
+  --blue_60: rgba(32, 139, 241, 0.60);
+  --blue_20: rgba(32, 139, 241, 0.20);
+  --blue_10: rgba(32, 139, 241, 0.10);
+  --purple_100: #6367f0;
+  --purple_80: rgba(99, 103, 240, 0.80);
+  --purple_60: rgba(99, 103, 240, 0.60);
+  --purple_20: rgba(99, 103, 240, 0.20);
+  --purple_10: rgba(99, 103, 240, 0.10);
+  --gold_100: #c79a56;
+  --gold_80: rgba(199, 154, 86, 0.80);
+  --gold_60: rgba(199, 154, 86, 0.60);
+  --gold_20: rgba(199, 154, 86, 0.20);
+  --gold_10: rgba(199, 154, 86, 0.10);
+  --transparent: transparent;
+
+  /* PDF / Kuikly font tokens */
+  --Font22-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font22-font-size: 22px;
+  --Font22-normal-font-weight: 400;
+  --Font22-medium-font-weight: 500;
+  --Font22-line-height: 33px;
+  --Font18-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font18-font-size: 18px;
+  --Font18-normal-font-weight: 400;
+  --Font18-medium-font-weight: 500;
+  --Font18-line-height: 27px;
+  --Font16-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font16-font-size: 16px;
+  --Font16-normal-font-weight: 400;
+  --Font16-medium-font-weight: 500;
+  --Font16-line-height: 24px;
+  --Font14-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font14-font-size: 14px;
+  --Font14-normal-font-weight: 400;
+  --Font14-medium-font-weight: 500;
+  --Font14-line-height: 21px;
+  --Font12-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font12-font-size: 12px;
+  --Font12-normal-font-weight: 400;
+  --Font12-medium-font-weight: 500;
+  --Font12-line-height: 18px;
+  --Font10-font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+  --Font10-font-size: 10px;
+  --Font10-normal-font-weight: 400;
+  --Font10-medium-font-weight: 500;
+  --Font10-line-height: 14px;
+  --font-family-icon: "wego-iconfont-s", sans-serif;
+
+  /* number */
+  --number-sm-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+  --number-sm-font-size: 12px;
+  --number-sm-font-weight: 500;
+  --number-sm-line-height: 16px;
+  --number-md-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+  --number-md-font-size: 14px;
+  --number-md-font-weight: 500;
+  --number-md-line-height: 18px;
+  --number-lg-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+  --number-lg-font-size: 16px;
+  --number-lg-font-weight: 500;
+  --number-lg-line-height: 20px;
+  --number-lg2-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+  --number-lg2-font-size: 18px;
+  --number-lg2-font-weight: 500;
+  --number-lg2-line-height: 24px;
+  --number-xl-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+  --number-xl-font-size: 20px;
+  --number-xl-font-weight: 500;
+  --number-xl-line-height: 24px;
+  --number-xxl-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+  --number-xxl-font-size: 24px;
+  --number-xxl-font-weight: 500;
+  --number-xxl-line-height: 30px;
+  --number-display-font-family: "WegoKeyboard N9", "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+  --number-display-font-size: 32px;
+  --number-display-font-weight: 500;
+  --number-display-line-height: 38px;
+  --number-fallback-font-family: "DIN Alternate", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* radius */
+  --radius-0: 0px;
+  --radius-4: 4px;
+  --radius-6: 6px;
+  --radius-8: 8px;
+  --radius-12: 12px;
+  --radius-16: 16px;
+  --radius-full: 999px;
+
+  /* spacing */
+  --spacer-0: 0px;
+  --spacer-2: 2px;
+  --spacer-4: 4px;
+  --spacer-6: 6px;
+  --spacer-8: 8px;
+  --spacer-10: 10px;
+  --spacer-12: 12px;
+  --spacer-14: 14px;
+  --spacer-16: 16px;
+  --spacer-20: 20px;
+  --spacer-24: 24px;
+  --spacer-32: 32px;
+  --spacer-40: 40px;
+  --spacer-48: 48px;
+  --spacer-72: 72px;
+
+  /* size */
+  --size-10: 10px;
+  --size-12: 12px;
+  --size-16: 16px;
+  --size-20: 20px;
+  --size-24: 24px;
+  --size-28: 28px;
+  --size-32: 32px;
+  --size-36: 36px;
+  --size-40: 40px;
+  --size-48: 48px;
+  --size-56: 56px;
+  --size-64: 64px;
+  --size-72: 72px;
+  --size-76: 76px;
+  --size-96: 96px;
+  --size-104: 104px;
+
+  /* stroke */
+  --stroke-0: 0px;
+  --stroke-hairline: 0.5px;
+  --stroke-1: 1px;
+  --stroke-strong: 1.5px;
+  --stroke-icon: 1.5px;
+  --stroke-icon-strong: 2.25px;
+  --stroke-style-solid: solid;
+  --stroke-style-dashed: dashed;
+  --stroke-style-none: none;
+
+  /* shadow */
+  --shadow-none: none;
+  --shadow-xs: 0px 1px 4px 0px rgba(30, 32, 40, 0.04);
+  --shadow-sm: 0px 2px 8px 0px rgba(30, 32, 40, 0.06);
+  --shadow-md: 0px 4px 16px 0px rgba(30, 32, 40, 0.08);
+  --shadow-lg: 0px 8px 32px 0px rgba(30, 32, 40, 0.12);
+  --shadow-xl: 0px 12px 48px 0px rgba(30, 32, 40, 0.16);
+  --shadow-control-thumb: 0 2px 4px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+
+  /* motion */
+  --duration-instant: 0ms;
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  --duration-xslow: 500ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --ease-linear: linear;
+
+  /* touch */
+  --touch-min: 40px;
+  --touch-default: 44px;
+  --touch-comfortable: 48px;
+
+  /* zIndex */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100;
+  --z-dropdown: 200;
+  --z-popover: 300;
+  --z-scene: 400;
+  --z-overlay: 500;
+  --z-modal: 600;
+  --z-toast: 700;
+  --z-critical: 900;
+
+  /* blur */
+  --blur-none: 0px;
+  --blur-xs: 4px;
+  --blur-sm: 8px;
+  --blur-md: 16px;
+  --blur-frosted: 20px;
+  --blur-lg: 24px;
+  --blur-xl: 32px;
+  --blur-frosted-live: 40px;
+
+  /* layout */
+  --layout-page-margin-m0: 0px;
+  --layout-page-margin-m8: 8px;
+  --layout-page-margin-m32: 32px;
+  --layout-group-g1-inside: 0px;
+  --layout-group-g1-outside: 16px;
+  --layout-group-g2-inside: 8px;
+  --layout-group-g2-outside: 32px;
+  --layout-list-padding: 16px;
+  --layout-list-info-gap: 24px;
+  --layout-card-padding-sm: 16px;
+  --layout-card-padding-lg: 32px;
+  --layout-info-unit-it-gap: 4px;
+  --layout-info-unit-tt-gap: 4px;
+  --layout-info-unit-tp-gap: 8px;
+  --layout-info-unit-bt-gap: 8px;
+  --layout-hit-min: 40px;
+  --layout-hit-icon-btn-width-padding: 8px;
+  --layout-hit-icon-btn-height: 32px;
+  --layout-hit-combo-width-padding: 12px;
+
+  /* safe-area */
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-bottom-content: calc(40px + var(--safe-area-bottom));
+  --navbar-body-height: 44px;
+
+  /* icon-token */
+  --icon-yuancha-mian: "\e69c";
+
+}
+
+/* ============ 全局元素重置(统一入口,不在各组件分散写) ============ */
+/* 放在 :root Token 之后,所有项目通过 library-consumption.json 的 buildMobileAppPage.copyFiles
+   自动复制此文件,获得统一重置,不再依赖 scaffold.css(仅用于预览页)或各组件内部重置类。 */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg_100);
+  font-family: var(--Font14-font-family);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin: 0;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* 全局隐藏滚动条(模拟移动端原生体验,保留滚动功能)
+   - scrollbar-width: none 适用于 Firefox
+   - ::-webkit-scrollbar { display: none } 适用于 webkit/iOS Safari/Chrome/Edge
+   - 不影响键盘导航、触控滑动和滚轮,仅移除可见滚动条 */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
