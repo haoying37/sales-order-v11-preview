@@ -1,4 +1,23 @@
-/* Seg 分段控制器 — canonical: segment-control; visible track 32, hit target 40. */
+.segment-control:not(.wg-segment-control) { position: relative; display: inline-flex; align-items: center; flex: 0 0 auto; width: max-content; height: var(--size-32); padding: var(--spacer-2) var(--spacer-4); box-sizing: border-box; border-radius: var(--radius-6); background: var(--bg_gray_03); isolation: isolate; vertical-align: middle; }
+.segment-control:not(.wg-segment-control)[data-layout="fill"] { display: flex; width: 100%; min-width: 0; }
+.segment-control__item { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 0; height: var(--size-28); margin: 0; padding: 0 var(--spacer-6); border: 0; border-radius: var(--radius-4); background: transparent; color: var(--text_80); font-family: var(--Font14-font-family); font-size: var(--Font14-font-size); font-weight: var(--Font14-normal-font-weight); line-height: var(--Font14-line-height); white-space: nowrap; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; transition: color var(--duration-normal) var(--ease-standard); }
+.segment-control:not(.wg-segment-control)[data-layout="fill"] > .segment-control__item { flex: 1 1 0; }
+.segment-control__label { overflow: hidden; text-overflow: ellipsis; }
+/* Extend only vertically: adjacent segments never overlap horizontally. Host reserves 4px above/below. */
+.segment-control__item::before { content: ""; position: absolute; inset: calc(0px - var(--spacer-6)) 0; }
+.segment-control__item[aria-checked="true"] { background: var(--bg_white_100); color: var(--text_100); font-weight: var(--Font14-medium-font-weight); }
+.segment-control:not(.wg-segment-control).is-bound > .segment-control__item[aria-checked="true"] { background: transparent; }
+.segment-control__indicator { position: absolute; z-index: 0; top: var(--spacer-2); left: 0; height: var(--size-28); border-radius: var(--radius-4); background: var(--bg_white_100); pointer-events: none; transition: transform var(--duration-normal) var(--ease-standard), width var(--duration-normal) var(--ease-standard); }
+.segment-control__indicator[hidden] { display: none; }
+@media (hover: hover) { .segment-control:not(.wg-segment-control):not([aria-disabled="true"]) > .segment-control__item:not(:disabled):hover { background: var(--bg_gray_03); } }
+.segment-control:not(.wg-segment-control):not([aria-disabled="true"]) > .segment-control__item:not(:disabled):active { background: var(--bg_gray_06); }
+.segment-control__item:focus-visible { outline: var(--spacer-2) solid var(--green_1_100); outline-offset: var(--spacer-2); }
+.segment-control__item:disabled { opacity: 0.2; cursor: not-allowed; }
+.segment-control:not(.wg-segment-control)[aria-disabled="true"] { cursor: not-allowed; }
+.segment-control:not(.wg-segment-control)[aria-disabled="true"] > .segment-control__item { opacity: 0.2; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) { .segment-control__indicator, .segment-control__item { transition: none; } }
+
+/* Seg variants: real 40px root, 32px track. */
 .segment-control.wg-segment-control {
   display: inline-flex;
   position: relative;

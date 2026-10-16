@@ -1,6 +1,114 @@
+/* seg_32 H5 runtime. No business state, DOM replacement or scrolling. */
+(function (global) {
+  'use strict';
+  var bindings = new WeakMap();
+  function bindOne(root) {
+    if (bindings.has(root)) return bindings.get(root);
+    var indicator = root.querySelector(':scope > .segment-control__indicator');
+    if (!indicator) throw new Error('segment-control requires an indicator');
+    var disposed = false;
+    var observed = new Set();
+    function items() { return Array.from(root.querySelectorAll(':scope > .segment-control__item')); }
+    function groupDisabled() { return root.getAttribute('aria-disabled') === 'true'; }
+    function measure() {
+      if (disposed) return;
+      var selected = items().find(function (item) { return item.getAttribute('aria-checked') === 'true'; });
+      indicator.hidden = !selected || !root.getClientRects().length;
+      if (indicator.hidden) return;
+      // offset coordinates stay correct when an outer preview frame is scaled.
+      indicator.style.width = selected.offsetWidth + 'px';
+      indicator.style.transform = 'translateX(' + selected.offsetLeft + 'px)';
+    }
+    var observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    function update() {
+      if (disposed) return;
+      var list = items();
+      var selected = list.find(function (item) { return item.getAttribute('aria-checked') === 'true' && !item.disabled; });
+      selected = selected || list.find(function (item) { return !item.disabled; });
+      list.forEach(function (item) {
+        item.setAttribute('aria-checked', String(item === selected));
+        item.tabIndex = item === selected && !groupDisabled() ? 0 : -1;
+      });
+      if (observer) {
+        observed.forEach(function (item) { if (!list.includes(item)) { observer.unobserve(item); observed.delete(item); } });
+        list.forEach(function (item) { if (!observed.has(item)) { observer.observe(item); observed.add(item); } });
+      }
+      measure();
+    }
+    function setIndex(index, options) {
+      if (disposed || groupDisabled()) return false;
+      var list = items();
+      var target = list[index];
+      if (!Number.isInteger(index) || !target || target.disabled) return false;
+      var repeated = target.getAttribute('aria-checked') === 'true';
+      list.forEach(function (item) { item.setAttribute('aria-checked', String(item === target)); });
+      update();
+      if (options && options.focus) target.focus({ preventScroll: true });
+      if (!options || !options.silent) root.dispatchEvent(new CustomEvent(repeated ? 'segment-reclick' : 'segment-change', {
+        bubbles: true, detail: { index: index, value: target.dataset.value || '', label: target.textContent.trim() }
+      }));
+      return true;
+    }
+    function click(event) {
+      var target = event.target.closest('.segment-control__item');
+      var index = items().indexOf(target);
+      if (index >= 0) setIndex(index);
+    }
+    function keydown(event) {
+      if (groupDisabled() || event.altKey || event.ctrlKey || event.metaKey) return;
+      var list = items();
+      var current = list.indexOf(event.target.closest('.segment-control__item'));
+      if (current < 0) return;
+      var available = list.map(function (item, index) { return item.disabled ? -1 : index; }).filter(function (index) { return index >= 0; });
+      if (!available.length) return;
+      var position = available.indexOf(current);
+      var rtl = getComputedStyle(root).direction === 'rtl';
+      var step = 0;
+      if (event.key === 'ArrowRight') step = rtl ? -1 : 1;
+      if (event.key === 'ArrowLeft') step = rtl ? 1 : -1;
+      if (event.key === 'ArrowDown') step = 1;
+      if (event.key === 'ArrowUp') step = -1;
+      var next;
+      if (step) next = available[(position + step + available.length) % available.length];
+      else if (event.key === 'Home') next = available[0];
+      else if (event.key === 'End') next = available[available.length - 1];
+      else return; // Native buttons supply Enter / Space click semantics.
+      event.preventDefault();
+      setIndex(next, { focus: true });
+    }
+    var handle = { root: root, update: update, setIndex: setIndex, destroy: function () {
+      if (disposed) return;
+      disposed = true;
+      root.removeEventListener('click', click);
+      root.removeEventListener('keydown', keydown);
+      global.removeEventListener('resize', measure);
+      if (observer) observer.disconnect();
+      root.classList.remove('is-bound');
+      indicator.hidden = true;
+      bindings.delete(root);
+    } };
+    bindings.set(root, handle);
+    root.addEventListener('click', click);
+    root.addEventListener('keydown', keydown);
+    global.addEventListener('resize', measure);
+    if (observer) observer.observe(root);
+    update();
+    root.classList.add('is-bound');
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+    return handle;
+  }
+  global.WegoSegmentControl = { bind: function (scope) {
+    scope = scope || document;
+    var roots = Array.from(scope.querySelectorAll('[data-component="segment-control"]'));
+    if (scope.matches && scope.matches('[data-component="segment-control"]')) roots.unshift(scope);
+    return roots.map(bindOne);
+  } };
+})(window);
+
 /* Seg 分段控制器. Host owns business state; binding never dispatches business DOM events. */
 (function () {
   "use strict";
+  var legacyBind = window.WegoSegmentControl.bind;
   var bindings = new WeakMap();
   var itemSelector = ".wg-segment-control__item";
 
@@ -141,5 +249,14 @@
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(layout);
     return handle;
   }
-  window.WegoSegmentControl = { bind: bind };
+  window.WegoSegmentControl = { bind: function (scope, options) {
+    // Explicit new root returns a handle; legacy roots and scanned scopes retain arrays.
+    if (scope && scope.matches && scope.matches(".wg-segment-control")) return bind(scope, options);
+    scope = scope || document;
+    var roots = Array.from(scope.querySelectorAll('[data-component="segment-control"]'));
+    if (scope.matches && scope.matches('[data-component="segment-control"]')) roots.unshift(scope);
+    return roots.map(function (root) {
+      return root.matches(".wg-segment-control") ? bind(root, options) : legacyBind(root)[0];
+    });
+  } };
 })();

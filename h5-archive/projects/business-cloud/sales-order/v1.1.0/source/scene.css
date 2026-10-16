@@ -10553,7 +10553,7 @@ button.order-payment-method-card {
 }
 
 .order-reference-payment__metric.metric--danger {
-  color: var(--status-danger-default);
+  color: var(--red_100);
 }
 
 .order-refund-payment__sheet {
@@ -10866,7 +10866,7 @@ button.order-payment-method-card {
   z-index: calc(var(--z-modal) + 2);
 }
 
-@media (max-width: 479px) {
+@media (max-width: 559px) {
   .order-refund-payment__option-grid--inventory {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -10880,7 +10880,7 @@ button.order-payment-method-card {
   min-height: var(--size-48);
   margin: 0;
   padding: 0 var(--spacer-16);
-  border-top: var(--stroke-hairline) solid var(--bg_gray_03);
+  border-top: 0;
 }
 
 .order-reference-payment__balance > div {
@@ -10924,6 +10924,10 @@ button.order-payment-method-card {
   flex: 0 0 auto;
 }
 
+.order-reference-payment__balance-toggle:not(.is-active) .checkbox {
+  --checkbox-border: var(--text_80);
+}
+
 .order-reference-payment__sheet {
   overflow: hidden;
   background: var(--bg_white_100);
@@ -10935,9 +10939,9 @@ button.order-payment-method-card {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: var(--size-56);
+  min-height: 0;
   margin: 0;
-  padding: 0 var(--spacer-16);
+  padding: var(--spacer-12) var(--spacer-16) 0;
   border-bottom: 0;
   border-radius: var(--radius-12) var(--radius-12) 0 0;
 }
@@ -10948,6 +10952,10 @@ button.order-payment-method-card {
   line-height: var(--Font16-line-height);
 }
 
+.order-reference-payment__remaining > span:first-child {
+  font-weight: var(--Font16-medium-font-weight);
+}
+
 .order-reference-payment__remaining .metric {
   margin-left: auto;
 }
@@ -10956,7 +10964,7 @@ button.order-payment-method-card {
   position: relative;
   display: block;
   margin: 0;
-  padding: var(--spacer-8) var(--spacer-16) var(--spacer-16);
+  padding: var(--spacer-16) var(--spacer-16) var(--spacer-16);
 }
 
 .order-reference-payment__status-row.is-guided {
@@ -11052,21 +11060,24 @@ button.order-payment-method-card {
 
 .order-reference-payment__methods {
   margin: 0;
-  padding: 0 var(--spacer-16) var(--spacer-12);
+  padding: 0 var(--spacer-16);
 }
 
-.order-reference-payment__methods > header {
+.order-reference-payment .order-reference-payment__section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-height: var(--size-48);
+  margin: 0;
 }
 
-.order-reference-payment__methods > header > strong {
+.order-reference-payment .order-reference-payment__section-header > strong {
   font-size: var(--Font16-font-size);
   line-height: var(--Font16-line-height);
   font-weight: var(--Font14-medium-font-weight);
 }
+
+.order-reference-payment .order-return-inventory { padding: 0 var(--spacer-16); }
 
 .order-reference-payment__mode-switch {
   display: flex;
@@ -12034,15 +12045,15 @@ button.order-payment-method-card {
 
 /* 渠道色与选中态解耦；green_100 对应本归档令牌 green_1_100。 */
 .order-reference-payment--refund [data-select-refund-method="wechat"] .stack__bg > i,
-.order-reference-payment__private-methods [data-select-payment-method="wechat"] .stack__bg > i { color: var(--green_1_100); }
+.order-reference-payment__private-methods [data-select-payment-method="wechat"] .stack__bg > .order-reference-payment__method-header > i { color: var(--green_1_100); }
 .order-reference-payment--refund [data-select-refund-method="alipay"] .stack__bg > i,
-.order-reference-payment__private-methods [data-select-payment-method="alipay"] .stack__bg > i { color: var(--blue_100); }
+.order-reference-payment__private-methods [data-select-payment-method="alipay"] .stack__bg > .order-reference-payment__method-header > i { color: var(--blue_100); }
 .order-reference-payment--refund [data-select-refund-method="bankcard"] .stack__bg > i,
-.order-reference-payment__private-methods [data-select-payment-method="bankcard"] .stack__bg > i { color: var(--orange_100); }
+.order-reference-payment__private-methods [data-select-payment-method="bankcard"] .stack__bg > .order-reference-payment__method-header > i { color: var(--orange_100); }
 .order-reference-payment--refund [data-select-refund-method="cash"] .stack__bg > i,
-.order-reference-payment__private-methods [data-select-payment-method="cash"] .stack__bg > i { color: var(--gold_100); }
+.order-reference-payment__private-methods [data-select-payment-method="cash"] .stack__bg > .order-reference-payment__method-header > i { color: var(--gold_100); }
 .order-reference-payment--refund [data-select-refund-method="other"] .stack__bg > i,
-.order-reference-payment__private-methods [data-select-payment-method="other"] .stack__bg > i { color: var(--text_30); }
+.order-reference-payment__private-methods [data-select-payment-method="other"] .stack__bg > .order-reference-payment__method-header > i { color: var(--text_30); }
 
 /* 退款弹窗固定高度；仅视口不足或中部内容溢出时由 sheet 滚动。 */
 .order-desktop-modal--refund .order-desktop-modal__panel,
@@ -12190,7 +12201,7 @@ button.order-payment-method-card {
 }
 
 .order-reference-payment--refund .order-refund-payment__methods .stack__bg > i,
-.order-reference-payment__private-methods .order-refund-stack .stack__bg > i {
+.order-reference-payment__private-methods .order-refund-stack .stack__bg > .order-reference-payment__method-header > i {
   flex: 0 0 var(--size-20);
   width: var(--size-20);
   height: var(--size-20);
@@ -12721,3 +12732,124 @@ button.order-payment-method-card {
 
 
 .order-catalog-view-switch, .order-add-view-seg { flex: 0 0 auto; }
+
+/* Single private collection: selected Stack contains a real amount input. */
+.order-reference-payment__private-methods { row-gap: 0; }
+.order-reference-payment__single-input.number-input {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  padding-inline: var(--spacer-8);
+}
+.order-reference-payment__method {
+  position: relative;
+  display: grid;
+  grid-template-rows: 66px var(--spacer-16);
+  align-items: stretch;
+  min-width: 0;
+}
+.order-reference-payment__private-methods .order-refund-stack > .stack__bg.order-reference-payment__online-method {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--Font14-line-height) 33px;
+  align-content: center;
+  align-items: center;
+  height: 66px;
+  min-height: 66px;
+  column-gap: var(--spacer-8);
+  row-gap: var(--spacer-4);
+  padding: var(--spacer-4) var(--spacer-8);
+}
+.order-reference-payment__private-methods .order-refund-stack:not(.stack--selected) > .stack__bg.order-reference-payment__online-method {
+  grid-template-rows: var(--Font14-line-height);
+}
+.order-reference-payment__private-methods .stack__bg > .order-reference-payment__method-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacer-8);
+  min-width: 0;
+}
+.order-reference-payment__private-methods .order-reference-payment__method-header > i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.order-reference-payment__private-methods .order-reference-payment__method-header > .stack__label {
+  display: block;
+  min-width: 0;
+}
+.order-reference-payment__private-methods .order-reference-payment__method-header .stack__label > strong {
+  display: block;
+  font-size: var(--Font14-font-size);
+  line-height: var(--Font14-line-height);
+  font-weight: inherit;
+}
+.order-reference-payment__private-methods .stack__bg > .order-reference-payment__single-input,
+.order-reference-payment__private-methods .stack__bg > .order-reference-payment__single-amount,
+.order-reference-payment__private-methods .stack__bg > .metric {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+.order-reference-payment__private-methods .stack__bg > .order-reference-payment__single-amount {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 33px;
+}
+.order-reference-payment__private-methods .stack__bg > .metric { justify-content: center; }
+.order-reference-payment__amount-default { cursor: text; }
+.order-reference-payment__amount-default .number-input__field { pointer-events: none; }
+.order-reference-payment__difference {
+  position: absolute;
+  top: 66px;
+  left: 0;
+  width: max-content;
+  height: var(--spacer-16);
+  margin: 0;
+  text-align: left;
+  font-size: var(--Font12-font-size);
+  line-height: var(--spacer-16);
+  white-space: nowrap;
+}
+.order-reference-payment__method:nth-child(3n) .order-reference-payment__difference { right: 0; left: auto; }
+.order-reference-payment__difference:empty { display: none; }
+.order-reference-payment__difference--over { color: var(--yellow_100, var(--yellow_1_100)); }
+.order-reference-payment__difference--short { color: var(--red_100); }
+
+/* Selection labels use regular weight until selected; nested strong inherits it. */
+.order-reference-payment .order-payment-kind__option > span,
+.order-reference-payment .order-refund-stack .stack__label {
+  font-weight: var(--Font14-normal-font-weight);
+}
+.order-reference-payment .order-payment-kind__option.is-active > span,
+.order-reference-payment .order-refund-stack.stack--selected .stack__label {
+  font-weight: var(--Font14-medium-font-weight);
+}
+.order-reference-payment .order-refund-stack .stack__label > strong { font-weight: inherit; }
+
+/* 2026-10-15 confirmed scene adaptation: guest collection and all refund methods
+   share the collection-status height; customer amount editors retain their geometry. */
+.order-reference-payment__private-methods.order-reference-payment__methods--compact {
+  row-gap: var(--spacer-8);
+}
+.order-reference-payment__methods--compact .order-reference-payment__method {
+  grid-template-rows: var(--size-40);
+}
+.order-reference-payment__private-methods.order-reference-payment__methods--compact .order-refund-stack > .stack__bg.order-reference-payment__online-method {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--size-40);
+  min-height: var(--size-40);
+  padding-block: 0;
+  gap: var(--spacer-8);
+}
+.order-reference-payment__methods--compact .stack__bg > .stack__label,
+.order-reference-payment__methods--compact .stack__bg > .order-reference-payment__method-header {
+  width: auto;
+  flex: 0 1 auto;
+  justify-content: center;
+}

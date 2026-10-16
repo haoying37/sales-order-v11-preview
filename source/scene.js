@@ -1267,7 +1267,7 @@
   function refundSyncEntry() {
     if (!canSyncRefund()) return '';
     var sync = refundSyncState();
-    if (isPureReturnOrder() && !sync.choices.length) return '';
+    if (!sync.choices.length) return '';
     var labels = { syncWait: '已挂起', syncSend: '已发货', syncUnSend: '未发货', unSync: '不同步' };
     return '<button type="button" class="order-refund-sync-entry link link--14" data-component="link" data-open-refund-sync data-prototype="历史同步配置为原型模拟"><span>退货商品同步已有订单</span><small>'
       + escapeHtml(sync.choices.map(function (type) { return labels[type]; }).join('、') || '选择同步范围')
@@ -1449,7 +1449,7 @@
     if (!orderHasReturnSku()) return '';
     var config = refundPrototypeConfig();
     if (config.inventoryFailed) return '<p class="order-return-inventory-error" role="alert">库存退回方式加载失败，请关闭后重新打开结算。</p>';
-    return '<section class="order-refund-payment__field" aria-labelledby="order-refund-inventory-title"><header><strong id="order-refund-inventory-title">退货商品库存退回方式</strong><button type="button" class="checkbox-field order-refund-sync-remember order-return-inventory-remember" data-remember-return-inventory role="checkbox" aria-checked="' + Boolean(draft.rememberInventory) + '">' + paymentSmallCheckbox(draft.rememberInventory) + '<span class="checkbox-field__text">记住本次选择</span></button></header><div class="order-refund-payment__option-grid order-refund-payment__option-grid--inventory" role="radiogroup" aria-label="退货商品库存退回方式">'
+    return '<section class="order-refund-payment__field order-return-inventory" aria-labelledby="order-refund-inventory-title"><header class="order-reference-payment__section-header"><strong id="order-refund-inventory-title">退货商品库存退回方式</strong><button type="button" class="checkbox-field order-refund-sync-remember order-return-inventory-remember" data-remember-return-inventory role="checkbox" aria-checked="' + Boolean(draft.rememberInventory) + '">' + paymentSmallCheckbox(draft.rememberInventory) + '<span class="checkbox-field__text">记住选项</span></button></header><div class="order-refund-payment__option-grid order-refund-payment__option-grid--inventory" role="radiogroup" aria-label="退货商品库存退回方式">'
       + returnInventoryTypes().map(function (type) {
         return refundRadioOption('inventory', type, RETURN_INVENTORY_LABELS[type], draft.inventoryReturnMode === type, draft.refundWarehouseId);
       }).join('') + '</div></section>';
@@ -1992,7 +1992,7 @@
   function paymentFocusSelector(root) {
     var active = document.activeElement;
     if (!active || !root || !root.contains(active)) return '';
-    var attributes = ['data-payment-kind', 'data-select-payment-method', 'data-payment-amount', 'data-remove-payment-method'];
+    var attributes = ['data-payment-kind', 'data-select-payment-method', 'data-payment-amount', 'data-edit-private-payment-amount', 'data-remove-payment-method'];
     for (var i = 0; i < attributes.length; i += 1) {
       if (active.hasAttribute(attributes[i])) return '[' + attributes[i] + '=' + JSON.stringify(active.getAttribute(attributes[i])) + ']';
     }
@@ -2056,11 +2056,19 @@
   }
 
   function handlePaymentControlKeydown(event) {
-    var control = event.target.closest && event.target.closest('[data-auto-print-receipt], [data-auto-dispatch], [data-open-payment-note][role="button"]');
+    var control = event.target.closest && event.target.closest('[data-auto-print-receipt], [data-auto-dispatch], [data-open-payment-note][role="button"], [data-edit-private-payment-amount]');
     if (!control || (event.key !== 'Enter' && event.key !== ' ') || control.tagName === 'BUTTON') return false;
     event.preventDefault();
     if (!event.repeat) control.click();
     return true;
+  }
+
+  function visiblePaymentControl(root, selector) {
+    // Responsive checkout mounts both layouts; prefer the active visible control.
+    var checkout = Array.prototype.find.call(root.querySelectorAll('.order-reference-payment'), function (node) {
+      return node.getClientRects().length > 0;
+    });
+    return checkout ? checkout.querySelector(selector) : root.querySelector(selector);
   }
 
   function refreshPaymentAmountsInPlace(root) {
@@ -2079,7 +2087,9 @@
       var fillCents = Math.max(0, targetCents - paymentAllocatedCents(draft, methodId));
       control.textContent = '填入剩余 ' + (fillCents / 100).toFixed(2);
     });
-    var confirm = root.querySelector('[data-confirm-payment]');
+    var confirm = visiblePaymentControl(root, '[data-confirm-payment]');
+    var difference = visiblePaymentControl(root, '[data-payment-balance-difference]');
+    if (difference) difference.innerHTML = paymentBalanceDifferenceHint(draft, payable);
     if (confirm) {
       var confirmState = paymentConfirmState(draft, payable);
       confirm.innerHTML = paymentConfirmContent(draft, payable, confirmState);
@@ -4060,13 +4070,14 @@
     var confirmState = paymentConfirmState(draft, t.payable);
     if (refundSyncState().checking) confirmState.enabled = false;
     var collectionContent = '';
-    if (targetCents > 0) {
+    var showZeroMixedCollection = orderHasReturnSku() && !isPureReturnOrder() && t.payable === 0 && !draft.useBalance;
+    if (targetCents > 0 || showZeroMixedCollection) {
       collectionContent = '<div class="order-reference-payment__status-row' + (isCollecting ? ' is-guided' : '') + '">'
         + '<div class="order-payment-kind" role="radiogroup" aria-label="收款状态">'
         + paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid', orderHasReturnSku())
         + (featureEnabled('onlinePayment') ? paymentKindOption('online', '在线收款', draft.kind === 'online') : '')
         + paymentKindOption('private', '已私下收款', draft.kind === 'private')
-        + (orderHasReturnSku() ? (state.customer ? paymentKindOption('debt', '记欠款', draft.kind === 'debt', !returnDebtAllowed()) : '') : paymentKindOption('debt', '记欠款', draft.kind === 'debt', !state.customer))
+        + paymentKindOption('debt', '记欠款', draft.kind === 'debt', orderHasReturnSku() ? !returnDebtAllowed() : !state.customer)
         + '</div></div>'
         + (isCollecting ? paymentReferenceMethods(draft, targetCents) : '')
         + (draft.kind === 'debt' && t.payable !== 0 ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span></div>' : '');
@@ -4082,7 +4093,7 @@
       +   '</section>'
       +   (state.customer && Number(state.customer.balance || 0) > 0 ? paymentReferenceBalance(draft, t.payable) : '')
       +   '<section class="order-reference-payment__sheet">'
-      +     '<div class="order-reference-payment__remaining"><span>还需收款</span>' + paymentAmountMetric(targetCents / 100, 24, 'black') + '</div>'
+      +     (draft.useBalance ? '<div class="order-reference-payment__remaining"><span>还需收款</span>' + paymentAmountMetric(targetCents / 100, 24, 'black') + '</div>' : '')
       +     collectionContent
       +     returnInventoryPanel(draft)
       +     paymentNoteEntry(draft)
@@ -4105,7 +4116,7 @@
     var privateMethods = paymentMethodsForKind('private');
     var refundMethod = paymentMethodById(draft.refundMethod);
     var methodContent = draft.refundStatus === 'private'
-      ? '<section class="order-reference-payment__methods order-refund-payment__methods"><header><strong>退款方式</strong></header><div class="order-reference-payment__private-methods">' + privateMethods.map(function (method) {
+      ? '<section class="order-reference-payment__methods order-refund-payment__methods"><header><strong>退款方式</strong></header><div class="order-reference-payment__private-methods order-reference-payment__methods--compact">' + privateMethods.map(function (method) {
         var active = refundMethod && refundMethod.id === method.id;
         return refundStackOption('', 'data-select-refund-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"',
           '<i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span class="stack__label"><strong>' + method.label + '</strong></span>', Boolean(active));
@@ -4135,10 +4146,11 @@
   }
 
   // Shared collection/refund Stack anatomy; each host owns its selection state.
-  function refundStackOption(classes, attributes, content, selected) {
+  function refundStackOption(classes, attributes, content, selected, rootTag) {
+    var tag = rootTag === 'div' ? 'div' : 'button';
     var corner = '<span class="stack__check-corner order-delivery-option__check order-reference-payment__selection-check" aria-hidden="true"><img class="stack__check-icon" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>';
-    return '<button type="button" class="stack order-refund-stack' + (selected ? ' stack--selected' : '') + '" data-component="stack" data-component-slug="stack" data-state="' + (selected ? 'selected' : 'unselected') + '" ' + attributes + '>'
-      + '<span class="stack__bg order-reference-payment__online-method ' + classes + (selected ? ' is-active' : '') + '">' + content + corner + '</span></button>';
+    return '<' + tag + (tag === 'button' ? ' type="button"' : '') + ' class="stack order-refund-stack' + (selected ? ' stack--selected' : '') + '" data-component="stack" data-component-slug="stack" data-state="' + (selected ? 'selected' : 'unselected') + '" ' + attributes + '>'
+      + '<span class="stack__bg order-reference-payment__online-method ' + classes + (selected ? ' is-active' : '') + '">' + content + corner + '</span></' + tag + '>';
   }
 
   function refundRadioOption(group, value, label, selected, warehouseId) {
@@ -4302,6 +4314,67 @@
       + '</div>';
   }
 
+  function canEditPrivatePaymentAmount(draft) {
+    return Boolean(draft && draft.kind === 'private' && draft.mode === 'single'
+      && state.customer && state.refundCapabilities.balanceEnabled);
+  }
+
+  function privatePaymentAmountContent(draft, method) {
+    var processing = state.paymentStatus === 'processing';
+    if (draft.editingPrivateAmount === method.id) {
+      return '<label class="input number-input order-reference-payment__single-input' + (processing ? ' is-disabled' : '') + '" data-component="input" data-component-slug="input" data-variant-name="Input_32"><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft.singleAmount || '')) + '" data-payment-amount="' + method.id + '" data-private-payment-amount-input aria-label="' + method.label + '收款金额"' + (processing ? ' disabled' : '') + '><span class="number-input__suffix" aria-hidden="true">元</span></label>';
+    }
+    return '<div class="input number-input order-reference-payment__single-input order-reference-payment__amount-default' + (processing ? ' is-disabled' : '') + '" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-edit-private-payment-amount="' + method.id + '" data-clickable role="button" tabindex="' + (processing ? '-1' : '0') + '" aria-label="编辑' + method.label + '收款金额" aria-disabled="' + processing + '">'
+      + '<input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft.singleAmount || '')) + '" placeholder="请输入金额" aria-label="' + method.label + '收款金额" readonly tabindex="-1"' + (processing ? ' disabled' : '') + '><span class="number-input__suffix" aria-hidden="true">元</span></div>';
+  }
+
+  function setPrivatePaymentAmountEditing(root, methodId, editing, restoreFocus) {
+    var draft = state.paymentDraft;
+    if (!canEditPrivatePaymentAmount(draft) || draft.method !== methodId || (editing && state.paymentStatus === 'processing')) return;
+    var method = paymentMethodById(methodId);
+    if (!method || method.category !== 'private') return;
+    if (!editing && draft.editingPrivateAmount !== methodId) return;
+    if (editing && draft.editingPrivateAmount !== methodId) {
+      draft.privateAmountBeforeEdit = String(draft.singleAmount == null ? '' : draft.singleAmount);
+    }
+    var restoredAmount = !editing && String(draft.singleAmount || '').trim() === ''
+      && String(draft.privateAmountBeforeEdit || '').trim() !== '';
+    if (restoredAmount) {
+      draft.singleAmount = draft.privateAmountBeforeEdit;
+      draft.lastSingleMethod = methodId;
+      draft.lastSingleAmount = draft.singleAmount;
+    }
+    draft.editingPrivateAmount = editing ? methodId : '';
+    // Only replace the visible amount slot: keep the other responsive copy untouched.
+    var slotSelector = '[data-private-payment-amount-slot="' + methodId + '"]';
+    var slot = visiblePaymentControl(root, slotSelector);
+    if (restoredAmount) {
+      // Replacing a focused input can emit a final change event; do not let its old
+      // empty DOM value overwrite the amount we have just restored.
+      var previousInput = slot && slot.querySelector('input');
+      if (previousInput) previousInput.value = draft.singleAmount;
+      refreshPaymentAmountsInPlace(root);
+    }
+    if (!slot) return;
+    slot.innerHTML = privatePaymentAmountContent(draft, method);
+    if (editing || restoreFocus) {
+      var focusTarget = slot.querySelector(editing ? 'input' : '[data-edit-private-payment-amount]');
+      if (focusTarget) focusTarget.focus({ preventScroll: true });
+    }
+  }
+
+  function paymentDifferenceCents(draft, payable) {
+    return paymentBalanceCents(draft, payable) + paymentAllocatedCents(draft) - toCents(payable);
+  }
+
+  function paymentBalanceDifferenceHint(draft, payable) {
+    if (!canEditPrivatePaymentAmount(draft) || !selectedPaymentMethods(draft).length || String(draft.singleAmount).trim() === '') return '';
+    var difference = paymentDifferenceCents(draft, payable);
+    if (!difference) return '';
+    return '<span class="order-reference-payment__difference--' + (difference > 0 ? 'over' : 'short') + '">'
+      + (difference > 0 ? '超收 ' : '欠款 ') + money(Math.abs(difference) / 100) + '，将计入客户余额</span>';
+  }
+
   function paymentReferenceMethods(draft, targetCents) {
     applyPaymentFeatureVisibility(draft);
     if (!draft || (draft.kind !== 'online' && draft.kind !== 'private')) return '';
@@ -4323,14 +4396,20 @@
         return '<button type="button" class="order-reference-payment__online-method' + (active ? ' is-active' : '') + '" data-component-slug="stack" data-variant-name="selection" data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '') + '</span>' + (active ? paymentSelectionCheck() : '') + '</button>';
       }).join('') + '</div>';
     } else {
-      content = '<div class="order-reference-payment__private-methods">' + methods.map(function (method) {
+      content = '<div class="order-reference-payment__private-methods' + (!state.customer ? ' order-reference-payment__methods--compact' : '') + '">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        return refundStackOption('', 'data-select-payment-method="' + method.id + '" aria-pressed="' + Boolean(active) + '"',
-          '<i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span class="stack__label"><strong>' + method.label + '</strong>' + (active ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '') + '</span>', Boolean(active));
+        var editable = active && canEditPrivatePaymentAmount(draft);
+        var amount = editable
+          ? '<span class="order-reference-payment__single-amount" data-private-payment-amount-slot="' + method.id + '">' + privatePaymentAmountContent(draft, method) + '</span>'
+          : (active && state.customer ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '');
+        return '<div class="order-reference-payment__method">'
+          + refundStackOption('', 'data-select-payment-method="' + method.id + '" ' + (editable ? 'role="group" aria-label="' + method.label + '收款"' : 'aria-pressed="' + Boolean(active) + '"'),
+            '<span class="order-reference-payment__method-header"><i class="' + paymentMethodIconClass(method) + '" aria-hidden="true"></i><span class="stack__label"><strong>' + method.label + '</strong></span></span>' + amount, Boolean(active), editable ? 'div' : 'button')
+          + (editable ? '<div class="order-reference-payment__difference" data-payment-balance-difference aria-live="polite">' + paymentBalanceDifferenceHint(draft, totals().payable) + '</div>' : '') + '</div>';
       }).join('') + '</div>';
     }
     var modeSwitch = featureEnabled('comboPayment') ? '<button type="button" class="order-reference-payment__mode-switch" role="switch" aria-checked="' + (draft.mode === 'combo') + '" data-payment-mode="' + (draft.mode === 'combo' ? 'single' : 'combo') + '"><span>组合支付</span><i class="switch ' + (draft.mode === 'combo' ? 'switch--on' : 'switch--off') + '" data-component-slug="switch"><span class="switch__thumb"></span></i></button>' : '';
-    return '<section class="order-reference-payment__methods"><header><strong>支付方式</strong>' + modeSwitch + '</header>' + content + '</section>';
+    return '<section class="order-reference-payment__methods"><header class="order-reference-payment__section-header"><strong>收款方式</strong>' + modeSwitch + '</header>' + content + '</section>';
   }
 
   function paymentOnlineComboInput(method, draft, index) {
@@ -4452,8 +4531,8 @@
     var parts = [];
     var balance = paymentBalanceCents(draft, payable) / 100;
     if (draft.kind === 'private') {
-      if (balance > 0) parts.push('余额抵扣');
-      selectedPaymentMethods(draft).forEach(function (method) { parts.push(method.label); });
+      if (balance > 0) parts.push('余额抵扣' + (draft.mode === 'single' ? money(balance) : ''));
+      selectedPaymentMethods(draft).forEach(function (method) { parts.push(method.label + (draft.mode === 'single' ? money(paymentAmountCents(draft, method.id) / 100) : '')); });
       return parts.join(' + ');
     }
     if (balance > 0) parts.push('余额抵扣' + money(balance));
@@ -4467,7 +4546,8 @@
     if (!isPureReturnOrder() && Number(payable) >= 0 && toCents(payable) - paymentBalanceCents(draft, payable) <= 0) return '<span>' + stateValue.label + '</span>';
     var detail = stateValue.detail || paymentConfirmDetail(draft, payable);
     if (!detail) return '<span>' + stateValue.label + '</span>';
-    return '<span>' + stateValue.label + '</span><small>' + (stateValue.plainDetail ? detail : '(' + detail + ')') + '</small>';
+    var plainDetail = stateValue.plainDetail || (draft && draft.kind === 'private' && draft.mode === 'single' && Number(payable) >= 0 && !isPureReturnOrder());
+    return '<span>' + stateValue.label + '</span><small>' + (plainDetail ? detail : '(' + detail + ')') + '</small>';
   }
 
   function paymentReferenceFlow(draft, payable) {
@@ -4625,6 +4705,7 @@
     }
     var selected = selectedPaymentMethods(draft);
     if (targetCents > 0 && !selected.length) return { enabled: true, label: '确认开单' };
+    if (draft.kind === 'private' && draft.mode === 'single') return { enabled: !canEditPrivatePaymentAmount(draft) || String(draft.singleAmount).trim() !== '', label: '确认开单' };
     return { enabled: true, label: '确认收款 ' + money(payable) };
   }
 
@@ -6905,6 +6986,8 @@
       mode: 'single',
       method: '',
       singleAmount: '',
+      editingPrivateAmount: '',
+      privateAmountBeforeEdit: '',
       lastSingleMethod: '',
       lastSingleAmount: '',
       selectedMethods: [],
@@ -6918,7 +7001,7 @@
       note: '',
       noteEditorValue: '',
       noteEditorOpen: false,
-      refundStatus: refundUsesPrivateOnly() ? 'private' : '',
+      refundStatus: 'private',
       refundMethod: '',
       refundImages: [],
       refundImagesEditor: null,
@@ -6972,7 +7055,7 @@
     // Prototype-only direct entry used by tour and review automation.
     var reviewState = '';
     try { reviewState = new URLSearchParams(window.location.search).get('state') || ''; } catch (error) {}
-    if (['refund-checkout', 'refund-checkout-guest', 'refund-sync-prompt', 'return-list', 'return-mixed-positive', 'return-mixed-zero', 'return-mixed-negative', 'refund-sync', 'refund-sync-quantity', 'refund-sync-amount', 'refund-sync-many', 'refund-sync-remembered', 'refund-sync-skip', 'refund-sync-refund-failed', 'refund-no-sync-refund-failed', 'refund-temporary'].indexOf(reviewState) < 0) return;
+    if (['checkout-sale', 'refund-checkout', 'refund-checkout-guest', 'refund-sync-prompt', 'return-list', 'return-mixed-positive', 'return-mixed-zero', 'return-mixed-negative', 'refund-sync', 'refund-sync-quantity', 'refund-sync-amount', 'refund-sync-many', 'refund-sync-remembered', 'refund-sync-skip', 'refund-sync-refund-failed', 'refund-no-sync-refund-failed', 'refund-temporary'].indexOf(reviewState) < 0) return;
     state.products = [{
       id: 'refund-review-product',
       code: PRODUCTS[0].code,
@@ -6988,6 +7071,16 @@
       note: ''
     }];
     state.customer = reviewState === 'refund-checkout-guest' ? null : CUSTOMERS[0];
+    if (reviewState === 'checkout-sale') {
+      state.products[0].qty = 1;
+      state.products[0].skuQty = { '白色/M': 1 };
+    }
+    // 原型自测参数只在上述显式 state 入口生效，不改变正常开单客户或余额。
+    var reviewParams = new URLSearchParams(window.location.search);
+    if (reviewParams.get('reviewCustomer') === 'guest') state.customer = null;
+    if (state.customer && reviewParams.has('reviewBalance') && Number.isFinite(Number(reviewParams.get('reviewBalance')))) {
+      state.customer = Object.assign({}, state.customer, { balance: Number(reviewParams.get('reviewBalance')) });
+    }
     if (reviewState === 'refund-temporary') state.products[0].createdType = 'temporary';
     state.delivery = 'none';
     if (reviewState === 'return-list' || reviewState.indexOf('return-mixed-') === 0) {
@@ -7095,6 +7188,9 @@
       return;
     }
     if (!validateReturnInventory(ctx, draft)) return;
+    // A retry may switch to full balance, unpaid or debt; discard the previous attempt's settlement amounts.
+    draft.balanceAdjustmentCents = null;
+    draft.receivedAmount = 0; draft.balanceAmount = 0; draft.shortage = 0; draft.excess = 0;
     var coveredBalanceCents = paymentBalanceCents(draft, payable);
     if (toCents(payable) - coveredBalanceCents <= 0) {
       draft.kind = 'private';
@@ -7124,9 +7220,12 @@
       renderActive();
       return;
     }
-    var shortageCents = Math.max(0, targetCents - allocatedCents);
-    var excessCents = Math.max(0, allocatedCents - targetCents);
-    if (shortageCents > 0) {
+    var differenceCents = paymentDifferenceCents(draft, payable);
+    var shortageCents = Math.max(0, -differenceCents);
+    var excessCents = Math.max(0, differenceCents);
+    var adjustsBalance = canEditPrivatePaymentAmount(draft);
+    if (adjustsBalance && String(draft.singleAmount).trim() === '') { ctx.toast('请输入收款金额'); return; }
+    if (shortageCents > 0 && !adjustsBalance) {
       draft.showShortageDialog = true;
       renderActive();
       return;
@@ -7139,6 +7238,8 @@
     draft.balanceAmount = balanceCents / 100;
     draft.shortage = shortageCents / 100;
     draft.excess = excessCents / 100;
+    draft.balanceAdjustmentCents = adjustsBalance ? differenceCents : null;
+    if (adjustsBalance) { draft.overpaymentHandling = 'balance'; draft.shortageHandling = shortageCents > 0 ? 'balance' : null; }
     if (draft.kind === 'online' && targetCents > 0) {
       startOnlinePayment();
       renderActive();
@@ -7363,8 +7464,9 @@
     if (!draft || draft.ledgerApplied || !state.customer) return;
     var balanceAmount = Math.max(0, Number(draft.balanceAmount || 0));
     var excess = Math.max(0, Number(draft.excess || 0));
-    var nextBalance = Math.max(0, Number(state.customer.balance || 0) - balanceAmount);
-    if (excess > 0 && draft.overpaymentHandling === 'balance') nextBalance += excess;
+    var nextBalance = Number(state.customer.balance || 0) - balanceAmount;
+    if (typeof draft.balanceAdjustmentCents === 'number') nextBalance += draft.balanceAdjustmentCents / 100;
+    else if (excess > 0 && draft.overpaymentHandling === 'balance') nextBalance += excess;
     state.customer.balance = Math.round(nextBalance * 100) / 100;
     draft.ledgerApplied = true;
   }
@@ -7387,7 +7489,7 @@
       : (paymentKind === 'debt'
         ? '记欠款'
         : (state.paymentDraft && state.paymentDraft.shortage > 0
-          ? '部分收款 · 记欠款 ' + money(state.paymentDraft.shortage)
+          ? '部分收款 · ' + (typeof state.paymentDraft.balanceAdjustmentCents === 'number' ? '计入客户余额 ' : '记欠款 ') + money(state.paymentDraft.shortage)
           : (state.paymentDraft && state.paymentDraft.balanceAmount > 0 && state.paymentDraft.balanceAmount >= totals().payable
             ? '余额全额收款'
             : (state.paymentDraft && state.paymentDraft.mode === 'combo' ? '组合收款' : ((paymentMethodById(state.paymentDraft.method) || {}).label || '已收款')))));
@@ -9421,8 +9523,13 @@
       ctx.toast('会员和余额功能已开通');
       return;
     }
+    if (target.matches('[data-edit-private-payment-amount]')) {
+      setPrivatePaymentAmountEditing(root, target.dataset.editPrivatePaymentAmount, true, true);
+      return;
+    }
     if (target.matches('[data-payment-kind]')) {
-      if (orderHasReturnSku() && target.dataset.paymentKind === 'unpaid') return;
+      if (orderHasReturnSku() && target.dataset.paymentKind === 'unpaid') { ctx.toast('退货单不支持记收款'); return; }
+      if (orderHasReturnSku() && target.dataset.paymentKind === 'debt' && !state.customer) { ctx.toast('未选客户不支持记欠款'); return; }
       if (target.dataset.paymentKind === 'debt' && orderHasReturnSku() && !returnDebtAllowed()) { ctx.toast('暂无记欠款权限或余额功能未开通'); return; }
       if (target.dataset.paymentKind === 'online' && !featureEnabled('onlinePayment')) return;
       if (target.dataset.paymentKind === 'debt' && !state.customer) {
@@ -9434,6 +9541,7 @@
       state.paymentDraft.mode = 'single';
       state.paymentDraft.method = '';
       state.paymentDraft.singleAmount = '';
+      state.paymentDraft.editingPrivateAmount = '';
       state.paymentDraft.lastSingleMethod = '';
       state.paymentDraft.lastSingleAmount = '';
       state.paymentDraft.selectedMethods = [];
@@ -9464,6 +9572,7 @@
         state.paymentDraft.selectedMethods = state.paymentDraft.method ? [state.paymentDraft.method] : [];
       }
       state.paymentDraft.mode = nextPaymentMode;
+      state.paymentDraft.editingPrivateAmount = '';
       renderPaymentPreservingScroll(root);
       return;
     }
@@ -9487,6 +9596,7 @@
       var payableTargetCents = Math.max(0, toCents(totals().payable) - paymentBalanceCents(state.paymentDraft, totals().payable));
       if (state.paymentDraft.mode === 'single') {
         if (state.paymentDraft.method === selectedMethodId) return;
+        state.paymentDraft.editingPrivateAmount = '';
         state.paymentDraft.method = selectedMethodId;
         state.paymentDraft.singleAmount = (payableTargetCents / 100).toFixed(2);
         state.paymentDraft.lastSingleMethod = selectedMethodId;
@@ -9505,7 +9615,7 @@
       state.paymentDraft.shortageHandling = null;
       renderPaymentPreservingScroll(root, state.paymentDraft.mode === 'combo'
         ? '[data-payment-amount=' + JSON.stringify(selectedMethodId) + ']'
-        : '');
+        : canEditPrivatePaymentAmount(state.paymentDraft) ? '[data-edit-private-payment-amount=' + JSON.stringify(selectedMethodId) + ']' : '');
       return;
     }
     if (target.matches('[data-remove-payment-method]')) {
@@ -10119,6 +10229,7 @@
       return;
     }
     if (target.matches('[data-payment-amount]') && state.paymentDraft) {
+      if (state.paymentStatus === 'processing') return;
       var amountRaw = String(target.value || '').replace(/[^\d.]/g, '');
       var amountParts = amountRaw.split('.');
       var amountInteger = amountParts.shift().slice(0, 7);
@@ -10402,6 +10513,10 @@
       }
     });
     root.addEventListener('blur', function (event) {
+      if (event.target.matches('[data-private-payment-amount-input]')) {
+        setPrivatePaymentAmountEditing(root, event.target.dataset.paymentAmount, false, false);
+        return;
+      }
       if (event.target.matches('[data-single-qty-input]') && event.target.closest('.order-add-spec-counter-row') && state.addDraft) {
         var blurredSpec = decodeURIComponent(event.target.dataset.singleSpec || '');
         if (!blurredSpec) return;
@@ -10461,6 +10576,11 @@
       }
       if (event.key === 'Escape' && refundSyncState().dialog) { if (refundSyncState().dialog !== 'prompt') closeRefundSync(); return; }
       if (handlePaymentControlKeydown(event)) return;
+      if (event.target.matches('[data-private-payment-amount-input]') && (event.key === 'Enter' || event.key === 'Escape')) {
+        event.preventDefault();
+        setPrivatePaymentAmountEditing(root, event.target.dataset.paymentAmount, false, true);
+        return;
+      }
       if (event.key === 'Tab' && (state.skuPriceDraft || state.orderPromotionDraft || state.freightEditOpen)) {
         var priceModal = root.querySelector(state.orderPromotionDraft ? '.order-promotion-modal' : state.skuPriceDraft ? '.order-sku-price-modal' : '.order-freight-edit-modal');
         var priceControls = priceModal ? Array.from(priceModal.querySelectorAll('button:not([disabled]), input:not([disabled])')) : [];
