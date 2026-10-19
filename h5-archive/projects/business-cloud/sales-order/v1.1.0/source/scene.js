@@ -530,6 +530,13 @@
     { id: 'sender-1', name: '深圳发货仓', detail: '广东省深圳市南山区科技园18号' },
     { id: 'sender-2', name: '广州发货仓', detail: '广东省广州市越秀区站西路57号' }
   ];
+  var COURIER_PRINTERS = [
+    { id: 'label-1', name: '模拟标签打印机', format: '100×180mm' },
+    { id: 'label-2', name: '模拟标签打印机 2', format: '100×180mm' },
+    { id: 'label-3', name: '模拟标签打印机 3', format: '100×180mm' },
+    { id: 'label-4', name: '模拟标签打印机 4', format: '100×180mm' },
+    { id: 'label-5', name: '模拟标签打印机 5', format: '100×180mm' }
+  ];
 
   function courierParams() { return new URLSearchParams(window.location.search); }
   function courierState() {
@@ -539,7 +546,7 @@
       var noPrinter = params.get('courierPrinters') === 'empty';
       state.courier = {
         confirmed: { waybillId: empty ? '' : 'sto', printerId: empty || noPrinter ? '' : 'label-1', addressId: '', serviceId: '' },
-        printers: noPrinter ? [] : [{ id: 'label-1', name: '模拟标签打印机', format: '100×180mm' }],
+        printers: noPrinter ? [] : COURIER_PRINTERS.map(function (item) { return Object.assign({}, item); }),
         draft: null, view: '', origin: '', menu: '', connectingId: '', error: '', token: 0
       };
     }
@@ -597,7 +604,7 @@
     if (courier.leaving) return;
     var root = activeContext && activeContext.root;
     var page = root && root.querySelector('.order-courier-page');
-    var isSelection = courier.view === 'waybills' || courier.view === 'services' || courier.view === 'addresses';
+    var isSelection = courier.view === 'waybills' || courier.view === 'services' || courier.view === 'addresses' || courier.view === 'printers';
     var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (!page || !isSelection) { complete(); return; }
     var selectedRow = selectedSelector && page.querySelector && page.querySelector(selectedSelector);
@@ -650,15 +657,15 @@
     // Explicit review requirement: a Cell selection row with a trailing check, no leading checkbox.
     return '<div class="cell cell--' + (detail ? 'double' : 'single') + ' cell--bg-white' + (last ? '' : ' cell--divider-right-edge') + '" data-component="cell" data-variant-name="Cell_Action" data-clickable role="radio" aria-checked="' + selected + '" tabindex="0" ' + attr + '="' + id + '"><div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">' + escapeHtml(label) + '</span></div>' + (detail ? '<span class="cell__subtitle">' + escapeHtml(detail) + '</span>' : '') + '</div>' + (selected ? '<div class="cell__action"><i class="cell__select-icon order-courier-choice-check wego-iconfont-s icon-gou-jiacu" aria-hidden="true"></i></div>' : '') + '</div></div>';
   }
-  function courierChoice(attr, id, label, detail, selected, loading) {
-    return '<div class="cell cell--' + (detail ? 'double' : 'single') + ' cell--bg-white cell--clickable cell--divider-right-edge" data-component="cell" data-variant-name="Cell_Action" data-clickable role="radio" aria-checked="' + selected + '" tabindex="0" ' + attr + '="' + id + '"><div class="cell__body"><div class="cell__select">' + paymentSmallCheckbox(selected) + '</div><div class="cell__content"><div class="cell__title-row"><span class="cell__title">' + escapeHtml(label) + '</span></div>' + (detail ? '<span class="cell__subtitle">' + escapeHtml(detail) + '</span>' : '') + '</div>' + (loading ? '<div class="cell__action"><span class="loading loading--circle loading--16" data-component="loading" data-variant-name="Loading_Circle" role="status" aria-label="连接中"><span class="loading__circle"></span></span><span class="cell__action-text">连接中…</span></div>' : '') + '</div></div>';
+  function courierChoice(attr, id, label, detail, selected, loading, last) {
+    return '<div class="cell cell--double cell--bg-white' + (last ? '' : ' cell--divider-right-edge') + '" data-component="cell" data-variant-name="Cell_Action" data-clickable role="radio" aria-checked="' + selected + '" tabindex="0" ' + attr + '="' + id + '"><div class="cell__select">' + paymentSelectionCheckboxControl(selected, false) + '</div><div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">' + escapeHtml(label) + '</span></div><span class="cell__subtitle">' + escapeHtml(detail) + '</span></div><div class="cell__action cell__action--link">' + (loading ? '<span class="loading loading--circle loading--16" data-component="loading" data-variant-name="Loading_Circle" role="status" aria-label="连接中"><span class="loading__circle"></span></span><span class="cell__action-text">连接中…</span>' : '') + '<a class="link" data-component="link" data-variant-name="Link_14" data-clickable data-courier-printer-settings="' + id + '" href="#">设置</a></div></div></div>';
   }
   function courierDialog() {
     var c = courierState();
     if (!c.view || !c.draft) return '';
     var d = c.draft, w = courierWaybill(d), content = '', actions = '', extra = '';
     var title = ({ config: '打印快递单', waybills: '选择快递', services: '选择快递类型', addresses: '选择发件地址', printers: '连接打印机', manage: '打印机管理' })[c.view];
-    var selectionPage = c.view === 'waybills' || c.view === 'services' || c.view === 'addresses';
+    var selectionPage = c.view === 'waybills' || c.view === 'services' || c.view === 'addresses' || c.view === 'printers';
     if (c.view === 'config') {
       var address = COURIER_ADDRESSES.find(function (item) { return item.id === d.addressId; });
       var service = courierServices(d).find(function (item) { return item.id === d.serviceId; });
@@ -676,9 +683,8 @@
       var services = courierServices(d);
       content = services.map(function (item, index) { return courierTrailingChoice('data-courier-select', item.id, item.name, '', d.serviceId === item.id, index === services.length - 1); }).join('');
     } else if (c.view === 'printers') {
-      content = c.printers.map(function (item) { return courierChoice('data-courier-printer', item.id, item.name, item.format, (c.connectingId || d.printerId) === item.id, c.connectingId === item.id); }).join('');
+      content = c.printers.map(function (item, index) { return courierChoice('data-courier-printer', item.id, item.name, item.format, (c.connectingId || d.printerId) === item.id, c.connectingId === item.id, index === c.printers.length - 1); }).join('');
       extra = '<button type="button" class="link link--14" data-component="link" data-variant-name="Link_14" data-courier-manage>管理</button>';
-      actions = button('返回', 'weak', 'md', 'data-courier-back');
     } else {
       content = c.printers.length ? c.printers.map(function (item) { return '<div class="order-courier-device"><strong>' + escapeHtml(item.name) + '</strong><span>' + escapeHtml(item.format) + '</span></div>'; }).join('') : '<p class="order-courier-empty">暂无可用打印机</p>';
       actions = button('返回', 'weak', 'md', 'data-courier-back') + button('添加模拟设备', 'strong', 'md', 'data-courier-add-printer');
@@ -718,6 +724,7 @@
     var c = courierState();
     if (!target || !c.view || !c.draft) return false;
     if (c.leaving) return true;
+    if (target.matches('[data-courier-printer-settings]')) { ctx.toast('外跳到打印机设置页'); return true; }
     if (target.matches('[data-courier-add-waybill]')) { ctx.toast('外跳到电子面单页'); return true; }
     if (target.matches('[data-courier-cancel]')) { closeCourier(); return true; }
     if (target.matches('[data-courier-back]')) { courierBack(); return true; }
@@ -768,12 +775,25 @@
     if (target.matches('[data-courier-printer]')) {
       var id = target.dataset.courierPrinter;
       if (c.connectingId || !c.printers.some(function (item) { return item.id === id; })) return true;
+      if (courierParams().get('courierConnect') !== 'failed') {
+        c.token++; c.connectingId = ''; c.error = '';
+        c.draft.printerId = id; c.view = 'config';
+        renderCourier('[data-courier-field="printer"]');
+        return true;
+      }
       c.connectingId = id; c.error = ''; var token = ++c.token;
       renderCourier('[data-courier-back]');
+      var connectingPage = root.querySelector('.order-courier-page');
+      if (connectingPage) connectingPage.classList.remove('order-courier-page--enter');
       window.setTimeout(function () {
         if (state.courier !== c || c.token !== token || c.view !== 'printers' || !c.draft) return;
         c.connectingId = '';
-        if (courierParams().get('courierConnect') === 'failed') { c.error = '连接失败，请重试'; renderCourier('[data-courier-printer="' + id + '"]'); return; }
+        if (courierParams().get('courierConnect') === 'failed') {
+          c.error = '连接失败，请重试'; renderCourier('[data-courier-printer="' + id + '"]');
+          var failedPage = root.querySelector('.order-courier-page');
+          if (failedPage) failedPage.classList.remove('order-courier-page--enter');
+          return;
+        }
         c.draft.printerId = id; c.view = 'config'; renderCourier('[data-courier-field="printer"]');
       }, 700);
       return true;
@@ -6635,7 +6655,18 @@
     return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + '</div>';
   }
 
+  function openRechargeMenu(trigger, root, ctx) {
+    var selector = trigger.hasAttribute('data-reference-recharge') ? '[data-reference-recharge]' : '[data-recharge]';
+    var customerId = state.customer && state.customer.id;
+    // Let the same click dismiss any previous menu and complete its workbench render first.
+    window.requestAnimationFrame(function () {
+      if (!window.WegoRechargeMenu || !state.customer || state.customer.id !== customerId) return;
+      var current = trigger.isConnected && trigger.getClientRects().length ? trigger : Array.from(root.querySelectorAll(selector)).find(function (node) { return node.getClientRects().length; });
+      if (current) window.WegoRechargeMenu.open(current, function () { ctx.toast('打开业务组件'); });
+    });
+  }
   function renderWorkbench(root, ctx) {
+    if (window.WegoRechargeMenu) window.WegoRechargeMenu.close(false);
     var focusedSegment = root.contains(document.activeElement) && document.activeElement.closest('[data-order-segment]');
     var focusScope = focusedSegment && focusedSegment.dataset.orderSegment;
     var focusValue = focusScope && document.activeElement.dataset.value;
@@ -7851,7 +7882,7 @@
     if (state.paymentDraft && state.paymentDraft.refundWarehouseMenuOpen && !event.target.closest('.order-refund-warehouse-popmenu')) closeRefundWarehouseMenu(root);
     var target = event.target.closest('button, [data-clickable]');
     if (courierState().menu && !event.target.closest('.order-courier-menu') && !(target && target.matches('[data-courier-field], [data-courier-select]'))) closeCourierMenu(root);
-    if (handleCourierAction(target, root, ctx)) { if (target && target.matches('[data-courier-add-waybill]')) event.preventDefault(); return; }
+    if (handleCourierAction(target, root, ctx)) { if (target && target.matches('[data-courier-add-waybill], [data-courier-printer-settings]')) event.preventDefault(); return; }
     if (target && target.matches('[data-open-refund-sync]')) {
       if (canSyncRefund()) openRefundSync();
       return;
@@ -9147,7 +9178,7 @@
       return;
     }
     if (target.matches('[data-recharge]')) {
-      ctx.toast('充值入口已保留，本期暂不展开');
+      openRechargeMenu(target, root, ctx);
       return;
     }
     if (target.matches('[data-warehouse-id]')) {
@@ -9983,7 +10014,7 @@
       return;
     }
     if (target.matches('[data-reference-recharge]')) {
-      ctx.toast('充值');
+      openRechargeMenu(target, root, ctx);
       return;
     }
     if (target.matches('[data-close-payment-overlay]')) {
@@ -10742,6 +10773,7 @@
       if (courierState().menu && !event.target.closest('.order-courier-menu') && !event.target.matches('[data-courier-field="' + courierState().menu + '"]')) closeCourierMenu(root);
     });
     var dismissCourierOnResize = function () { closeCourierMenu(root); };
+    ctx.onDestroy(function () { if (window.WegoRechargeMenu) window.WegoRechargeMenu.close(false); });
     window.addEventListener('resize', dismissCourierOnResize);
     ctx.onDestroy(function () { window.removeEventListener('resize', dismissCourierOnResize); if (state.courier) { state.courier.token++; state.courier.connectingId = ''; } });
     root.addEventListener('input', function (event) { handleInput(event, root, ctx); });

@@ -12917,3 +12917,11 @@ button.order-payment-method-card {
 .order-courier-modal [data-courier-field="address"] .cell__content { flex: 0 0 auto; }
 .order-courier-modal [data-courier-field="address"] .cell__action { flex: 1 1 0; }
 .order-courier-modal [data-courier-field="address"] .cell__action-text { flex: 1; min-width: 0; max-width: none; text-align: right; }
+
+/* Explicit review: printer rows use a 16px inset on both sides. */
+.order-courier-modal [data-courier-printer] { padding-inline: 16px; }
+.order-courier-modal [data-courier-printer] > .cell__select { margin-left: 0; padding-left: 0; min-width: 24px; }
+.order-courier-modal [data-courier-printer] > .cell__body { padding-right: 0; }
+/* A portal keeps the standard PopMenu clear of the checkout clipping/stacking context. */
+.order-recharge-layer { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 5); pointer-events: none; }
+.order-recharge-layer > .popmenu { position: fixed; pointer-events: auto; }
