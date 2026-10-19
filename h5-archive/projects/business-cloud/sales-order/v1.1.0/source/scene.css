@@ -12725,7 +12725,7 @@ button.order-payment-method-card {
 .order-add-price-modes .tag:not(.tag--selected) { background: var(--bg_gray_03_pack); border: 0; }
 .order-reference-payment__post-option--courier { grid-template-columns: minmax(0, 1fr) auto; }
 .order-reference-payment__post-toggle { min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; gap: var(--spacer-6); }
-.order-reference-payment__post-toggle[aria-disabled="true"] .checkbox-field__text { color: var(--text_30); }
+
 .order-reference-payment__courier-printer { display: inline-flex; align-items: center; gap: 0; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text_80); font-size: var(--Font10-font-size); }
 .order-reference-payment__courier-printer > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .order-reference-payment__courier-printer > i { flex-shrink: 0; font-size: var(--size-14); }
@@ -12853,3 +12853,67 @@ button.order-payment-method-card {
   flex: 0 1 auto;
   justify-content: center;
 }
+
+/* Courier configuration uses the existing scene modal shell; component anatomy
+   and intrinsic Cell/Button/Checkbox dimensions stay in the frozen bundle. */
+.order-courier-modal { z-index: calc(var(--z-modal) + 2); }
+.order-courier-modal .order-note-modal__panel { height: 480px; padding: 0; gap: 0; }
+.order-courier-modal .order-note-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 var(--size-56);
+  padding: 0 var(--spacer-16);
+  background: var(--bg_bar_100);
+  border-bottom: var(--stroke-hairline) solid var(--bg_line_08);
+}
+.order-courier-head-actions { display: flex; align-items: center; gap: var(--spacer-16); }
+.order-courier-modal .order-note-modal__body { flex: 1 1 0; gap: 0; padding: 0; min-height: 0; }
+.order-courier-modal .order-note-modal__actions {
+  flex: 0 0 auto;
+  align-items: center;
+  height: calc(var(--size-64) + var(--safe-area-bottom));
+  min-height: calc(var(--size-64) + var(--safe-area-bottom));
+  padding: var(--spacer-12) var(--spacer-16) calc(var(--spacer-12) + var(--safe-area-bottom));
+  background: var(--bg_white_100);
+  border-top: var(--stroke-hairline) solid var(--bg_line_08);
+}
+.order-courier-empty, .order-courier-error { margin: 0; padding: var(--spacer-16); font-size: var(--Font14-font-size); line-height: var(--Font14-line-height); }
+.order-courier-empty { color: var(--text_60); }
+.order-courier-error { color: var(--red_100); }
+.order-courier-device { display: flex; flex-direction: column; gap: var(--spacer-4); padding: var(--spacer-16); }
+.order-courier-device > span { color: var(--text_60); font-size: var(--Font14-font-size); }
+.order-courier-menu { position: fixed; z-index: var(--z-popover); }
+.order-courier-menu[data-positioned="false"] { visibility: hidden; }
+.order-courier-result { display: flex; flex-direction: column; align-items: center; gap: var(--spacer-8); }
+.order-courier-result[data-status="failed"] > strong, .order-courier-result[data-status="failed"] > span { color: var(--red_100); }
+
+/* Courier secondary pages keep the same fixed shell; only page content enters. */
+.order-courier-page { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.order-courier-heading { display: flex; align-items: center; min-width: 0; gap: var(--spacer-8); }
+.order-courier-heading > strong { font-size: var(--Font16-font-size); font-weight: var(--Font14-medium-font-weight); line-height: var(--Font16-line-height); }
+.order-courier-add-waybill { padding: var(--spacer-12) var(--spacer-16); }
+.order-courier-printer-value { min-width: 0; text-align: right; }
+.order-courier-page--enter { animation: courier-page-enter 220ms ease-out; }
+@keyframes courier-page-enter { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { .order-courier-page--enter { animation: none; } }
+
+/* Explicit review: selected waybill and printer names use the primary text token. */
+.order-courier-modal [data-courier-filled] .cell__action-text { color: var(--text_100); }
+
+.order-courier-choice-check { color: var(--green_1_100); }
+.order-courier-page--exit { animation: courier-page-exit 220ms ease-in forwards; }
+@keyframes courier-page-exit { from { transform: translateX(0); } to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .order-courier-page--exit { animation: none; } }
+
+/* Explicit review: all configuration values distinguish selected text from placeholders. */
+.order-courier-modal [data-courier-field]:not([data-courier-filled]) .cell__action-text { color: var(--text_30); }
+/* The two-line business value fits inside the standard 56px single Cell without enlarging it. */
+.order-courier-printer-value { position: relative; width: 140px; height: 24px; }
+.order-courier-printer-lines { position: absolute; right: 0; top: 50%; transform: translateY(-50%); display: grid; justify-items: end; gap: 2px; }
+.order-courier-printer-lines > .cell__subtitle { margin-top: 0; }
+/* Explicit review: address uses all remaining width after the label plus 16px. */
+.order-courier-modal [data-courier-field="address"] .cell__body { gap: 16px; }
+.order-courier-modal [data-courier-field="address"] .cell__content { flex: 0 0 auto; }
+.order-courier-modal [data-courier-field="address"] .cell__action { flex: 1 1 0; }
+.order-courier-modal [data-courier-field="address"] .cell__action-text { flex: 1; min-width: 0; max-width: none; text-align: right; }

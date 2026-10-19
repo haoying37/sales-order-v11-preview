@@ -518,6 +518,286 @@
     return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
   }
 
+  // Prototype-only fixtures: no printer, account or delivery service is contacted.
+  var COURIER_WAYBILLS = [
+    { id: 'sto', name: '申通快递', waybillRemarkName: '', waybillType: 0, company: 'STO', accountName: '682451', remaining: 1280 },
+    { id: 'sf', name: '顺丰速运', waybillRemarkName: '顺丰月结面单', waybillType: 0, company: 'SF', hidden: true },
+    { id: 'sf-cainiao', name: '顺丰速运', waybillRemarkName: '顺丰菜鸟面单', waybillType: 4, company: 'SF', accountName: '903728', remaining: 860 },
+    { id: 'cainiao', name: '菜鸟电子面单', waybillRemarkName: '', waybillType: 1, company: 'ZJS', accountName: '751306', remaining: 520 },
+    { id: 'jd', name: '京东快递', waybillRemarkName: '', waybillType: 5, company: 'JINGDONG', accountName: '428195', remaining: 300 }
+  ];
+  var COURIER_ADDRESSES = [
+    { id: 'sender-1', name: '深圳发货仓', detail: '广东省深圳市南山区科技园18号' },
+    { id: 'sender-2', name: '广州发货仓', detail: '广东省广州市越秀区站西路57号' }
+  ];
+
+  function courierParams() { return new URLSearchParams(window.location.search); }
+  function courierState() {
+    if (!state.courier) {
+      var params = courierParams();
+      var empty = params.get('courierConfig') === 'empty';
+      var noPrinter = params.get('courierPrinters') === 'empty';
+      state.courier = {
+        confirmed: { waybillId: empty ? '' : 'sto', printerId: empty || noPrinter ? '' : 'label-1', addressId: '', serviceId: '' },
+        printers: noPrinter ? [] : [{ id: 'label-1', name: '模拟标签打印机', format: '100×180mm' }],
+        draft: null, view: '', origin: '', menu: '', connectingId: '', error: '', token: 0
+      };
+    }
+    return state.courier;
+  }
+  function courierWaybill(config) { return COURIER_WAYBILLS.find(function (item) { return item.id === config.waybillId; }); }
+  function courierServices(config) {
+    var waybill = courierWaybill(config);
+    if (!waybill) return [];
+    // Sample choices only. Production options come from the selected waybill provider.
+    if (waybill.company === 'SF') return [{ id: 'sf-standard', name: '顺丰标快' }, { id: 'sf-express', name: '顺丰特快' }];
+    if (waybill.company === 'JINGDONG') return [{ id: 'jd-standard', name: '京东标快' }, { id: 'jd-express', name: '京东特快' }];
+    return [];
+  }
+  function courierNeedsAddress(config) { var item = courierWaybill(config); return Boolean(item && (item.waybillType === 1 || item.waybillType === 4)); }
+  function courierEligibility(draft) {
+    if (isPureReturnOrder()) return '退货商品不支持打印快递单';
+    if (!draft) return '请先打开结算';
+    if (!draft.autoDispatch && draft.kind === 'unpaid') return '未收款不能打印快递单发货';
+    // Prototype mapping; production uses expressTypeRule.insteadSend.
+    if (state.delivery !== 'express' && state.delivery !== 'freight') return '自提/其他/跑腿不支持快递打单';
+    if (!state.address || !state.address.name) return '无收货信息开单不支持打印快递单';
+    return '';
+  }
+  function courierConfigError(config) {
+    if (!courierWaybill(config)) return '请选择电子面单';
+    if (courierNeedsAddress(config) && !COURIER_ADDRESSES.some(function (item) { return item.id === config.addressId; })) return '请选择发件地址';
+    var services = courierServices(config);
+    if (services.length && !services.some(function (item) { return item.id === config.serviceId; })) return '请选择快递类型';
+    if (!courierState().printers.some(function (item) { return item.id === config.printerId; })) return '请选择打印机';
+    return '';
+  }
+  function renderCourier(focusSelector) {
+    renderActive();
+    var root = activeContext && activeContext.root;
+    var node = root && root.querySelector(focusSelector || '.order-courier-modal button');
+    if (node && node.focus) node.focus({ preventScroll: true });
+  }
+  function openCourier(origin) {
+    var courier = courierState();
+    courier.draft = Object.assign({}, courier.confirmed);
+    courier.leaving = false; courier.view = 'config'; courier.origin = origin; courier.menu = ''; courier.error = ''; courier.connectingId = ''; courier.token++;
+    renderCourier('[data-courier-field="waybill"]');
+  }
+  function closeCourier() {
+    var courier = courierState(), origin = courier.origin;
+    courier.leaving = false; courier.token++; courier.draft = null; courier.view = ''; courier.menu = ''; courier.error = ''; courier.connectingId = '';
+    renderActive();
+    var root = activeContext && activeContext.root;
+    var control = root && visiblePaymentControl(root, origin === 'toggle' ? '[data-auto-dispatch]' : '[data-open-courier-printer]');
+    if (control && control.focus) control.focus({ preventScroll: true });
+  }
+  function exitCourierSelection(complete, selectedSelector) {
+    var courier = courierState();
+    if (courier.leaving) return;
+    var root = activeContext && activeContext.root;
+    var page = root && root.querySelector('.order-courier-page');
+    var isSelection = courier.view === 'waybills' || courier.view === 'services' || courier.view === 'addresses';
+    var reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!page || !isSelection) { complete(); return; }
+    var selectedRow = selectedSelector && page.querySelector && page.querySelector(selectedSelector);
+    if (reduced && !selectedRow) { complete(); return; }
+    if (selectedRow) {
+      page.querySelectorAll('[role="radio"]').forEach(function (row) {
+        row.setAttribute('aria-checked', row === selectedRow ? 'true' : 'false');
+        var oldCheck = row.querySelector('.cell__action');
+        if (oldCheck) oldCheck.remove();
+      });
+      selectedRow.querySelector('.cell__body').insertAdjacentHTML('beforeend', '<div class="cell__action"><i class="cell__select-icon order-courier-choice-check wego-iconfont-s icon-gou-jiacu" aria-hidden="true"></i></div>');
+    }
+    // Commit only after the visual exit; stale animation callbacks cannot affect a reopened draft.
+    courier.leaving = true;
+    var token = ++courier.token, view = courier.view, finished = false;
+    page.inert = true;
+    page.classList.remove('order-courier-page--enter');
+    function finish(event) {
+      if (event && (event.target !== page || event.animationName !== 'courier-page-exit')) return;
+      if (finished) return;
+      finished = true;
+      page.removeEventListener('animationend', finish);
+      if (state.courier !== courier || courier.token !== token || courier.view !== view || !courier.draft) return;
+      courier.leaving = false;
+      complete();
+    }
+    function startExit() {
+      if (state.courier !== courier || courier.token !== token || courier.view !== view || !courier.draft) return;
+      if (reduced) { finish(); return; }
+      page.classList.add('order-courier-page--exit');
+      page.addEventListener('animationend', finish);
+      window.setTimeout(finish, 280);
+    }
+    // Leave the updated check visible before moving the selection page away.
+    if (selectedRow) window.setTimeout(startExit, 120); else startExit();
+  }
+  function courierBack() {
+    var courier = courierState(), previous = courier.view;
+    exitCourierSelection(function () {
+      courier.token++; courier.connectingId = ''; courier.error = ''; courier.menu = '';
+      courier.view = previous === 'manage' && courier.manageFrom === 'printers' ? 'printers' : 'config';
+      renderCourier(courier.view === 'config' ? '[data-courier-field="' + (previous === 'waybills' ? 'waybill' : previous === 'services' ? 'service' : previous === 'addresses' ? 'address' : 'printer') + '"]' : '[data-courier-manage]');
+    });
+  }
+  function courierField(field, label, value, subtitle, filled) {
+    var valueSubtitle = field === 'printer' && subtitle;
+    return '<div class="cell cell--single cell--bg-white cell--clickable cell--divider-right-edge" data-component="cell" data-variant-name="Cell" data-clickable role="button" tabindex="0" data-courier-field="' + field + '"' + (filled ? ' data-courier-filled' : '') + '><div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">' + label + '</span></div>' + (subtitle && !valueSubtitle ? '<span class="cell__subtitle">' + escapeHtml(subtitle) + '</span>' : '') + '</div><div class="cell__action">' + (valueSubtitle ? '<div class="order-courier-printer-value"><div class="order-courier-printer-lines">' : '') + '<span class="cell__action-text" title="' + escapeHtml(value) + '">' + escapeHtml(value) + '</span>' + (valueSubtitle ? '<span class="cell__subtitle">' + escapeHtml(subtitle) + '</span></div></div>' : '') + '<i class="cell__arrow wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></div></div></div>';
+  }
+  function courierTrailingChoice(attr, id, label, detail, selected, last) {
+    // Explicit review requirement: a Cell selection row with a trailing check, no leading checkbox.
+    return '<div class="cell cell--' + (detail ? 'double' : 'single') + ' cell--bg-white' + (last ? '' : ' cell--divider-right-edge') + '" data-component="cell" data-variant-name="Cell_Action" data-clickable role="radio" aria-checked="' + selected + '" tabindex="0" ' + attr + '="' + id + '"><div class="cell__body"><div class="cell__content"><div class="cell__title-row"><span class="cell__title">' + escapeHtml(label) + '</span></div>' + (detail ? '<span class="cell__subtitle">' + escapeHtml(detail) + '</span>' : '') + '</div>' + (selected ? '<div class="cell__action"><i class="cell__select-icon order-courier-choice-check wego-iconfont-s icon-gou-jiacu" aria-hidden="true"></i></div>' : '') + '</div></div>';
+  }
+  function courierChoice(attr, id, label, detail, selected, loading) {
+    return '<div class="cell cell--' + (detail ? 'double' : 'single') + ' cell--bg-white cell--clickable cell--divider-right-edge" data-component="cell" data-variant-name="Cell_Action" data-clickable role="radio" aria-checked="' + selected + '" tabindex="0" ' + attr + '="' + id + '"><div class="cell__body"><div class="cell__select">' + paymentSmallCheckbox(selected) + '</div><div class="cell__content"><div class="cell__title-row"><span class="cell__title">' + escapeHtml(label) + '</span></div>' + (detail ? '<span class="cell__subtitle">' + escapeHtml(detail) + '</span>' : '') + '</div>' + (loading ? '<div class="cell__action"><span class="loading loading--circle loading--16" data-component="loading" data-variant-name="Loading_Circle" role="status" aria-label="连接中"><span class="loading__circle"></span></span><span class="cell__action-text">连接中…</span></div>' : '') + '</div></div>';
+  }
+  function courierDialog() {
+    var c = courierState();
+    if (!c.view || !c.draft) return '';
+    var d = c.draft, w = courierWaybill(d), content = '', actions = '', extra = '';
+    var title = ({ config: '打印快递单', waybills: '选择快递', services: '选择快递类型', addresses: '选择发件地址', printers: '连接打印机', manage: '打印机管理' })[c.view];
+    var selectionPage = c.view === 'waybills' || c.view === 'services' || c.view === 'addresses';
+    if (c.view === 'config') {
+      var address = COURIER_ADDRESSES.find(function (item) { return item.id === d.addressId; });
+      var service = courierServices(d).find(function (item) { return item.id === d.serviceId; });
+      var printer = c.printers.find(function (item) { return item.id === d.printerId; });
+      content = courierField('waybill', '电子面单', w ? w.waybillRemarkName || w.name : '请选择电子面单', '', Boolean(w));
+      if (courierNeedsAddress(d)) content += courierField('address', '发件地址', address ? address.detail : '请选择发件地址', '', Boolean(address));
+      if (courierServices(d).length) content += courierField('service', '快递类型', service ? service.name : '请选择快递类型', '', Boolean(service));
+      content += courierField('printer', '打印机', printer ? printer.name : '请选择打印机', printer && printer.format, Boolean(printer));
+      actions = button('取消', 'weak', 'md', 'data-courier-cancel') + button('确定', 'strong', 'md', 'data-courier-confirm');
+    } else if (c.view === 'waybills') {
+      content = COURIER_WAYBILLS.filter(function (item) { return !item.hidden; }).map(function (item) { return courierTrailingChoice('data-courier-waybill', item.id, item.waybillRemarkName || item.name, item.accountName + '　剩余单量：' + item.remaining, d.waybillId === item.id, false); }).join('');
+    } else if (c.view === 'addresses') {
+      content = COURIER_ADDRESSES.map(function (item, index) { return courierTrailingChoice('data-courier-select', item.id, item.detail, '', d.addressId === item.id, index === COURIER_ADDRESSES.length - 1); }).join('');
+    } else if (c.view === 'services') {
+      var services = courierServices(d);
+      content = services.map(function (item, index) { return courierTrailingChoice('data-courier-select', item.id, item.name, '', d.serviceId === item.id, index === services.length - 1); }).join('');
+    } else if (c.view === 'printers') {
+      content = c.printers.map(function (item) { return courierChoice('data-courier-printer', item.id, item.name, item.format, (c.connectingId || d.printerId) === item.id, c.connectingId === item.id); }).join('');
+      extra = '<button type="button" class="link link--14" data-component="link" data-variant-name="Link_14" data-courier-manage>管理</button>';
+      actions = button('返回', 'weak', 'md', 'data-courier-back');
+    } else {
+      content = c.printers.length ? c.printers.map(function (item) { return '<div class="order-courier-device"><strong>' + escapeHtml(item.name) + '</strong><span>' + escapeHtml(item.format) + '</span></div>'; }).join('') : '<p class="order-courier-empty">暂无可用打印机</p>';
+      actions = button('返回', 'weak', 'md', 'data-courier-back') + button('添加模拟设备', 'strong', 'md', 'data-courier-add-printer');
+    }
+    var menu = '';
+    if (c.menu) {
+      var options = c.menu === 'address' ? COURIER_ADDRESSES : courierServices(d);
+      var value = d[c.menu === 'address' ? 'addressId' : 'serviceId'];
+      menu = '<div class="popmenu popmenu--select order-courier-menu" role="listbox" aria-label="' + (c.menu === 'address' ? '发件地址' : '快递类型') + '" data-component="popmenu" data-variant-name="select" data-state="open" data-positioned="false"><div class="popmenu__list">' + options.map(function (item) { return '<button type="button" class="popmenu__item' + (value === item.id ? ' popmenu__item--selected' : '') + '" role="option" aria-selected="' + (value === item.id) + '" data-courier-select="' + item.id + '"><span class="popmenu__item-text">' + escapeHtml(item.name) + '</span><i class="wego-iconfont-s icon-gou-jiacu popmenu__item-check" aria-hidden="true"></i></button>'; }).join('') + '</div></div>';
+    }
+    var back = selectionPage ? '<button type="button" class="navbar__left-btn navbar__left-btn--circle" data-courier-back aria-label="返回上一页"><i class="wego-iconfont-s icon-fanhui-juzhong" aria-hidden="true"></i></button>' : '';
+    var addWaybill = c.view === 'waybills' ? '<div class="order-courier-add-waybill"><a class="link" data-component="link" data-variant-name="Link_14" data-clickable data-courier-add-waybill href="#">添加电子面单</a></div>' : '';
+    return '<div class="order-note-modal order-courier-modal" role="dialog" aria-modal="true" aria-labelledby="order-courier-title" data-courier-view="' + c.view + '"><div class="order-note-modal__panel"><div class="order-courier-page' + (selectionPage ? ' order-courier-page--enter' : '') + '"><header class="order-note-modal__head"><div class="order-courier-heading">' + back + '<strong id="order-courier-title">' + title + '</strong></div><div class="order-courier-head-actions">' + extra + '<button type="button" class="navbar__left-btn navbar__left-btn--circle" ' + (c.view === 'config' ? 'data-courier-cancel' : 'data-courier-back') + ' aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>' + '</div></header><div class="order-note-modal__body"><div class="cell-group"><div class="cell-group__content"' + (selectionPage || c.view === 'printers' ? ' role="radiogroup" aria-label="' + title + '"' : '') + '>' + content + '</div></div>' + addWaybill + (c.error && c.view !== 'config' ? '<p class="order-courier-error" role="alert">' + escapeHtml(c.error) + '</p>' : '') + '</div>' + (actions ? '<footer class="order-note-modal__actions">' + actions + '</footer>' : '') + '</div></div>' + menu + '</div>';
+
+  }
+  function closeCourierMenu(root) {
+    if (!courierState().menu) return;
+    courierState().menu = '';
+    var menu = root && root.querySelector('.order-courier-menu');
+    if (menu) menu.remove();
+  }
+  function positionCourierMenu(root) {
+    var c = courierState();
+    if (!c.menu) return;
+    var trigger = root.querySelector('[data-courier-field="' + c.menu + '"]'), menu = root.querySelector('.order-courier-menu');
+    if (!trigger || !menu) return;
+    // Measure without the entry scale so the popup never covers its trigger.
+    menu.style.transition = 'none'; menu.style.transform = 'none';
+    var r = trigger.getBoundingClientRect(), m = menu.getBoundingClientRect(), gap = 4;
+    var left = Math.max(gap, Math.min(r.right - m.width, window.innerWidth - m.width - gap)), top = r.bottom + gap, placement = 'bottom';
+    if (top + m.height > window.innerHeight - gap) { top = r.top - gap - m.height; placement = 'top'; }
+    if (top < gap || left + m.width > window.innerWidth - gap) { c.menu = ''; menu.remove(); return; }
+    menu.style.left = left + 'px'; menu.style.top = top + 'px'; menu.dataset.placement = placement; menu.dataset.align = 'end'; menu.dataset.positioned = 'true';
+    menu.style.removeProperty('transition'); menu.style.removeProperty('transform');
+  }
+  function handleCourierAction(target, root, ctx) {
+    var c = courierState();
+    if (!target || !c.view || !c.draft) return false;
+    if (c.leaving) return true;
+    if (target.matches('[data-courier-add-waybill]')) { ctx.toast('外跳到电子面单页'); return true; }
+    if (target.matches('[data-courier-cancel]')) { closeCourier(); return true; }
+    if (target.matches('[data-courier-back]')) { courierBack(); return true; }
+    if (target.matches('[data-courier-confirm]')) {
+      c.error = courierConfigError(c.draft) || (c.origin === 'toggle' ? courierEligibility(state.paymentDraft) : '');
+      if (c.error) { ctx.toast(c.error); renderCourier('[data-courier-confirm]'); return true; }
+      c.confirmed = Object.assign({}, c.draft);
+      if (c.origin === 'toggle' && state.paymentDraft) state.paymentDraft.autoDispatch = true;
+      closeCourier(); return true;
+    }
+    if (target.matches('[data-courier-field]')) {
+      var field = target.dataset.courierField;
+      c.error = '';
+      if (field === 'waybill') c.view = 'waybills';
+      else if (field === 'service') c.view = 'services';
+      else if (field === 'address') c.view = 'addresses';
+      else if (field === 'printer') { c.view = c.printers.length ? 'printers' : 'manage'; c.manageFrom = 'config'; }
+      else { c.menu = c.menu === field ? '' : field; renderCourier('[data-courier-field="' + field + '"]'); return true; }
+      c.menu = ''; renderCourier(); return true;
+    }
+    if (target.matches('[data-courier-waybill]')) {
+      if (!COURIER_WAYBILLS.some(function (item) { return item.id === target.dataset.courierWaybill; })) return true;
+      exitCourierSelection(function () {
+        if (c.draft.waybillId !== target.dataset.courierWaybill) { c.draft.waybillId = target.dataset.courierWaybill; c.draft.serviceId = ''; c.draft.addressId = ''; }
+        c.view = 'config'; c.error = ''; renderCourier('[data-courier-field="waybill"]');
+      }, '[data-courier-waybill="' + target.dataset.courierWaybill + '"]');
+      return true;
+    }
+    if (target.matches('[data-courier-select]')) {
+      var selectingService = c.view === 'services', selectingAddress = c.view === 'addresses';
+      var options = selectingAddress ? COURIER_ADDRESSES : courierServices(c.draft);
+      if ((!selectingAddress && !selectingService) || !options.some(function (item) { return item.id === target.dataset.courierSelect; })) return true;
+      var selectedField = selectingService ? 'service' : 'address';
+      function selectValue() {
+        c.draft[selectedField === 'address' ? 'addressId' : 'serviceId'] = target.dataset.courierSelect;
+        c.menu = ''; c.error = ''; c.view = 'config';
+        renderCourier('[data-courier-field="' + selectedField + '"]');
+      }
+      exitCourierSelection(selectValue, '[data-courier-select="' + target.dataset.courierSelect + '"]');
+      return true;
+    }
+    if (target.matches('[data-courier-manage]')) { c.manageFrom = c.view; c.token++; c.connectingId = ''; c.view = 'manage'; c.error = ''; renderCourier(); return true; }
+    if (target.matches('[data-courier-add-printer]')) {
+      var nextId = 'label-' + (c.printers.length + 1);
+      c.printers.push({ id: nextId, name: '模拟标签打印机' + (c.printers.length ? ' ' + (c.printers.length + 1) : ''), format: '100×180mm' });
+      c.view = 'printers'; c.error = ''; renderCourier('[data-courier-printer="' + nextId + '"]'); return true;
+    }
+    if (target.matches('[data-courier-printer]')) {
+      var id = target.dataset.courierPrinter;
+      if (c.connectingId || !c.printers.some(function (item) { return item.id === id; })) return true;
+      c.connectingId = id; c.error = ''; var token = ++c.token;
+      renderCourier('[data-courier-back]');
+      window.setTimeout(function () {
+        if (state.courier !== c || c.token !== token || c.view !== 'printers' || !c.draft) return;
+        c.connectingId = '';
+        if (courierParams().get('courierConnect') === 'failed') { c.error = '连接失败，请重试'; renderCourier('[data-courier-printer="' + id + '"]'); return; }
+        c.draft.printerId = id; c.view = 'config'; renderCourier('[data-courier-field="printer"]');
+      }, 700);
+      return true;
+    }
+    return false;
+  }
+  function courierPrintResult() {
+    var task = state.paymentPostActions;
+    if (!task || !task.dispatch) return '';
+    var label = task.status === 'failed' ? '快递单打印失败' : task.status === 'success' ? '快递单打印成功' : '正在打印快递单…';
+    return '<div class="order-courier-result" data-courier-print-result data-status="' + (task.status || 'printing') + '" role="status"><strong>' + label + '</strong>' + (task.status === 'failed' ? '<span>' + escapeHtml(task.error) + '</span>' + button('重试', 'weak', 'sm', 'data-retry-courier-print') : '') + '<small>本地模拟打印结果</small></div>';
+  }
+  function startCourierPrint(refresh, retry) {
+    var task = state.paymentPostActions;
+    if (!task || !task.dispatch || task.status === 'printing' || (retry && task.status !== 'failed')) return;
+    task.status = 'printing'; task.error = ''; if (refresh) refresh();
+    window.setTimeout(function () {
+      if (state.paymentPostActions !== task) return;
+      var failed = courierParams().get(retry ? 'courierRetry' : 'courierPrint') === 'failed';
+      task.status = failed ? 'failed' : 'success'; task.error = failed ? '模拟打印机连接中断' : '';
+      if (refresh) refresh();
+    }, 800);
+  }
+
   var state = {
     customer: null,
     warehouse: WAREHOUSES[0],
@@ -633,6 +913,7 @@
     orderNo: '',
     paymentSummary: '',
     paymentPostActions: null,
+    courier: null,
     clerkDailyTotal: storedClerkDailyTotal(),
     dailyTotalRecorded: false,
     previewImageIndex: null,
@@ -1862,7 +2143,7 @@
     '.order-remark-modal .order-note-modal__body',
     '.order-remark-modal textarea',
     '.order-delivery-panel__scroll',
-    '.order-draft-panel__list'
+    '.order-draft-panel__list', '.order-courier-modal .order-note-modal__body'
   ];
 
   function captureRenderScrollPositions(root) {
@@ -4438,12 +4719,14 @@
   }
 
   function courierCheckoutOption(draft) {
-    var disabled = orderHasReturnSku();
-    var checked = !disabled && Boolean(draft.autoDispatch);
+    var disabled = Boolean(courierEligibility(draft));
+    var checked = !disabled && draft.kind !== 'unpaid' && Boolean(draft.autoDispatch);
+    var waybill = courierWaybill(courierState().confirmed);
+    var label = waybill ? waybill.waybillRemarkName || waybill.name : '去设置';
     return '<div class="order-reference-payment__post-option order-reference-payment__post-option--courier">'
       + '<button type="button" class="checkbox-field order-reference-payment__post-toggle" role="checkbox" aria-checked="' + checked + '" aria-disabled="' + disabled + '" data-auto-dispatch>'
       + paymentSelectionCheckboxControl(checked, true, disabled) + '<strong class="checkbox-field__text order-reference-payment__post-title">快递打单发货</strong></button>'
-      + '<button type="button" class="order-reference-payment__courier-printer" data-open-courier-printer aria-label="设置快递单打印机"><span>申通快递</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button></div>';
+      + '<button type="button" class="order-reference-payment__courier-printer" data-open-courier-printer aria-label="设置快递打单"><span>' + escapeHtml(label) + '</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button></div>';
   }
 
   function paymentNoteEntry(draft, isRefund) {
@@ -6349,7 +6632,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + '</div>';
   }
 
   function renderWorkbench(root, ctx) {
@@ -6372,6 +6655,10 @@
       modal.setAttribute('inert', '');
       modal.setAttribute('aria-hidden', 'true');
     });
+    if (courierState().view) {
+      root.querySelectorAll('.order-v2-page > :not(.order-courier-modal)').forEach(function (node) { node.setAttribute('inert', ''); });
+      positionCourierMenu(root);
+    }
     normalizeGongfengComponentContracts(root);
     var scannerVideo = root.querySelector('[data-barcode-video]');
     if (scannerVideo && scannerStream) {
@@ -6961,7 +7248,7 @@
     if (draft && orderHasReturnSku()) {
       if (draft.kind === 'unpaid') draft.kind = 'private';
       if (draft.kind === 'debt' && !returnDebtAllowed()) draft.kind = 'private';
-      draft.autoDispatch = false;
+      if (isPureReturnOrder()) draft.autoDispatch = false;
       if (refundUsesPrivateOnly()) draft.refundStatus = 'private';
     }
     if (draft && !featureEnabled('onlinePayment') && draft.kind === 'online') {
@@ -7055,6 +7342,14 @@
     // Prototype-only direct entry used by tour and review automation.
     var reviewState = '';
     try { reviewState = new URLSearchParams(window.location.search).get('state') || ''; } catch (error) {}
+    // Explicit isolated review states: simulate a previous cart, never restore a saved draft or real cache.
+    if (reviewState === 'new-order-demo') { resetOrder(); state.panel = null; return; }
+    if (reviewState === 'last-order-demo') {
+      state.customer = CUSTOMERS[0];
+      state.products = [Object.assign({}, PRODUCTS[0], { id: 'last-order-demo-product', price: PRODUCTS[0].listPrice, qty: 2, mode: 'single', skuQty: { '白色/M': 2 }, note: '' })];
+      state.panel = null; state.activeDraftId = ''; state.saveStatus = '模拟上次开单';
+      return;
+    }
     if (['checkout-sale', 'refund-checkout', 'refund-checkout-guest', 'refund-sync-prompt', 'return-list', 'return-mixed-positive', 'return-mixed-zero', 'return-mixed-negative', 'refund-sync', 'refund-sync-quantity', 'refund-sync-amount', 'refund-sync-many', 'refund-sync-remembered', 'refund-sync-skip', 'refund-sync-refund-failed', 'refund-no-sync-refund-failed', 'refund-temporary'].indexOf(reviewState) < 0) return;
     state.products = [{
       id: 'refund-review-product',
@@ -7103,6 +7398,15 @@
     if (reviewState === 'refund-sync-refund-failed') config.syncChoices = ['syncSend'];
     if (reviewState.indexOf('refund-failed') >= 0) config.refundResult = 'failed';
     state.paymentDraft = createPaymentDraft();
+    if (reviewParams.get('courierReview') === '1') {
+      if (!isPureReturnOrder()) state.delivery = 'express';
+      state.address = { name: '示例收件人', phone: '13800138000', detail: '广东省深圳市南山区科技园18号' };
+      // Explicit courier demo reuses the existing group-shipping fixture so
+      // unrelated real-name validation does not interrupt the print-result tour.
+      state.realNameInfo = { mode: 'group', name: '', idCard: '' };
+      state.paymentDraft.kind = 'private';
+      state.paymentDraft.useBalance = false;
+    }
     state.paymentStatus = 'idle';
     state.paymentScrollSpacer = 0;
     state.panel = reviewState === 'return-list' || reviewState === 'refund-sync-prompt' ? null : 'checkout';
@@ -7507,7 +7811,8 @@
     }
     state.paymentPostActions = {
       print: Boolean(state.paymentDraft && state.paymentDraft.autoPrintReceipt),
-      dispatch: Boolean(!orderHasReturnSku() && state.paymentDraft && state.paymentDraft.autoDispatch)
+      dispatch: Boolean(state.paymentDraft && state.paymentDraft.kind !== 'unpaid' && state.paymentDraft.autoDispatch && !courierEligibility(state.paymentDraft) && !courierConfigError(courierState().confirmed)),
+      status: 'pending', error: ''
     };
     state.panel = null;
     renderActive();
@@ -7545,6 +7850,8 @@
   function handleClick(event, root, ctx) {
     if (state.paymentDraft && state.paymentDraft.refundWarehouseMenuOpen && !event.target.closest('.order-refund-warehouse-popmenu')) closeRefundWarehouseMenu(root);
     var target = event.target.closest('button, [data-clickable]');
+    if (courierState().menu && !event.target.closest('.order-courier-menu') && !(target && target.matches('[data-courier-field], [data-courier-select]'))) closeCourierMenu(root);
+    if (handleCourierAction(target, root, ctx)) { if (target && target.matches('[data-courier-add-waybill]')) event.preventDefault(); return; }
     if (target && target.matches('[data-open-refund-sync]')) {
       if (canSyncRefund()) openRefundSync();
       return;
@@ -9664,12 +9971,15 @@
       return;
     }
     if (target.matches('[data-auto-dispatch]')) {
-      if (orderHasReturnSku()) { ctx.toast('退货商品不支持打印快递单'); return; }
-      if (state.paymentDraft) { state.paymentDraft.autoDispatch = !state.paymentDraft.autoDispatch; renderPaymentPreservingScroll(root); }
+      var courierReason = courierEligibility(state.paymentDraft);
+      if (courierReason) { ctx.toast(courierReason); return; }
+      if (!state.paymentDraft.autoDispatch && courierConfigError(courierState().confirmed)) { openCourier('toggle'); return; }
+      state.paymentDraft.autoDispatch = !state.paymentDraft.autoDispatch;
+      renderPaymentPreservingScroll(root);
       return;
     }
     if (target.matches('[data-open-courier-printer]')) {
-      ctx.toast('打印快递单设置弹窗暂未实现');
+      openCourier('settings');
       return;
     }
     if (target.matches('[data-reference-recharge]')) {
@@ -10425,6 +10735,15 @@
         renderActive();
       }
     });
+    root.addEventListener('scroll', function (event) {
+      if (courierState().menu && !event.target.closest('.order-courier-menu')) closeCourierMenu(root);
+    }, true);
+    root.addEventListener('focusin', function (event) {
+      if (courierState().menu && !event.target.closest('.order-courier-menu') && !event.target.matches('[data-courier-field="' + courierState().menu + '"]')) closeCourierMenu(root);
+    });
+    var dismissCourierOnResize = function () { closeCourierMenu(root); };
+    window.addEventListener('resize', dismissCourierOnResize);
+    ctx.onDestroy(function () { window.removeEventListener('resize', dismissCourierOnResize); if (state.courier) { state.courier.token++; state.courier.connectingId = ''; } });
     root.addEventListener('input', function (event) { handleInput(event, root, ctx); });
     root.addEventListener('change', function (event) { handleInput(event, root, ctx); });
     root.addEventListener('paste', function (event) {
@@ -10566,6 +10885,17 @@
       markDirty(ctx);
     }, true);
     root.addEventListener('keydown', function (event) {
+      if (courierState().view) {
+        if (courierState().leaving) { event.preventDefault(); return; }
+        if (event.key === 'Escape') { event.preventDefault(); if (courierState().menu) { courierState().menu = ''; renderCourier(); } else if (courierState().view === 'config') closeCourier(); else courierBack(); return; }
+        if (event.key === 'Tab') {
+          var controls = Array.from(root.querySelectorAll('.order-courier-modal button:not([disabled]), .order-courier-modal a[href], .order-courier-modal [tabindex="0"]')).filter(function (node) { return node.getClientRects().length; });
+          var first = controls[0], last = controls[controls.length - 1];
+          if (first && ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last))) { event.preventDefault(); (event.shiftKey ? last : first).focus({ preventScroll: true }); }
+          return;
+        }
+        if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-courier-field], [data-courier-waybill], [data-courier-printer], [data-courier-select]')) { event.preventDefault(); event.target.click(); return; }
+      }
       if (refundSyncState().dialog && event.key === 'Tab') {
         var syncControls = Array.from(root.querySelectorAll('.order-refund-sync-dialog button:not([disabled]), .order-refund-sync-dialog [tabindex="0"]'));
         var firstControl = syncControls[0], lastControl = syncControls[syncControls.length - 1];
@@ -10820,7 +11150,7 @@
       +     '<h1 id="order-success-title">' + resultTitle + '</h1>'
       +     '<p>' + escapeHtml(state.paymentSummary || '已收款') + ' · ' + money(t.payable) + '</p>'
       +     '<dl><div><dt>订单号</dt><dd>' + escapeHtml(state.orderNo) + '</dd></div><div><dt>客户</dt><dd>' + escapeHtml(state.customer ? state.customer.name : '散客') + '</dd></div><div><dt>仓库</dt><dd>' + escapeHtml(state.warehouse.name) + '</dd></div><div><dt>商品</dt><dd>' + t.styles + '款 ' + t.pieces + '件</dd></div>' + (isPureReturn ? '<div><dt>订单状态</dt><dd>已退款</dd></div>' : '') + '<div><dt>' + statusLabel + '</dt><dd>' + paymentState + '</dd></div></dl>'
-      +     (state.paymentPostActions && (state.paymentPostActions.print || state.paymentPostActions.dispatch) ? '<div class="order-success-v2__post-actions">' + (state.paymentPostActions.print ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>小票打印任务已创建</span>' : '') + (state.paymentPostActions.dispatch ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>快递单任务已创建</span>' : '') + '<small>打印或打单失败时可在订单详情中单独重试，不影响开单结果。</small></div>' : '')
+      +     (state.paymentPostActions && (state.paymentPostActions.print || state.paymentPostActions.dispatch) ? '<div class="order-success-v2__post-actions">' + (state.paymentPostActions.print ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>小票打印任务已创建</span>' : '') + courierPrintResult() + '<small>打印结果不影响已创建的订单。</small></div>' : '')
       +     '<div class="order-success-v2__actions">' + button('继续开单', 'strong', 'lg', 'data-new-order') + button('查看订单', 'weak', 'lg', 'data-view-order') + '</div>'
       +     '<small>配货、发货等后续流程不在本期原型范围内</small>'
       +   '</main>'
@@ -10869,6 +11199,7 @@
     state.paymentDraft = null;
     state.paymentScrollSpacer = 0;
     state.paymentPostActions = null;
+    state.courier = null;
     state.dailyTotalRecorded = false;
     state.saveStatus = '新订单';
     state.activeDraftId = '';
@@ -10904,16 +11235,25 @@
         setTimeout(renderActive, 0);
       }
 
-      successRoot.innerHTML = successTemplate();
-      normalizeGongfengComponentContracts(successRoot);
-      successRoot.querySelector('[data-new-order]')?.addEventListener('click', function () {
-        closeSuccess();
+      var successAlive = true;
+      function refreshSuccess() {
+        if (!successAlive) return;
+        var scrollTop = successRoot.querySelector('.order-success-v2__body')?.scrollTop || 0;
+        successRoot.innerHTML = successTemplate();
+        normalizeGongfengComponentContracts(successRoot);
+        var body = successRoot.querySelector('.order-success-v2__body');
+        if (body) body.scrollTop = scrollTop;
+      }
+      refreshSuccess();
+      successRoot.addEventListener('click', function (event) {
+        if (event.target.closest('[data-new-order]')) closeSuccess();
+        else if (event.target.closest('[data-view-order]')) ctx.toast('订单详情入口已保留，本期不展开');
+        else if (event.target.closest('[data-retry-courier-print]')) startCourierPrint(refreshSuccess, true);
       });
-      successRoot.querySelector('[data-view-order]')?.addEventListener('click', function () {
-        ctx.toast('订单详情入口已保留，本期不展开');
-      });
-      autoCloseTimer = window.setTimeout(closeSuccess, 3000);
+      if (state.paymentPostActions && state.paymentPostActions.dispatch) startCourierPrint(refreshSuccess, false);
+      else autoCloseTimer = window.setTimeout(closeSuccess, 3000);
       ctx.onDestroy(function () {
+        successAlive = false;
         if (autoCloseTimer) window.clearTimeout(autoCloseTimer);
       });
     }

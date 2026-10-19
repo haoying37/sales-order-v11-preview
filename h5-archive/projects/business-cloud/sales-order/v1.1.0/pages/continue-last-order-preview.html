@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>进入开单：继续上一次开单</title>
+  <link rel="stylesheet" href="../assets/design-system/wego-design/colors_and_type.css">
+  <link rel="stylesheet" href="../assets/design-system/wego-design/components.css">
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    iframe { display: block; width: 100%; height: 100%; border: 0; }
+  </style>
+</head>
+<body>
+  <!-- Prototype-only: each entry opens the prompt; neither choice touches real storage. -->
+  <iframe id="order-demo" title="继续上一次开单演示" src="./sales-order.html?demoPreview=1&amp;state=new-order-demo" inert tabindex="-1" aria-hidden="true" allow="clipboard-write"></iframe>
+  <div class="dialog dialog--text" role="dialog" aria-modal="true" aria-labelledby="resume-title" aria-describedby="resume-content" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_2" data-variant-cn="按钮数量=2">
+    <div class="dialog__card">
+      <div class="dialog__body">
+        <div class="dialog__header"><h3 class="dialog__title" id="resume-title">继续上一次开单</h3></div>
+        <div class="dialog__content" id="resume-content">你有一个开单草稿单，是否继续。</div>
+      </div>
+      <div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual">
+        <button type="button" class="dialog__btn dialog__btn--dismiss" data-restart-order>重新开单</button>
+        <span class="dialog__divider" aria-hidden="true"></span>
+        <button type="button" class="dialog__btn dialog__btn--confirm" data-continue-last-order>继续开单</button>
+      </div></div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var frame = document.getElementById('order-demo');
+      var dialog = document.querySelector('[role="dialog"]');
+      var buttons = Array.from(dialog.querySelectorAll('button'));
+      function choose(mode) {
+        if (!dialog.isConnected) return;
+        document.body.dataset.resumeResult = mode;
+        frame.src = './sales-order.html?demoPreview=1&state=' + (mode === 'continue' ? 'last-order-demo' : 'new-order-demo');
+        dialog.remove();
+        frame.inert = false; frame.removeAttribute('tabindex'); frame.removeAttribute('aria-hidden');
+        frame.addEventListener('load', function () { frame.focus(); }, { once: true });
+      }
+      buttons[0].addEventListener('click', function () { choose('restart'); });
+      buttons[1].addEventListener('click', function () { choose('continue'); });
+      dialog.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { event.preventDefault(); return; }
+        if (event.key !== 'Tab') return;
+        if (event.shiftKey && document.activeElement === buttons[0]) { event.preventDefault(); buttons[1].focus(); }
+        else if (!event.shiftKey && document.activeElement === buttons[1]) { event.preventDefault(); buttons[0].focus(); }
+      });
+      buttons[1].focus({ preventScroll: true });
+    })();
+  </script>
+</body>
+</html>
