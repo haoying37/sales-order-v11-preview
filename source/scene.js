@@ -539,20 +539,50 @@
   ];
 
   function courierParams() { return new URLSearchParams(window.location.search); }
+  function receiptState() {
+    // Prototype catalog only; production obtains added devices and selection from its receipt-printer service.
+    if (!state.receipt) {
+      var params = courierParams(), empty = params.get('receiptPrinters') === 'empty';
+      state.receipt = {
+        printers: empty ? [] : [{ id: 'receipt-1', name: 'MJJS-2BIUI', format: '小票打印机' }],
+        printerId: empty || params.get('receiptConfig') === 'empty' ? '' : 'receipt-1'
+      };
+    }
+    return state.receipt;
+  }
+  function receiptPrinter() {
+    var receipt = receiptState();
+    return receipt.printers.find(function (item) { return item.id === receipt.printerId; });
+  }
+  function openReceiptPrinter(origin, ctx) {
+    var receipt = receiptState();
+    if (!receipt.printers.length) { ctx.toast('外跳到小票打印机页'); return; }
+    var courier = courierState();
+    courier.scope = 'receipt'; courier.origin = origin;
+    courier.draft = { printerId: receiptPrinter() ? receipt.printerId : '' };
+    courier.receiptPaymentDraft = state.paymentDraft;
+    courier.leaving = false; courier.view = 'printers'; courier.menu = ''; courier.error = ''; courier.connectingId = ''; courier.token++;
+    renderCourier('[data-courier-back]');
+  }
+  function activePrinterCatalog(courier) { return courier.scope === 'receipt' ? receiptState().printers : courier.printers; }
   function courierState() {
     if (!state.courier) {
       var params = courierParams();
       var empty = params.get('courierConfig') === 'empty';
       var noPrinter = params.get('courierPrinters') === 'empty';
+      // Keep the original empty-demo URL working when its wrapper is already cached.
+      var emptyCourierDemo = params.get('demoPreview') === '1' && params.get('courierReview') === '1' && empty && noPrinter;
+      var noWaybill = params.get('courierWaybills') === 'empty' || emptyCourierDemo;
       state.courier = {
-        confirmed: { waybillId: empty ? '' : 'sto', printerId: empty || noPrinter ? '' : 'label-1', addressId: '', serviceId: '' },
+        confirmed: { waybillId: empty || noWaybill ? '' : 'sto', printerId: empty || noPrinter ? '' : 'label-1', addressId: '', serviceId: '' },
+        waybills: noWaybill ? [] : COURIER_WAYBILLS.map(function (item) { return Object.assign({}, item); }),
         printers: noPrinter ? [] : COURIER_PRINTERS.map(function (item) { return Object.assign({}, item); }),
         draft: null, view: '', origin: '', menu: '', connectingId: '', error: '', token: 0
       };
     }
     return state.courier;
   }
-  function courierWaybill(config) { return COURIER_WAYBILLS.find(function (item) { return item.id === config.waybillId; }); }
+  function courierWaybill(config) { return courierState().waybills.find(function (item) { return item.id === config.waybillId; }); }
   function courierServices(config) {
     var waybill = courierWaybill(config);
     if (!waybill) return [];
@@ -572,7 +602,7 @@
     return '';
   }
   function courierConfigError(config) {
-    if (!courierWaybill(config)) return '请选择电子面单';
+    if (!courierWaybill(config)) return courierState().waybills.length ? '请选择电子面单' : '请选择快递公司';
     if (courierNeedsAddress(config) && !COURIER_ADDRESSES.some(function (item) { return item.id === config.addressId; })) return '请选择发件地址';
     var services = courierServices(config);
     if (services.length && !services.some(function (item) { return item.id === config.serviceId; })) return '请选择快递类型';
@@ -587,16 +617,19 @@
   }
   function openCourier(origin) {
     var courier = courierState();
+    courier.scope = 'courier'; courier.receiptPaymentDraft = null;
     courier.draft = Object.assign({}, courier.confirmed);
     courier.leaving = false; courier.view = 'config'; courier.origin = origin; courier.menu = ''; courier.error = ''; courier.connectingId = ''; courier.token++;
     renderCourier('[data-courier-field="waybill"]');
   }
   function closeCourier() {
-    var courier = courierState(), origin = courier.origin;
+    var courier = courierState(), origin = courier.origin, receipt = courier.scope === 'receipt';
     courier.leaving = false; courier.token++; courier.draft = null; courier.view = ''; courier.menu = ''; courier.error = ''; courier.connectingId = '';
+    courier.receiptPaymentDraft = null;
     renderActive();
     var root = activeContext && activeContext.root;
-    var control = root && visiblePaymentControl(root, origin === 'toggle' ? '[data-auto-dispatch]' : '[data-open-courier-printer]');
+    var selector = receipt ? (origin === 'toggle' ? '[data-auto-print-receipt]' : '[data-open-receipt-printer]') : (origin === 'toggle' ? '[data-auto-dispatch]' : '[data-open-courier-printer]');
+    var control = root && visiblePaymentControl(root, selector);
     if (control && control.focus) control.focus({ preventScroll: true });
   }
   function exitCourierSelection(complete, selectedSelector) {
@@ -612,10 +645,14 @@
     if (selectedRow) {
       page.querySelectorAll('[role="radio"]').forEach(function (row) {
         row.setAttribute('aria-checked', row === selectedRow ? 'true' : 'false');
-        var oldCheck = row.querySelector('.cell__action');
-        if (oldCheck) oldCheck.remove();
+        if (courier.view === 'printers') {
+          row.querySelector('.cell__select').innerHTML = paymentSelectionCheckboxControl(row === selectedRow, false);
+        } else {
+          var oldCheck = row.querySelector('.cell__action');
+          if (oldCheck) oldCheck.remove();
+        }
       });
-      selectedRow.querySelector('.cell__body').insertAdjacentHTML('beforeend', '<div class="cell__action"><i class="cell__select-icon order-courier-choice-check wego-iconfont-s icon-gou-jiacu" aria-hidden="true"></i></div>');
+      if (courier.view !== 'printers') selectedRow.querySelector('.cell__body').insertAdjacentHTML('beforeend', '<div class="cell__action"><i class="cell__select-icon order-courier-choice-check wego-iconfont-s icon-gou-jiacu" aria-hidden="true"></i></div>');
     }
     // Commit only after the visual exit; stale animation callbacks cannot affect a reopened draft.
     courier.leaving = true;
@@ -643,6 +680,7 @@
   }
   function courierBack() {
     var courier = courierState(), previous = courier.view;
+    if (courier.scope === 'receipt') { exitCourierSelection(closeCourier); return; }
     exitCourierSelection(function () {
       courier.token++; courier.connectingId = ''; courier.error = ''; courier.menu = '';
       courier.view = previous === 'manage' && courier.manageFrom === 'printers' ? 'printers' : 'config';
@@ -670,20 +708,22 @@
       var address = COURIER_ADDRESSES.find(function (item) { return item.id === d.addressId; });
       var service = courierServices(d).find(function (item) { return item.id === d.serviceId; });
       var printer = c.printers.find(function (item) { return item.id === d.printerId; });
-      content = courierField('waybill', '电子面单', w ? w.waybillRemarkName || w.name : '请选择电子面单', '', Boolean(w));
+      var emptyWaybills = c.waybills.length === 0;
+      content = courierField('waybill', emptyWaybills ? '快递公司' : '电子面单', w ? w.waybillRemarkName || w.name : emptyWaybills ? '请选择快递公司' : '请选择电子面单', '', Boolean(w));
       if (courierNeedsAddress(d)) content += courierField('address', '发件地址', address ? address.detail : '请选择发件地址', '', Boolean(address));
       if (courierServices(d).length) content += courierField('service', '快递类型', service ? service.name : '请选择快递类型', '', Boolean(service));
-      content += courierField('printer', '打印机', printer ? printer.name : '请选择打印机', printer && printer.format, Boolean(printer));
+      if (!emptyWaybills) content += courierField('printer', '打印机', printer ? printer.name : '请选择打印机', printer && printer.format, Boolean(printer));
       actions = button('取消', 'weak', 'md', 'data-courier-cancel') + button('确定', 'strong', 'md', 'data-courier-confirm');
     } else if (c.view === 'waybills') {
-      content = COURIER_WAYBILLS.filter(function (item) { return !item.hidden; }).map(function (item) { return courierTrailingChoice('data-courier-waybill', item.id, item.waybillRemarkName || item.name, item.accountName + '　剩余单量：' + item.remaining, d.waybillId === item.id, false); }).join('');
+      content = c.waybills.filter(function (item) { return !item.hidden; }).map(function (item) { return courierTrailingChoice('data-courier-waybill', item.id, item.waybillRemarkName || item.name, item.accountName + '　剩余单量：' + item.remaining, d.waybillId === item.id, false); }).join('');
     } else if (c.view === 'addresses') {
       content = COURIER_ADDRESSES.map(function (item, index) { return courierTrailingChoice('data-courier-select', item.id, item.detail, '', d.addressId === item.id, index === COURIER_ADDRESSES.length - 1); }).join('');
     } else if (c.view === 'services') {
       var services = courierServices(d);
       content = services.map(function (item, index) { return courierTrailingChoice('data-courier-select', item.id, item.name, '', d.serviceId === item.id, index === services.length - 1); }).join('');
     } else if (c.view === 'printers') {
-      content = c.printers.map(function (item, index) { return courierChoice('data-courier-printer', item.id, item.name, item.format, (c.connectingId || d.printerId) === item.id, c.connectingId === item.id, index === c.printers.length - 1); }).join('');
+      var printers = activePrinterCatalog(c);
+      content = printers.map(function (item, index) { return courierChoice('data-courier-printer', item.id, item.name, item.format, (c.connectingId || d.printerId) === item.id, c.connectingId === item.id, index === printers.length - 1); }).join('');
       extra = '<button type="button" class="link link--14" data-component="link" data-variant-name="Link_14" data-courier-manage>管理</button>';
     } else {
       content = c.printers.length ? c.printers.map(function (item) { return '<div class="order-courier-device"><strong>' + escapeHtml(item.name) + '</strong><span>' + escapeHtml(item.format) + '</span></div>'; }).join('') : '<p class="order-courier-empty">暂无可用打印机</p>';
@@ -696,7 +736,9 @@
       menu = '<div class="popmenu popmenu--select order-courier-menu" role="listbox" aria-label="' + (c.menu === 'address' ? '发件地址' : '快递类型') + '" data-component="popmenu" data-variant-name="select" data-state="open" data-positioned="false"><div class="popmenu__list">' + options.map(function (item) { return '<button type="button" class="popmenu__item' + (value === item.id ? ' popmenu__item--selected' : '') + '" role="option" aria-selected="' + (value === item.id) + '" data-courier-select="' + item.id + '"><span class="popmenu__item-text">' + escapeHtml(item.name) + '</span><i class="wego-iconfont-s icon-gou-jiacu popmenu__item-check" aria-hidden="true"></i></button>'; }).join('') + '</div></div>';
     }
     var back = selectionPage ? '<button type="button" class="navbar__left-btn navbar__left-btn--circle" data-courier-back aria-label="返回上一页"><i class="wego-iconfont-s icon-fanhui-juzhong" aria-hidden="true"></i></button>' : '';
-    var addWaybill = c.view === 'waybills' ? '<div class="order-courier-add-waybill"><a class="link" data-component="link" data-variant-name="Link_14" data-clickable data-courier-add-waybill href="#">添加电子面单</a></div>' : '';
+    var emptyWaybillPage = c.view === 'waybills' && c.waybills.length === 0;
+    if (emptyWaybillPage) content = '<div class="result-page result-page--80 order-courier-waybill-empty" data-component="result" data-variant-name="Result_80"><section class="result-page__info"><div class="result result--in-page" role="group" aria-label="暂无电子面单"><div class="result__copy"><h2 class="result__title">暂无电子面单</h2></div></div><div class="result-gradient" aria-hidden="true"></div><div class="result-actions">' + button('添加电子面单', 'strong', 'lg', 'data-courier-add-waybill') + '</div></section><section class="result-page__actions"></section></div>';
+    var addWaybill = c.view === 'waybills' && !emptyWaybillPage ? '<div class="order-courier-add-waybill"><a class="link" data-component="link" data-variant-name="Link_14" data-clickable data-courier-add-waybill href="#">添加电子面单</a></div>' : '';
     return '<div class="order-note-modal order-courier-modal" role="dialog" aria-modal="true" aria-labelledby="order-courier-title" data-courier-view="' + c.view + '"><div class="order-note-modal__panel"><div class="order-courier-page' + (selectionPage ? ' order-courier-page--enter' : '') + '"><header class="order-note-modal__head"><div class="order-courier-heading">' + back + '<strong id="order-courier-title">' + title + '</strong></div><div class="order-courier-head-actions">' + extra + '<button type="button" class="navbar__left-btn navbar__left-btn--circle" ' + (c.view === 'config' ? 'data-courier-cancel' : 'data-courier-back') + ' aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>' + '</div></header><div class="order-note-modal__body"><div class="cell-group"><div class="cell-group__content"' + (selectionPage || c.view === 'printers' ? ' role="radiogroup" aria-label="' + title + '"' : '') + '>' + content + '</div></div>' + addWaybill + (c.error && c.view !== 'config' ? '<p class="order-courier-error" role="alert">' + escapeHtml(c.error) + '</p>' : '') + '</div>' + (actions ? '<footer class="order-note-modal__actions">' + actions + '</footer>' : '') + '</div></div>' + menu + '</div>';
 
   }
@@ -737,16 +779,17 @@
     }
     if (target.matches('[data-courier-field]')) {
       var field = target.dataset.courierField;
+      if (field === 'printer' && !c.printers.length) { ctx.toast('外跳到快递单打印机页'); return true; }
       c.error = '';
       if (field === 'waybill') c.view = 'waybills';
       else if (field === 'service') c.view = 'services';
       else if (field === 'address') c.view = 'addresses';
-      else if (field === 'printer') { c.view = c.printers.length ? 'printers' : 'manage'; c.manageFrom = 'config'; }
+      else if (field === 'printer') { c.view = 'printers'; c.manageFrom = 'config'; }
       else { c.menu = c.menu === field ? '' : field; renderCourier('[data-courier-field="' + field + '"]'); return true; }
       c.menu = ''; renderCourier(); return true;
     }
     if (target.matches('[data-courier-waybill]')) {
-      if (!COURIER_WAYBILLS.some(function (item) { return item.id === target.dataset.courierWaybill; })) return true;
+      if (!c.waybills.some(function (item) { return item.id === target.dataset.courierWaybill; })) return true;
       exitCourierSelection(function () {
         if (c.draft.waybillId !== target.dataset.courierWaybill) { c.draft.waybillId = target.dataset.courierWaybill; c.draft.serviceId = ''; c.draft.addressId = ''; }
         c.view = 'config'; c.error = ''; renderCourier('[data-courier-field="waybill"]');
@@ -766,7 +809,7 @@
       exitCourierSelection(selectValue, '[data-courier-select="' + target.dataset.courierSelect + '"]');
       return true;
     }
-    if (target.matches('[data-courier-manage]')) { c.manageFrom = c.view; c.token++; c.connectingId = ''; c.view = 'manage'; c.error = ''; renderCourier(); return true; }
+    if (target.matches('[data-courier-manage]')) { ctx.toast(c.scope === 'receipt' ? '外跳到小票打印机页' : '外跳至快递单打印机页'); return true; }
     if (target.matches('[data-courier-add-printer]')) {
       var nextId = 'label-' + (c.printers.length + 1);
       c.printers.push({ id: nextId, name: '模拟标签打印机' + (c.printers.length ? ' ' + (c.printers.length + 1) : ''), format: '100×180mm' });
@@ -774,11 +817,21 @@
     }
     if (target.matches('[data-courier-printer]')) {
       var id = target.dataset.courierPrinter;
-      if (c.connectingId || !c.printers.some(function (item) { return item.id === id; })) return true;
+      if (c.connectingId || !activePrinterCatalog(c).some(function (item) { return item.id === id; })) return true;
+      if (c.scope === 'receipt') {
+        exitCourierSelection(function () {
+          if (state.paymentDraft !== c.receiptPaymentDraft) { closeCourier(); return; }
+          receiptState().printerId = id;
+          if (c.origin === 'toggle' && state.paymentDraft) state.paymentDraft.autoPrintReceipt = true;
+          closeCourier();
+        }, '[data-courier-printer="' + id + '"]');
+        return true;
+      }
       if (courierParams().get('courierConnect') !== 'failed') {
-        c.token++; c.connectingId = ''; c.error = '';
-        c.draft.printerId = id; c.view = 'config';
-        renderCourier('[data-courier-field="printer"]');
+        exitCourierSelection(function () {
+          c.connectingId = ''; c.error = ''; c.draft.printerId = id; c.view = 'config';
+          renderCourier('[data-courier-field="printer"]');
+        }, '[data-courier-printer="' + id + '"]');
         return true;
       }
       c.connectingId = id; c.error = ''; var token = ++c.token;
@@ -940,6 +993,13 @@
     refundImagePreviewIndex: null,
     noteImagePreviewScope: 'payment',
     confirmClearOrder: false,
+    pendingRowRemoval: null,
+    orderStockWarning: null,
+    productAvailabilityDialog: '',
+    pendingInvalidProducts: [],
+    invalidSkuTarget: null,
+    prototypeInvalidProductCodes: [],
+    prototypeDelistedSkus: [],
     productEditDraft: null,
     productEditReturnPanel: null,
     productCreateDraft: null,
@@ -1011,7 +1071,21 @@
   }
 
   function money(value) {
-    return '¥' + Number(value || 0).toFixed(2);
+    var amount = Number(value || 0);
+    var absolute = Math.abs(amount).toFixed(2);
+    return (amount < 0 && Number(absolute) !== 0 ? '-' : '') + '¥' + absolute;
+  }
+
+  function moneyMarkup(value, compact) {
+    var text = money(value);
+    if (compact) text = text.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+    return text.charAt(0) === '-' ? '<span class="order-money--negative">' + text + '</span>' : text;
+  }
+
+  function setMoneyText(node, value) {
+    var text = money(value);
+    node.textContent = text;
+    node.classList.toggle('order-money--negative', text.charAt(0) === '-');
   }
 
   function compactAmount(value) {
@@ -1019,8 +1093,10 @@
   }
 
   function addProductPrice(value) {
-    var parts = Number(value || 0).toFixed(2).split('.');
-    return '<span class="order-add-price__currency">¥</span><span class="order-add-price__major">' + parts[0] + '</span><span class="order-add-price__decimal">.' + parts[1] + '</span>';
+    var negative = money(value).charAt(0) === '-';
+    var parts = Math.abs(Number(value || 0)).toFixed(2).split('.');
+    var markup = '<span class="order-add-price__currency">' + (negative ? '-' : '') + '¥</span><span class="order-add-price__major">' + parts[0] + '</span><span class="order-add-price__decimal">.' + parts[1] + '</span>';
+    return negative ? '<span class="order-money--negative">' + markup + '</span>' : markup;
   }
 
   function splitSpec(spec) {
@@ -1657,7 +1733,7 @@
       var item = product.item;
       return '<article class="order-refund-sync-product"><span class="wg-image order-refund-sync-product__image" data-component="image"><img class="wg-image__src is-loaded" src="' + escapeHtml(item.image || PRODUCTS[0].image) + '" alt="' + escapeHtml(item.name || '商品图片') + '"></span>'
         + '<div class="order-refund-sync-product__info"><div class="order-refund-sync-product__head"><strong title="' + escapeHtml(item.name) + '">' + escapeHtml(item.name) + '</strong>'
-        + (syncType === 1 ? '' : '<span class="order-refund-sync-product__price">' + money(item.minPrice) + ' ~ ' + money(item.maxPrice) + '</span>') + '</div>'
+        + (syncType === 1 ? '' : '<span class="order-refund-sync-product__price">' + moneyMarkup(item.minPrice) + ' ~ ' + moneyMarkup(item.maxPrice) + '</span>') + '</div>'
         + (item.code ? '<small class="order-refund-sync-product__code">货号：' + escapeHtml(item.code) + '</small>' : '')
         + product.skus.map(function (sku) {
           return '<div class="order-refund-sync-product__sku"><span title="' + escapeHtml(sku.spec) + '">' + escapeHtml(sku.spec || '默认规格') + '</span>'
@@ -1857,6 +1933,7 @@
     if (!isPureReturnOrder()) return;
     state.freight = 0;
     state.delivery = 'none';
+    refreshDeliveryRestrictions();
   }
 
   function returnTag(qty) {
@@ -2029,6 +2106,28 @@
     state.pickupPointId = preference.pickupPointId || (PICKUP_POINTS[0] ? PICKUP_POINTS[0].id : null);
     state.pickupContact = preference.pickupContact ? Object.assign({}, preference.pickupContact) : null;
     state.deliveryDraft = null;
+    refreshDeliveryRestrictions();
+  }
+
+  // The order keeps the freight-template snapshot taken when each product was added.
+  // Refresh only when the order address/delivery or its product list changes; returning
+  // from an external template editor does not silently change an existing order.
+  function isUndeliverableAtAddress(item) {
+    if ((state.delivery !== 'express' && state.delivery !== 'freight') || !state.address) return false;
+    var regions = item.freightTemplate && item.freightTemplate.undeliverableRegions;
+    if (!Array.isArray(regions)) return false;
+    var address = state.address;
+    var fullRegion = [address.province, address.city, address.district].filter(Boolean).join('');
+    var destination = String(fullRegion || address.detail || '').replace(/\s/g, '');
+    return regions.some(function (region) {
+      var blocked = String(region || '').replace(/\s/g, '');
+      var detail = String(address.detail || '').replace(/\s/g, '');
+      return blocked && (destination.indexOf(blocked) === 0 || detail.indexOf(blocked) === 0);
+    });
+  }
+
+  function refreshDeliveryRestrictions() {
+    state.products.forEach(function (item) { item.isUndeliverable = isUndeliverableAtAddress(item); });
   }
 
   function guestDeliveryPreference() {
@@ -2698,7 +2797,7 @@
         +   '<div class="cell__body">'
         +     '<div class="cell__content" data-clickable data-open-panel="customer" role="button" tabindex="0" aria-label="更换客户">'
         +       '<div class="cell__title-row"><span class="cell__title">' + escapeHtml(state.customer.name) + '</span><em class="order-customer-vip order-customer-vip--' + state.customer.level.toLowerCase() + '"><b>' + escapeHtml(state.customer.level) + '</b><span>' + escapeHtml(state.customer.priceType) + '</span></em></div>'
-        +       '<div class="cell__subtitle">余额：' + money(state.customer.balance) + ' <button type="button" class="link link--12 link--inline" data-component-slug="link" data-recharge>充值</button></div>'
+        +       '<div class="cell__subtitle">余额：' + moneyMarkup(state.customer.balance) + ' <button type="button" class="link link--12 link--inline" data-component-slug="link" data-recharge>充值</button></div>'
         +     '</div>'
         +   '</div>'
         + '</div>'
@@ -2748,14 +2847,17 @@
   }
 
   function orderLine(item, index, desktop) {
+    if (!desktop && (hasInvalidOrderSku(item) || usesWholesaleQuantityRules(item))) return invalidMobileOrderLine(item, index);
     return ''
       + '<article class="' + (desktop ? 'order-desktop-line' : 'order-mobile-line') + '" data-line-index="' + index + '">'
       +   image(item, desktop ? 'order-desktop-line__image' : 'order-mobile-line__image')
       +   '<div class="order-line-main">'
       +     '<div class="order-line-title"><strong>' + escapeHtml(item.name) + '</strong><span>' + escapeHtml(item.code) + '</span></div>'
+      + wholesaleRuleTags(item)
+      +     (item.isUndeliverable ? '<span class="order-delivery-restriction-inline">此商品不支持配送</span>' : '')
       +     '<small>' + escapeHtml(lineMeta(item)) + '</small>'
       +     (featureEnabled('productNoteColumn') && item.note ? '<em>备注：' + escapeHtml(item.note) + '</em>' : '')
-      +     '<div class="order-line-price">' + (item.skuPrices ? '<span>按SKU计价</span>' : '<button type="button" class="link link--14" data-component-slug="link" data-edit-price="' + index + '">' + money(item.price) + '</button>') + '<span>× ' + item.qty + '</span><b>' + money(itemAmount(item)) + '</b></div>'
+      +     '<div class="order-line-price">' + (item.skuPrices ? '<span>按SKU计价</span>' : '<button type="button" class="link link--14" data-component-slug="link" data-edit-price="' + index + '">' + moneyMarkup(item.price) + '</button>') + '<span>× ' + item.qty + '</span><b>' + moneyMarkup(itemAmount(item)) + '</b></div>'
       +   '</div>'
       +   '<div class="order-line-actions">'
       +     '<div class="counter" data-component-slug="counter"><div class="counter__body">'
@@ -2768,10 +2870,22 @@
       + '</article>';
   }
 
+  function invalidMobileOrderLine(item, index) {
+    return '<article class="order-mobile-line' + (isOrderProductInvalid(item) ? ' is-invalid' : '') + '" data-line-index="' + index + '">'
+      + image(item, 'order-mobile-line__image')
+      + '<div class="order-line-main"><div class="order-line-title"><strong>' + escapeHtml(item.name) + '</strong><span>' + escapeHtml(item.code) + '</span></div>'
+      + wholesaleRuleTags(item)
+      + (item.isUndeliverable ? '<span class="order-delivery-restriction-inline">此商品不支持配送</span>' : '')
+      + '<div class="order-mobile-invalid-skus">' + itemSpecRows(item).map(function (row) {
+        return '<div class="order-mobile-invalid-sku' + (isOrderSkuInvalid(item, row.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, index, row.spec) + '><span>' + escapeHtml(row.spec) + '</span><span class="order-mobile-invalid-sku__price">' + moneyMarkup(itemSkuPrice(item, row.spec)) + '</span>' + desktopQuantityCounter(index, row.qty, row.spec, row.stock == null ? '' : '库存' + row.stock) + '</div>';
+      }).join('') + '</div></div>'
+      + '<div class="order-line-actions"><button type="button" class="link link--12 text-danger" data-delete-row="' + index + '">删除</button></div></article>';
+  }
+
   function itemSpecRows(item) {
     if (isSkuMode(item.mode)) {
       var rows = itemOrderSpecs(item).map(function (spec, index) {
-        return { spec: spec, qty: item.skuQty[spec], stock: 16 + index * 7 };
+        return { spec: spec, qty: item.skuQty[spec], stock: usesWholesaleQuantityRules(item) ? orderSkuStock(item, spec) : 16 + index * 7 };
       });
       if (rows.length) return rows;
     }
@@ -2781,20 +2895,140 @@
   function desktopQuantityCounter(itemIndex, qty, spec, hint) {
     var specAttr = spec ? ' data-qty-spec="' + encodeURIComponent(spec) + '"' : '';
     var minQuantity = QUANTITY_MIN;
+    var unavailable = isOrderSkuInvalid(state.products[itemIndex], spec);
+    var disabledAttr = unavailable ? ' disabled aria-disabled="true"' : '';
     return ''
-      + '<div class="counter is-hint" data-component-slug="counter" data-counter data-counter-min="' + minQuantity + '">'
+      + '<div class="counter is-hint' + (unavailable ? ' is-disabled' : '') + '" data-component="counter" data-component-slug="counter" data-counter data-counter-min="' + minQuantity + '"' + (unavailable ? ' data-state="disabled"' : '') + '>'
       +   '<div class="counter__body">'
-      +     '<button type="button" class="counter__btn counter__btn--minus" data-row-qty-delta="-1" data-item-index="' + itemIndex + '"' + specAttr + ' aria-label="减少"><i class="counter__icon icon-jian16"></i></button>'
-      +     '<input class="counter__value" type="text" inputmode="numeric" maxlength="8" value="' + qty + '" data-row-qty data-item-index="' + itemIndex + '"' + specAttr + ' aria-label="商品数量">'
-      +     '<button type="button" class="counter__btn counter__btn--plus" data-row-qty-delta="1" data-item-index="' + itemIndex + '"' + specAttr + ' aria-label="增加"><i class="counter__icon icon-jia16"></i></button>'
+      +     '<button type="button" class="counter__btn counter__btn--minus" data-row-qty-delta="-1" data-item-index="' + itemIndex + '"' + specAttr + disabledAttr + ' aria-label="减少"><i class="counter__icon icon-jian16"></i></button>'
+      +     '<input class="counter__value" type="text" inputmode="numeric" maxlength="8" value="' + qty + '" data-row-qty data-item-index="' + itemIndex + '"' + specAttr + disabledAttr + ' aria-label="商品数量">'
+      +     '<button type="button" class="counter__btn counter__btn--plus" data-row-qty-delta="1" data-item-index="' + itemIndex + '"' + specAttr + disabledAttr + ' aria-label="增加"><i class="counter__icon icon-jia16"></i></button>'
       +   '</div>'
-      +   '<div class="counter__message counter__hint">' + escapeHtml(hint) + '</div>'
+      +   '<div class="counter__message counter__hint' + (unavailable ? ' order-invalid-sku-message' : '') + '">' + (unavailable ? '已失效' : escapeHtml(hint)) + '</div>'
       +   '<div class="counter__message counter__error"></div>'
       + '</div>';
   }
 
+  function isOrderProductInvalid(item) {
+    return Boolean(item && item.availability === 'invalid');
+  }
+
+  function isOrderSkuInvalid(item, spec) {
+    return isOrderProductInvalid(item) || Boolean(item && Array.isArray(item.invalidSpecs) && item.invalidSpecs.indexOf(spec) >= 0);
+  }
+
+  function hasInvalidOrderSku(item) {
+    return Boolean(item && itemSpecRows(item).some(function (row) { return isOrderSkuInvalid(item, row.spec); }));
+  }
+
+  function hasPrototypeUnavailableProduct(item) {
+    return state.prototypeInvalidProductCodes.indexOf(item.code) >= 0 || state.prototypeDelistedSkus.some(function (sku) {
+      return sku.code === item.code && itemSpecRows(item).some(function (row) { return row.spec === sku.spec; });
+    });
+  }
+
+  function invalidSkuActionAttrs(item, itemIndex, spec) {
+    return isOrderSkuInvalid(item, spec) ? ' data-open-invalid-sku="' + itemIndex + '" data-invalid-spec="' + encodeURIComponent(spec) + '" data-clickable role="button" tabindex="0" aria-label="' + escapeHtml(spec) + ' 已失效，查看移除操作"' : '';
+  }
+
+  function rejectUnavailableProducts() {
+    // Prototype response fixture. Production provides unavailable product/SKU identities at submission.
+    var failed = state.products.filter(function (item) {
+      return hasInvalidOrderSku(item) || hasPrototypeUnavailableProduct(item);
+    });
+    if (!failed.length) return false;
+    state.pendingInvalidProducts = failed.map(function (item) {
+      return { item: item, wholeProduct: isOrderProductInvalid(item) || hasPrototypeUnavailableProduct(item) };
+    });
+    state.productAvailabilityDialog = 'notice';
+    state.invalidSkuTarget = null;
+    state.panel = null;
+    state.paymentStatus = 'idle';
+    renderActive();
+    return true;
+  }
+
+  function viewUnavailableProducts(ctx) {
+    state.pendingInvalidProducts.forEach(function (failure) {
+      // Already-marked partial failures retain their SKU scope; this submit fixture marks whole products.
+      if (failure.wholeProduct && state.products.indexOf(failure.item) >= 0) failure.item.availability = 'invalid';
+    });
+    state.pendingInvalidProducts = [];
+    state.productAvailabilityDialog = '';
+    markDirty(ctx);
+    focusAvailabilityRow();
+  }
+
+  function focusAvailabilityRow(item, spec) {
+    var root = activeContext && activeContext.root;
+    if (!root) return;
+    var index = item ? state.products.indexOf(item) : -1;
+    var selector = index >= 0 ? '[data-open-invalid-sku="' + index + '"][data-invalid-spec="' + encodeURIComponent(spec) + '"]' : '[data-open-invalid-sku], [data-delete-row], [data-open-checkout]';
+    var next = Array.from(root.querySelectorAll(selector)).find(function (node) { return node.getClientRects().length > 0; });
+    if (next) next.focus({ preventScroll: true });
+  }
+
+  function openInvalidSku(itemIndex, spec) {
+    var item = state.products[itemIndex];
+    if (!isOrderSkuInvalid(item, spec) || !itemSpecRows(item).some(function (row) { return row.spec === spec; })) return;
+    state.invalidSkuTarget = { item: item, spec: spec };
+    state.productAvailabilityDialog = 'sku';
+    state.rowContextMenu = null;
+    renderActive();
+  }
+
+  function finishInvalidSkuRemoval(confirmed, ctx) {
+    var pending = state.invalidSkuTarget;
+    var index = pending ? state.products.indexOf(pending.item) : -1;
+    state.invalidSkuTarget = null;
+    state.productAvailabilityDialog = '';
+    if (confirmed && index >= 0 && itemSpecRows(pending.item).some(function (row) { return row.spec === pending.spec; })) {
+      removeOrderRow(index, pending.spec);
+      markDirty(ctx);
+    } else renderActive();
+    focusAvailabilityRow(!confirmed && pending ? pending.item : null, pending && pending.spec);
+  }
+
+  function productAvailabilityDialog() {
+    var kind = state.productAvailabilityDialog;
+    if (!kind) return '';
+    var notice = kind === 'notice';
+    var title = notice ? '有商品或商品规格已删除/下架' : '规格已失效';
+    var actions = notice
+      ? '<button type="button" class="dialog__btn dialog__btn--confirm" data-view-invalid-products>去查看</button>'
+      : '<button type="button" class="dialog__btn dialog__btn--dismiss" data-invalid-sku-cancel>取消</button><span class="dialog__divider" aria-hidden="true"></span><button type="button" class="dialog__btn dialog__btn--danger" data-invalid-sku-remove>移除</button>';
+    return '<div class="dialog dialog--title order-product-availability-dialog" role="dialog" aria-modal="true" aria-labelledby="order-product-availability-title" data-state="open" data-component="dialog" data-variant-name="' + (notice ? 'Dialog_Title_1' : 'Dialog_Title_2') + '"><div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="order-product-availability-title">' + title + '</h3></div></div><div class="dialog__actions"><div class="dialog__buttons' + (notice ? '' : ' dialog__buttons--dual') + '">' + actions + '</div></div></div></div>';
+  }
+
+  function wholesaleMixedBatchType(config) {
+    var type = config && config.mixedBatchType;
+    return Number(type == null || type === '' ? (config && config.mixedMark ? 2 : 1) : type);
+  }
+
+  function wholesaleRuleLabels(item) {
+    if (!item || item.priceMode !== 'wholesale' || !item.wholeSaleInfo) return [];
+    var config = item.wholeSaleInfo;
+    var mixNames = { 2: '各颜色规格混拿', 3: '各颜色规格拿全', 4: '同颜色各规格拿全', 5: '同颜色规格混拿' };
+    var unitNames = { hand: '手', dozen: '打', box: '箱' };
+    var labels = [];
+    var mixName = mixNames[wholesaleMixedBatchType(config)];
+    if (mixName) labels.push(mixName);
+    var pieces = Number(config.saleUnitPieceQty);
+    if (unitNames[config.saleUnitType] && Number.isFinite(pieces) && pieces > 1) labels.push('1' + unitNames[config.saleUnitType] + pieces + '件');
+    var minimum = Number(config.miniSaleQty);
+    if (Number.isFinite(minimum) && minimum > 1) labels.push(minimum + '件起购');
+    return labels;
+  }
+
+  function wholesaleRuleTags(item) {
+    var labels = wholesaleRuleLabels(item);
+    if (!labels.length) return '';
+    var text = labels.join(', ');
+    return '<span class="order-wholesale-tags" data-wholesale-rules><span class="tag tag--20 order-wholesale-tag" data-component="tag" data-variant-name="Tag_20" title="' + escapeHtml(text) + '"><span class="tag__label">' + escapeHtml(text) + '</span></span></span>';
+  }
+
   function desktopProductName(item) {
-    return '<button type="button" class="order-desktop-product-name" data-product-activity><strong>' + escapeHtml(item.code) + '</strong><span>' + escapeHtml(item.name) + '</span></button>';
+    return '<button type="button" class="order-desktop-product-name" data-product-activity' + (isOrderProductInvalid(item) ? ' disabled' : '') + '><strong>' + escapeHtml(item.code) + '</strong><span>' + escapeHtml(item.name) + '</span>' + wholesaleRuleTags(item) + (item.isUndeliverable ? '<small class="order-delivery-restriction-inline">此商品不支持配送</small>' : '') + '</button>';
   }
 
   function desktopProductNote(item, itemIndex) {
@@ -2814,32 +3048,34 @@
     var original = itemSkuOriginalPrice(item, spec);
     var showOriginal = item.createdType !== 'temporary' && Math.abs(current - original) >= 0.005;
     return '<span class="order-desktop-sku-price">'
-      + '<button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-order-sku-price="' + itemIndex + '" data-order-sku-spec="' + encodeURIComponent(spec) + '" aria-label="修改' + escapeHtml(spec || item.name) + '单价 ' + money(current) + '">' + money(current) + '</button>'
-      + (showOriginal ? '<del class="order-desktop-sku-price__original">' + money(original) + '</del>' : '')
+      + '<button type="button" class="link link--14 order-desktop-product-price" data-component-slug="link" data-edit-order-sku-price="' + itemIndex + '" data-order-sku-spec="' + encodeURIComponent(spec) + '"' + (isOrderSkuInvalid(item, spec) ? ' disabled' : '') + ' aria-label="修改' + escapeHtml(spec || item.name) + '单价 ' + money(current) + '">' + moneyMarkup(current) + '</button>'
+      + (showOriginal ? '<del class="order-desktop-sku-price__original">' + moneyMarkup(original) + '</del>' : '')
       + '</span>';
   }
 
   function desktopProductRow(item, itemIndex, row, grouped) {
     var specs = itemSpecRows(item);
+    var unavailable = grouped ? isOrderProductInvalid(item) : isOrderSkuInvalid(item, row.spec);
+    var availabilityClass = unavailable ? ' is-invalid' : '';
     if (grouped) {
       var groupedSkuCountClass = specs.length > 1 ? ' order-desktop-product-row--multi-sku' : ' order-desktop-product-row--single-sku';
       var groupedSpecs = specs.map(function (entry) {
-        return '<span class="order-desktop-grouped-sku-line" title="' + escapeHtml(entry.spec) + '">' + orderSpecLabel(entry.spec, entry.qty) + '</span>';
+        return '<span class="order-desktop-grouped-sku-line' + (isOrderSkuInvalid(item, entry.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, itemIndex, entry.spec) + ' title="' + escapeHtml(entry.spec) + '">' + orderSpecLabel(entry.spec, entry.qty) + '</span>';
       }).join('');
       var groupedPrices = specs.map(function (entry) {
-        return '<span class="order-desktop-grouped-sku-line">' + desktopSkuUnitPrice(item, itemIndex, entry.spec) + '</span>';
+        return '<span class="order-desktop-grouped-sku-line' + (isOrderSkuInvalid(item, entry.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, itemIndex, entry.spec) + '>' + desktopSkuUnitPrice(item, itemIndex, entry.spec) + '</span>';
       }).join('');
       var groupedQuantities = specs.map(function (entry) {
-        return '<span class="order-desktop-grouped-sku-line">' + desktopQuantityCounter(itemIndex, entry.qty, entry.spec, '库存' + entry.stock) + '</span>';
+        return '<span class="order-desktop-grouped-sku-line' + (isOrderSkuInvalid(item, entry.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, itemIndex, entry.spec) + '>' + desktopQuantityCounter(itemIndex, entry.qty, entry.spec, entry.stock == null ? '' : '库存' + entry.stock) + '</span>';
       }).join('');
       return ''
-        + '<article class="order-desktop-product-row order-desktop-product-row--grouped' + groupedSkuCountClass + (isRowSelected(itemIndex, '') ? ' is-selected' : '') + '" data-item-index="' + itemIndex + '" data-row-select="' + itemIndex + '">'
+        + '<article class="order-desktop-product-row order-desktop-product-row--grouped' + groupedSkuCountClass + availabilityClass + (isRowSelected(itemIndex, '') ? ' is-selected' : '') + '" data-item-index="' + itemIndex + '" data-row-select="' + itemIndex + '">'
         +   desktopProductName(item)
         +   clickableImage(item, 'order-desktop-product-image', 'data-preview-image="' + itemIndex + '"')
         +   '<div class="order-desktop-grouped-sku-stack order-desktop-grouped-sku-stack--spec">' + groupedSpecs + '</div>'
         +   '<div class="order-desktop-grouped-sku-stack order-desktop-grouped-sku-stack--price">' + groupedPrices + '</div>'
         +   '<div class="order-desktop-grouped-sku-stack order-desktop-grouped-sku-stack--qty">' + groupedQuantities + '</div>'
-        +   '<strong class="order-desktop-product-total order-desktop-product-total--grouped"><small class="order-desktop-product-quantity-summary" data-product-quantity-summary>' + groupedQuantitySummary(item) + '</small><span class="order-desktop-product-total__value' + (itemAmount(item) < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(itemAmount(item)) + '</span></strong>'
+        +   '<strong class="order-desktop-product-total order-desktop-product-total--grouped"><small class="order-desktop-product-quantity-summary" data-product-quantity-summary>' + groupedQuantitySummary(item) + '</small><span class="order-desktop-product-total__value' + (itemAmount(item) < 0 ? ' is-negative' : '') + '" data-product-total-value>' + moneyMarkup(itemAmount(item)) + '</span></strong>'
         +   desktopProductNote(item, itemIndex)
         +   '<button type="button" class="order-desktop-row-delete" data-delete-row="' + itemIndex + '" aria-label="删除' + escapeHtml(item.name) + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
         + '</article>';
@@ -2849,15 +3085,15 @@
       : row.spec;
     var qty = grouped ? item.qty : row.qty;
     var specKey = grouped ? '' : row.spec;
-    var hint = grouped ? (specs.length + '个SKU · 共' + item.qty + '件') : ('库存' + row.stock);
+    var hint = grouped ? (specs.length + '个SKU · 共' + item.qty + '件') : (row.stock == null ? '' : '库存' + row.stock);
     return ''
-      + '<article class="order-desktop-product-row' + (isRowSelected(itemIndex, row.spec) ? ' is-selected' : '') + '" data-item-index="' + itemIndex + '" data-row-select="' + itemIndex + '" data-row-spec="' + encodeURIComponent(row.spec) + '">'
+      + '<article class="order-desktop-product-row' + availabilityClass + (isRowSelected(itemIndex, row.spec) ? ' is-selected' : '') + '" data-item-index="' + itemIndex + '" data-row-select="' + itemIndex + '" data-row-spec="' + encodeURIComponent(row.spec) + '"' + invalidSkuActionAttrs(item, itemIndex, row.spec) + '>'
       +   desktopProductName(item)
       +   clickableImage(item, 'order-desktop-product-image', 'data-preview-image="' + itemIndex + '"')
       +   '<span class="order-desktop-product-spec" title="' + escapeHtml(specText) + '">' + orderSpecLabel(specText, qty) + '</span>'
       +   desktopSkuUnitPrice(item, itemIndex, specKey)
       +   '<div class="order-desktop-product-qty">' + desktopQuantityCounter(itemIndex, qty, specKey, hint) + '</div>'
-      +   '<strong class="order-desktop-product-total"><span class="order-desktop-product-total__value' + (itemSkuPrice(item, specKey) * qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + money(itemSkuPrice(item, specKey) * qty) + '</span></strong>'
+      +   '<strong class="order-desktop-product-total"><span class="order-desktop-product-total__value' + (itemSkuPrice(item, specKey) * qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + moneyMarkup(itemSkuPrice(item, specKey) * qty) + '</span></strong>'
       +   desktopProductNote(item, itemIndex)
       +   '<button type="button" class="order-desktop-row-delete" data-delete-row="' + itemIndex + '" data-delete-row-spec="' + encodeURIComponent(specKey) + '" aria-label="删除' + escapeHtml(item.name) + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
       + '</article>';
@@ -2868,6 +3104,11 @@
       if (state.displayMode === 'grouped') return desktopProductRow(item, itemIndex, itemSpecRows(item)[0], true);
       return itemSpecRows(item).map(function (row) { return desktopProductRow(item, itemIndex, row, false); }).join('');
     }).join('');
+  }
+
+  function deliveryRestrictionBanner() {
+    if (!state.products.some(function (item) { return item.isUndeliverable; })) return '';
+    return '<div class="order-delivery-restriction-banner" role="status" data-delivery-restriction-banner><i class="wego-iconfont-s icon-tanhao" aria-hidden="true"></i><span>有商品在你设置的「不可配送地区」</span></div>';
   }
 
   function isRowSelected(itemIndex, spec) {
@@ -2889,6 +3130,7 @@
     if (isSkuMode(item.mode) && spec) {
       item.skuQty[spec] = 0;
       if (Array.isArray(item.orderSpecs)) item.orderSpecs = item.orderSpecs.filter(function (key) { return key !== spec; });
+      if (Array.isArray(item.invalidSpecs)) item.invalidSpecs = item.invalidSpecs.filter(function (key) { return key !== spec; });
       item.qty = Object.keys(item.skuQty).reduce(function (sum, key) { return sum + Number(item.skuQty[key] || 0); }, 0);
       var remainingSpecs = Array.isArray(item.orderSpecs)
         ? item.orderSpecs.length
@@ -2901,7 +3143,49 @@
     state.selectedRow = null;
   }
 
+  function requestOrderRowRemoval(itemIndex, spec, root) {
+    var item = state.products[itemIndex];
+    if (!item) return;
+    state.pendingRowRemoval = { item: item, spec: spec };
+    renderActive();
+    var cancel = root.querySelector('[data-row-remove-cancel]');
+    if (cancel) cancel.focus({ preventScroll: true });
+  }
+
+  function finishOrderRowRemoval(confirmed, root, ctx) {
+    var pending = state.pendingRowRemoval;
+    if (!pending) return;
+    var index = state.products.indexOf(pending.item);
+    state.pendingRowRemoval = null;
+    if (confirmed && index !== -1) {
+      removeOrderRow(index, pending.spec || '');
+      markDirty(ctx);
+    } else renderActive();
+    var opener = !confirmed && index !== -1
+      ? root.querySelector('[data-delete-row="' + index + '"]' + (pending.spec !== null ? '[data-delete-row-spec="' + encodeURIComponent(pending.spec) + '"]' : ':not([data-delete-row-spec])'))
+      : null;
+    var next = opener || root.querySelector('[data-delete-row], [data-open-checkout]');
+    if (next) next.focus({ preventScroll: true });
+  }
+
+  function handleOrderRowRemovalKeydown(event, root, ctx) {
+    if (!state.pendingRowRemoval) return false;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      finishOrderRowRemoval(false, root, ctx);
+    } else if (event.key === 'Tab') {
+      var controls = root.querySelectorAll('.order-row-remove-dialog button');
+      var first = controls[0], last = controls[controls.length - 1];
+      if (first && ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last))) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus({ preventScroll: true });
+      }
+    }
+    return true;
+  }
+
   function openOrderRowContextMenu(itemIndex, spec, x, y) {
+    if (spec ? isOrderSkuInvalid(state.products[itemIndex], spec) : hasInvalidOrderSku(state.products[itemIndex])) return false;
     if (!state.products[itemIndex]) return false;
     state.selectedRow = { itemIndex: itemIndex, spec: spec || '' };
     state.rowContextMenu = { itemIndex: itemIndex, spec: spec || '', x: x, y: y };
@@ -2934,20 +3218,19 @@
 
   function mobileFooter() {
     var t = totals();
-    var blocked = !state.products.length;
     return ''
       + '<footer class="order-v2__footer">'
-      +   '<div class="order-footer-total"><span>应收</span><strong>' + money(t.payable) + '</strong><small>' + t.styles + '款 ' + t.pieces + '件</small></div>'
+      +   '<div class="order-footer-total"><span>应收</span><strong>' + moneyMarkup(t.payable) + '</strong><small>' + t.styles + '款 ' + t.pieces + '件</small></div>'
       +   '<div class="order-footer-actions">'
       +     button('存草稿', 'weak', 'md', 'data-save-draft')
-      +     '<button type="button" class="btn btn--strong btn--md ' + (blocked ? 'btn--disabled' : '') + '" data-component-slug="button" data-checkout ' + (blocked ? 'disabled' : '') + '>去结算</button>'
+      +     '<button type="button" class="btn btn--strong btn--md" data-component-slug="button" data-checkout>去结算</button>'
       +   '</div>'
       + '</footer>';
   }
 
   function mobileView() {
     return ''
-      + '<section class="order-v2-mobile" aria-label="移动端开单">'
+      + '<section class="order-v2-mobile' + (state.products.some(function (item) { return item.isUndeliverable; }) ? ' has-delivery-restriction' : '') + '" aria-label="移动端开单">'
       +   navbar()
       +   '<main class="order-v2-mobile__scroll">'
       +     contextSection()
@@ -2956,6 +3239,7 @@
       +     orderNoteEntry()
       +     refundSyncEntry()
       +   '</main>'
+      +   deliveryRestrictionBanner()
       +   mobileFooter()
       + '</section>';
   }
@@ -2999,7 +3283,7 @@
       +     '</div>'
       +     '<div class="order-note-modal__actions">'
       +       button('取消', 'weak', 'md', 'data-note-cancel')
-      +       button('确定', 'strong', 'md', 'data-note-confirm')
+      +       button('确认', 'strong', 'md', 'data-note-confirm')
       +     '</div>'
       +   '</div>'
       + '</div>';
@@ -3050,13 +3334,14 @@
     });
     if (!rows.length) return '<div class="order-catalog-empty">没有匹配商品</div>';
     return rows.map(function (item) {
-      var catalogPrice = (Math.round(customerPrice(item) * 100) / 100).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+      var catalogNegative = money(customerPrice(item)).charAt(0) === '-';
+      var catalogPrice = (Math.abs(Math.round(customerPrice(item) * 100)) / 100).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
       var catalogInventory = item.inventory != null
         ? Number(item.inventory)
         : (item.stock != null
           ? Number(item.stock)
           : item.specs.reduce(function (total, spec) { return total + specStock(item, spec); }, 0));
-      var priceMarkup = '<b><span class="order-catalog-item__currency">¥</span><span class="order-catalog-item__amount">' + escapeHtml(catalogPrice) + '</span></b>';
+      var priceMarkup = '<b' + (catalogNegative ? ' class="order-money--negative"' : '') + '><span class="order-catalog-item__currency">' + (catalogNegative ? '-' : '') + '¥</span><span class="order-catalog-item__amount">' + escapeHtml(catalogPrice) + '</span></b>';
       var content = ''
         +   '<span class="order-catalog-item__media">' + image(item, 'order-catalog-item__image') + '<span class="order-catalog-item__code"><span class="order-catalog-item__code-copy"><span class="order-catalog-item__sku">' + escapeHtml(item.code) + '</span><span class="order-catalog-item__name">' + escapeHtml(item.name) + '</span></span></span><i class="wego-iconfont-s icon-jia16 order-catalog-item__add" aria-hidden="true"></i></span>'
         +   '<span class="order-catalog-item__list-detail"><strong class="order-catalog-item__list-code">' + escapeHtml(item.code) + '</strong><span class="order-catalog-item__list-name">' + escapeHtml(item.name) + '</span></span>'
@@ -3967,7 +4252,6 @@
 
   function desktopOrder() {
     var t = totals();
-    var checkoutBlocked = !state.products.length;
     return ''
       + '<main class="order-desktop__order' + (state.desktopOrderFullscreen ? ' order-desktop__order--fullscreen' : '') + '">'
       +   '<div class="order-desktop__context' + (isPureReturnOrder() ? ' order-desktop__context--pure-return' : '') + (state.panel === 'customer' ? ' order-desktop__context--customer-open' : '') + '">'
@@ -3984,11 +4268,12 @@
       +         '<div class="order-desktop__lines">' + (state.products.length ? desktopProductRows() : '<div class="order-empty"><strong>当前订单暂无商品</strong><span>从右侧商品库添加商品</span></div>') + '</div>'
       +       '</div>' + orderNoteEntry() + '</div>'
       +     '</div>'
+      +     deliveryRestrictionBanner()
       +   '</section>'
       +   '<footer class="order-desktop__summary">'
       +     quickOps()
       +     desktopSummaryDetails()
-      +     '<div class="order-desktop__summary-actions">' + '<button type="button" class="btn btn--strong btn--md ' + (checkoutBlocked ? 'btn--disabled' : '') + '" data-component-slug="button" data-open-checkout ' + (checkoutBlocked ? 'disabled' : '') + '>去结算</button>' + button('存草稿', 'weak', 'md', 'data-save-draft') + '</div>'
+      +     '<div class="order-desktop__summary-actions">' + '<button type="button" class="btn btn--strong btn--md" data-component-slug="button" data-open-checkout>去结算</button>' + button('存草稿', 'weak', 'md', 'data-save-draft') + '</div>'
       +   '</footer>'
       + '</main>';
   }
@@ -4029,7 +4314,8 @@
   }
 
   function discountDisplayAmount(amount) {
-    return amount > 0 ? '-' + money(amount) : amount < 0 ? '+' + money(-amount) : money(0);
+    var text = money(-amount);
+    return amount < 0 && text !== '¥0.00' ? '+' + text : text;
   }
 
   function desktopSummaryDetails() {
@@ -4038,15 +4324,15 @@
     var showFreight = !isPureReturnOrder() && (state.delivery === 'express' || state.delivery === 'freight');
     return ''
       + '<div class="order-desktop__summary-details" aria-label="本单金额明细">'
-      +   summaryDetailRow('商品总价', '<em class="order-summary-row__meta" data-summary-meta>' + quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces }) + '</em><strong data-summary-product-amount>' + money(t.productAmount) + '</strong>')
-      +   '<div class="order-summary-row order-summary-row--deduction">'
+      +   summaryDetailRow('商品总价', '<em class="order-summary-row__meta" data-summary-meta>' + quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces }) + '</em><strong data-summary-product-amount>' + moneyMarkup(t.productAmount) + '</strong>')
+      +   (isPureReturnOrder() ? '' : '<div class="order-summary-row order-summary-row--deduction">'
       +     '<span class="order-summary-row__label">优惠</span>'
       +     '<span class="order-summary-row__value order-summary-discount">'
-      +       '<strong data-summary-discount-total>' + discountDisplayAmount(t.totalDiscount) + '</strong>'
+      +       '<strong data-summary-discount-total>' + (t.totalDiscount < 0 ? '+' : '') + moneyMarkup(-t.totalDiscount) + '</strong>'
       +       '<span class="order-summary-discount__detail" data-summary-discount-detail' + (discountText ? '' : ' hidden') + '>' + escapeHtml(discountText) + '</span>'
       +     '</span>'
-      +   '</div>'
-      +   (showFreight ? summaryDetailRow('运费', '<strong data-summary-freight>' + money(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>') : '')
+      +   '</div>')
+      +   (showFreight ? summaryDetailRow('运费', '<strong data-summary-freight>' + moneyMarkup(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>') : '')
       +   summaryDetailRow('订单总价', (orderHasReturnSku() ? '<strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong>' : '<button type="button" class="order-summary-total-edit" data-edit-total aria-label="修改订单总价"><strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>'), 'order-summary-row--total')
       +   refundSyncEntry()
       + '</div>';
@@ -4065,15 +4351,15 @@
       payable: root.querySelector('[data-summary-payable]')
     };
     if (nodes.meta) nodes.meta.innerHTML = quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces });
-    if (nodes.product) nodes.product.textContent = money(t.productAmount);
+    if (nodes.product) setMoneyText(nodes.product, t.productAmount);
     if (nodes.discountTotal) nodes.discountTotal.textContent = discountDisplayAmount(t.totalDiscount);
     if (nodes.discountDetail) {
       nodes.discountDetail.textContent = discountDetailText(t);
       nodes.discountDetail.hidden = !nodes.discountDetail.textContent;
     }
-    if (nodes.freight) nodes.freight.textContent = money(t.freight);
+    if (nodes.freight) setMoneyText(nodes.freight, t.freight);
     if (nodes.payable) {
-      nodes.payable.textContent = money(t.payable);
+      setMoneyText(nodes.payable, t.payable);
       nodes.payable.classList.toggle('is-negative', t.payable < 0);
     }
   }
@@ -4105,7 +4391,7 @@
       + '<div class="order-desktop-customer-summary">'
       +   '<div class="order-desktop-customer-summary__main">'
       +     '<span class="order-desktop-customer-avatar"><span class="avatar avatar--40 avatar--image" data-component="avatar" data-variant-name="Avatar_40_Default"><img src="' + state.customer.avatar + '" alt="' + escapeHtml(state.customer.name) + '"></span><span class="order-desktop-customer-number">' + escapeHtml(state.customer.number) + '</span></span>'
-      +     '<span class="order-desktop-customer-summary__content"><span class="order-desktop-customer-summary__top"><button type="button" class="order-desktop-customer-profile-trigger" data-open-fan-profile aria-haspopup="dialog"><strong>' + escapeHtml(state.customer.name) + '</strong></button><button type="button" class="order-desktop-customer-selector-trigger" data-open-panel="customer" aria-label="切换客户" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'customer' && !state.customerPopoverClosing) + '" aria-controls="order-desktop-customer-popover"><em class="order-customer-vip order-customer-vip--' + state.customer.level.toLowerCase() + '"><b>' + escapeHtml(state.customer.level) + '</b><span>' + escapeHtml(state.customer.priceType) + '</span></em><span class="order-desktop-customer-tags">' + escapeHtml(customerTags) + '</span></button></span><span class="order-desktop-customer-summary__bottom"><span class="order-desktop-customer-balance">余额：' + money(state.customer.balance) + '</span><button type="button" class="link" data-component-slug="link" data-recharge>充值</button><span class="order-desktop-customer-divider" aria-hidden="true"></span><span class="order-desktop-customer-points">积分：' + Number(state.customer.points || 0) + '</span></span></span>'
+      +     '<span class="order-desktop-customer-summary__content"><span class="order-desktop-customer-summary__top"><button type="button" class="order-desktop-customer-profile-trigger" data-open-fan-profile aria-haspopup="dialog"><strong>' + escapeHtml(state.customer.name) + '</strong></button><button type="button" class="order-desktop-customer-selector-trigger" data-open-panel="customer" aria-label="切换客户" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'customer' && !state.customerPopoverClosing) + '" aria-controls="order-desktop-customer-popover"><em class="order-customer-vip order-customer-vip--' + state.customer.level.toLowerCase() + '"><b>' + escapeHtml(state.customer.level) + '</b><span>' + escapeHtml(state.customer.priceType) + '</span></em><span class="order-desktop-customer-tags">' + escapeHtml(customerTags) + '</span></button></span><span class="order-desktop-customer-summary__bottom"><span class="order-desktop-customer-balance">余额：' + moneyMarkup(state.customer.balance) + '</span><button type="button" class="link" data-component-slug="link" data-recharge>充值</button><span class="order-desktop-customer-divider" aria-hidden="true"></span><span class="order-desktop-customer-points">积分：' + Number(state.customer.points || 0) + '</span></span></span>'
       +   '</div>'
       +   '<button type="button" class="btn btn--weak btn--sm btn--icon-only order-desktop-customer-clear" data-component-slug="button" data-clear-customer aria-label="移除已选客户"><i class="btn__icon icon-yuancha-mian" aria-hidden="true"></i></button>'
       + '</div>';
@@ -4232,12 +4518,12 @@
     return ''
       +   '<div class="order-points-options" role="radiogroup" aria-label="积分使用方式">'
       +     pointsOption('none', '暂不使用积分', false)
-      +     pointsOption('max', '最高可使用' + maxPoints + '积分，抵扣<span class="order-points-amount">' + money(pointsDeduction(maxPoints)) + '</span>', currentMode === 'max')
+      +     pointsOption('max', '最高可使用' + maxPoints + '积分，抵扣<span class="order-points-amount">' + moneyMarkup(pointsDeduction(maxPoints)) + '</span>', currentMode === 'max')
       +     pointsOption('custom', '自行输入想用的积分', currentMode === 'custom')
       +   '</div>'
       +   '<div class="order-points-custom' + (currentMode === 'custom' ? ' is-active' : '') + '"' + (currentMode === 'custom' ? '' : ' hidden') + '>'
       +     '<span>使用</span><div class="number-input" data-component-slug="input"><input class="number-input__field" type="text" inputmode="numeric" value="' + (draftPoints || '') + '" placeholder="请输入" data-points-custom-input data-quick-op-value aria-label="使用积分"><span class="number-input__suffix">积分</span></div>'
-      +     '<span>抵扣<strong class="order-points-amount" data-points-deduction>' + money(pointsDeduction(draftPoints)) + '</strong></span>'
+      +     '<span>抵扣<strong class="order-points-amount" data-points-deduction>' + moneyMarkup(pointsDeduction(draftPoints)) + '</strong></span>'
       + '</div>';
   }
 
@@ -4259,11 +4545,11 @@
   }
 
   function quickOpButton(label, op) {
-    var status = quickOpStatus(op);
+    var status = op === 'coupon' ? null : quickOpStatus(op);
     var statusHtml = status
       ? '<span class="order-quick-op__status">' + escapeHtml(status) + '</span>'
       : '<span class="order-quick-op__status order-quick-op__status--add" aria-label="添加' + label + '"><i class="wego-iconfont-s icon-jia16" aria-hidden="true"></i></span>';
-    var trigger = '<button type="button" class="order-quick-op' + (status ? ' is-used' : '') + '" data-open-panel="quick" data-quick-op="' + op + '" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'quick' && state.quickOp === op) + '"><span class="order-quick-op__label">' + label + '</span>' + statusHtml + '</button>';
+    var trigger = '<button type="button" class="order-quick-op' + (status ? ' is-used' : '') + '" data-open-panel="quick" data-quick-op="' + op + '"' + (op === 'coupon' ? '' : ' aria-haspopup="dialog" aria-expanded="' + (state.panel === 'quick' && state.quickOp === op) + '"') + '><span class="order-quick-op__label">' + label + '</span>' + statusHtml + '</button>';
     if (op === 'freight') return '<div class="order-quick-op-anchor order-quick-op-anchor--freight">' + trigger + (state.panel === 'quick' && state.quickOp === 'freight' ? freightPopover() : '') + '</div>';
     if (op === 'points') {
       if (isDesktopWorkbench()) return trigger;
@@ -4279,10 +4565,9 @@
 
   function quickOps() {
     return '<div class="order-desktop__quick-ops" aria-label="快捷优惠操作">'
-      + quickOpButton('会员折扣', 'member')
+      + quickOpButton('优惠券', 'coupon')
       + quickOpButton('整单折扣', 'orderRate')
       + (featureEnabled('pointsDiscount') ? quickOpButton('积分抵扣', 'points') : '')
-      + (featureEnabled('couponDiscount') ? quickOpButton('优惠券', 'coupon') : '')
       + (featureEnabled('promotionDiscount') ? quickOpButton('满减促销', 'promotion') : '')
       + quickOpButton('整单优惠', 'orderAmount')
       + quickOpButton('整单抹零', 'rounding')
@@ -4381,7 +4666,7 @@
         + paymentKindOption('debt', '记欠款', draft.kind === 'debt', orderHasReturnSku() ? !returnDebtAllowed() : !state.customer)
         + '</div></div>'
         + (isCollecting ? paymentReferenceMethods(draft, targetCents) : '')
-        + (draft.kind === 'debt' && t.payable !== 0 ? '<div class="order-reference-payment__debt"><span>欠款 ' + money(t.payable) + '，将记入客户账单</span></div>' : '');
+        + (draft.kind === 'debt' && t.payable !== 0 ? '<div class="order-reference-payment__debt"><span>欠款 ' + moneyMarkup(t.payable) + '，将记入客户账单</span></div>' : '');
     }
     var overlay = '';
     if (draft.showShortageDialog) overlay = paymentShortageDialog(draft, t.payable);
@@ -4402,7 +4687,7 @@
       +   '</section>'
       +   '<footer class="order-reference-payment__footer">'
       +     '<div class="order-payment-options">'
-      +       paymentCheckoutOption(draft.autoPrintReceipt, 'auto-print-receipt', '打印小票', 'MJJS-2BIUI')
+      +       receiptCheckoutOption(draft)
       +       courierCheckoutOption(draft)
       +     '</div>'
       +     '<button type="button" class="btn btn--strong btn--lg order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '>' + paymentConfirmContent(draft, t.payable, confirmState) + '</button>'
@@ -4439,7 +4724,7 @@
       +   '</section>'
       +   '<footer class="order-reference-payment__footer">'
       +     '<div class="order-payment-options">'
-      +       paymentCheckoutOption(draft.autoPrintReceipt, 'auto-print-receipt', '打印小票', 'MJJS-2BIUI')
+      +       receiptCheckoutOption(draft)
       +       courierCheckoutOption(draft)
       +     '</div>'
       +     '<button type="button" class="btn btn--strong btn--lg order-reference-payment__confirm ' + (!confirmState.enabled ? 'btn--disabled' : '') + '" data-component="button" data-component-slug="button" data-confirm-payment ' + (!confirmState.enabled ? 'disabled' : '') + '>' + paymentConfirmContent(draft, t.payable, confirmState) + '</button></footer>'
@@ -4583,9 +4868,9 @@
 
   function paymentAmountMetric(value, size, theme, negative) {
     var numericValue = Number(value || 0);
-    var isNegative = Boolean(negative || numericValue < 0);
     var parts = Math.abs(numericValue).toFixed(2).split('.');
-    return '<span class="metric metric--' + size + ' metric--' + (theme || 'black') + ' order-reference-payment__metric" data-component-slug="metric">'
+    var isNegative = Boolean((negative || numericValue < 0) && Number(parts.join('.')) !== 0);
+    return '<span class="metric metric--' + size + ' metric--' + (isNegative ? 'danger' : (theme || 'black')) + ' order-reference-payment__metric' + (isNegative ? ' order-money--negative' : '') + '" data-component-slug="metric">'
       + '<span class="metric__main"><span class="metric__symbol">' + (isNegative ? '-' : '') + '¥</span><span class="metric__value"><span class="metric__integer">' + parts[0] + '</span><span class="metric__decimal">.' + parts[1] + '</span></span></span>'
       + '</span>';
   }
@@ -4610,7 +4895,7 @@
     var available = Math.max(0, Number(state.customer && state.customer.balance || 0));
     var deduction = paymentBalanceCents(draft, payable) / 100;
     return '<div class="order-reference-payment__balance">'
-      + '<div><strong>余额抵扣</strong><small>（当前可用余额：' + money(available) + '）</small><button type="button" class="link link--12" data-component-slug="link" data-reference-recharge>充值</button></div>'
+      + '<div><strong>余额抵扣</strong><small>（当前可用余额：' + moneyMarkup(available) + '）</small><button type="button" class="link link--12" data-component-slug="link" data-reference-recharge>充值</button></div>'
       + '<button type="button" class="checkbox-field order-reference-payment__balance-toggle' + (draft.useBalance ? ' is-active' : '') + '" role="checkbox" aria-checked="' + draft.useBalance + '" aria-label="余额抵扣" data-toggle-payment-balance>' + (draft.useBalance ? paymentAmountMetric(deduction, 16, 'black', true) : '') + paymentSmallCheckbox(draft.useBalance) + '</button>'
       + '</div>';
   }
@@ -4673,7 +4958,7 @@
     var difference = paymentDifferenceCents(draft, payable);
     if (!difference) return '';
     return '<span class="order-reference-payment__difference--' + (difference > 0 ? 'over' : 'short') + '">'
-      + (difference > 0 ? '超收 ' : '欠款 ') + money(Math.abs(difference) / 100) + '，将计入客户余额</span>';
+      + (difference > 0 ? '超收 ' : '欠款 ') + moneyMarkup(Math.abs(difference) / 100) + '，将计入客户余额</span>';
   }
 
   function paymentReferenceMethods(draft, targetCents) {
@@ -4736,6 +5021,14 @@
     return '<label class="checkbox-field order-reference-payment__post-option" role="checkbox" tabindex="0" aria-checked="' + (checked ? 'true' : 'false') + '" data-clickable data-' + attr + '>'
       + paymentSmallCheckbox(checked)
       + '<strong class="checkbox-field__text order-reference-payment__post-title">' + label + '</strong><small class="order-reference-payment__post-detail">' + detail + '</small><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></label>';
+  }
+
+  function receiptCheckoutOption(draft) {
+    var selected = receiptPrinter();
+    return '<div class="order-reference-payment__post-option order-reference-payment__post-option--receipt">'
+      + '<button type="button" class="checkbox-field order-reference-payment__post-toggle" role="checkbox" aria-checked="' + Boolean(draft.autoPrintReceipt) + '" data-auto-print-receipt>'
+      + paymentSmallCheckbox(draft.autoPrintReceipt) + '<strong class="checkbox-field__text order-reference-payment__post-title">打印小票</strong></button>'
+      + '<button type="button" class="order-reference-payment__receipt-printer" data-open-receipt-printer aria-label="设置小票打印机"><span>' + escapeHtml(selected ? selected.name : '去设置') + '</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button></div>';
   }
 
   function courierCheckoutOption(draft) {
@@ -4872,7 +5165,7 @@
     var qrProcessing = state.paymentStatus === 'processing';
     return '<div class="order-reference-payment__overlay"><section class="order-reference-payment__qr-dialog" role="dialog" aria-modal="true" aria-label="出示收款码">'
       + '<button type="button" class="order-reference-payment__overlay-close" data-close-payment-overlay aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>'
-      + '<header class="order-reference-payment__qr-head"><span>扫码支付你的订单</span><strong>' + money(amount) + '</strong></header>'
+      + '<header class="order-reference-payment__qr-head"><span>扫码支付你的订单</span><strong>' + moneyMarkup(amount) + '</strong></header>'
       + '<div class="order-reference-payment__qr-main"><button type="button" class="order-reference-payment__qr-card" data-simulate-qr-success aria-label="点击二维码模拟扫码支付成功"' + (qrProcessing ? ' disabled aria-busy="true"' : '') + '><span class="order-reference-payment__qr-code" aria-label="示意收款二维码">'
       + '<i class="order-reference-payment__qr-finder order-reference-payment__qr-finder--tl"></i><i class="order-reference-payment__qr-finder order-reference-payment__qr-finder--tr"></i><i class="order-reference-payment__qr-finder order-reference-payment__qr-finder--bl"></i>'
       + '<img src="' + escapeHtml(qrAvatar) + '" alt="店铺头像"></span></button><em>十三行大眼睛女装…</em></div>'
@@ -4951,7 +5244,7 @@
   function paymentBalanceControl(draft, payable) {
     var available = Math.max(0, Number(state.customer && state.customer.balance || 0));
     var deduction = paymentBalanceCents(draft, payable) / 100;
-    return '<section class="order-payment-balance" data-component-slug="cell"><div><strong>余额抵扣</strong><small>可用 ' + money(available) + (draft.useBalance ? ' · 本次抵扣 ' + money(deduction) : '') + '</small></div><button type="button" class="switch ' + (draft.useBalance ? 'switch--on' : 'switch--off') + '" role="switch" aria-checked="' + draft.useBalance + '" aria-label="使用余额抵扣" data-component-slug="switch" data-toggle-payment-balance><span class="switch__thumb"></span></button></section>';
+    return '<section class="order-payment-balance" data-component-slug="cell"><div><strong>余额抵扣</strong><small>可用 ' + moneyMarkup(available) + (draft.useBalance ? ' · 本次抵扣 ' + moneyMarkup(deduction) : '') + '</small></div><button type="button" class="switch ' + (draft.useBalance ? 'switch--on' : 'switch--off') + '" role="switch" aria-checked="' + draft.useBalance + '" aria-label="使用余额抵扣" data-component-slug="switch" data-toggle-payment-balance><span class="switch__thumb"></span></button></section>';
   }
 
   function paymentAllocationSummary(draft, payable) {
@@ -4962,7 +5255,7 @@
     var deltaCents = targetCents - allocatedCents;
     var difference = '';
     if (deltaCents > 0) {
-      difference = '<div class="order-payment-difference order-payment-difference--short"><strong>' + (allocatedCents > 0 ? '还差 ' : '待分配 ') + money(deltaCents / 100) + '</strong>'
+      difference = '<div class="order-payment-difference order-payment-difference--short"><strong>' + (allocatedCents > 0 ? '还差 ' : '待分配 ') + moneyMarkup(deltaCents / 100) + '</strong>'
         + (allocatedCents > 0
           ? (state.customer
             ? '<button type="button" class="order-payment-handling' + (draft.shortageHandling === 'debt' ? ' is-active' : '') + '" role="radio" aria-checked="' + (draft.shortageHandling === 'debt') + '" data-shortage-handling="debt"><span class="radio ' + (draft.shortageHandling === 'debt' ? 'radio--checked' : '') + '" data-component-slug="radio"><span class="radio__inner"></span><span class="radio__dot"></span></span>记为客户欠款</button>'
@@ -4970,7 +5263,7 @@
           : '<small>请选择支付方式并填写金额</small>')
         + '</div>';
     } else if (deltaCents < 0) {
-      difference = '<div class="order-payment-difference order-payment-difference--over"><strong>超收 ' + money(Math.abs(deltaCents) / 100) + '</strong><div>'
+      difference = '<div class="order-payment-difference order-payment-difference--over"><strong>超收 ' + moneyMarkup(Math.abs(deltaCents) / 100) + '</strong><div>'
         + paymentHandlingOption('change', '找零', draft.overpaymentHandling === 'change')
         + (state.customer ? paymentHandlingOption('balance', '存入客户预存余额', draft.overpaymentHandling === 'balance') : '')
         + '</div></div>';
@@ -4978,10 +5271,10 @@
       difference = '<div class="order-payment-difference order-payment-difference--exact"><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i><strong>' + (targetCents === 0 ? '余额已足额抵扣' : '金额已足额') + '</strong></div>';
     }
     return '<section class="order-payment-allocation" aria-label="收款金额汇总">'
-      + '<div><span>本单应收</span><strong>' + money(payableCents / 100) + '</strong></div>'
-      + '<div><span>余额抵扣</span><strong>-' + money(balanceCents / 100) + '</strong></div>'
-      + '<div><span>待分配金额</span><strong>' + money(targetCents / 100) + '</strong></div>'
-      + '<div><span>已分配</span><strong>' + money(allocatedCents / 100) + '</strong></div>'
+      + '<div><span>本单应收</span><strong>' + moneyMarkup(payableCents / 100) + '</strong></div>'
+      + '<div><span>余额抵扣</span><strong>' + moneyMarkup(-balanceCents / 100) + '</strong></div>'
+      + '<div><span>待分配金额</span><strong>' + moneyMarkup(targetCents / 100) + '</strong></div>'
+      + '<div><span>已分配</span><strong>' + moneyMarkup(allocatedCents / 100) + '</strong></div>'
       + difference
       + '</section>';
   }
@@ -5038,7 +5331,7 @@
           ? button('取消', 'weak', 'md', 'data-cancel-online-payment') + button('查询收款结果', 'strong', 'md', 'data-query-online-payment')
           : button('取消收款', 'weak', 'md', 'data-cancel-online-payment') + button('模拟收款成功', 'strong', 'md', 'data-online-pay-success')));
     return '<div class="order-payment-flow">'
-      + '<div class="order-payment-flow__summary"><span>' + escapeHtml(method ? method.label : '在线收款') + ' · ' + (completed + 1) + '/' + total + '</span><strong>' + money(amount) + '</strong></div>'
+      + '<div class="order-payment-flow__summary"><span>' + escapeHtml(method ? method.label : '在线收款') + ' · ' + (completed + 1) + '/' + total + '</span><strong>' + moneyMarkup(amount) + '</strong></div>'
       + '<div class="order-payment-flow__body">' + stateContent + '</div>'
       + ((status === 'awaiting-qr' || status === 'scanning') ? '<div class="order-payment-flow__test"><button type="button" class="link link--12" data-online-pay-fail>模拟失败</button><button type="button" class="link link--12" data-online-pay-timeout>模拟超时</button><button type="button" class="link link--12" data-online-pay-unknown>模拟结果未知</button></div>' : '')
       + '<div class="order-side-actions order-side-actions--pay order-payment-flow__actions">' + actions + '</div>'
@@ -5671,6 +5964,7 @@
       return false;
     }
     state.address = { name: parsed.name, phone: parsed.phone, detail: parsed.detail };
+    refreshDeliveryRestrictions();
     if (orderRequiresRealName() && parsed.idCard) state.realNameInfo = { name: parsed.name, idCard: parsed.idCard, mode: 'direct' };
     rememberCurrentDeliveryPreference();
     markDirty(ctx);
@@ -5850,7 +6144,7 @@
       return '<div class="order-add-spec-counter-row' + (rowState && rowState.showSkuImage ? ' has-sku-image' : ' has-no-sku-image') + (rowState && rowState.showStock ? ' has-sku-stock' : ' has-no-sku-stock') + (rowUnavailable ? ' is-disabled' : '') + '">'
         + (rowState && rowState.showSkuImage ? '<span class="wg-image wg-image--md wg-image--rounded-md order-add-spec-counter-row__image" data-component="image" data-component-slug="image" data-variant-name="Image_40_Rounded"><img class="wg-image__src is-loaded" src="' + escapeHtml(rowState.skuImageUrl) + '" alt=""></span>' : '')
         + '<div class="order-add-spec-counter-row__info"><span class="order-add-spec-counter-row__label">' + escapeHtml(size) + '</span>'
-        + (rowState && (rowState.showSkuPrice || draft.useSkuPrices) ? '<div class="order-add-sku-price"><span>¥' + compactAmount(addDraftSkuPrice(draft, rowSpec)) + '</span>' + (rowPriceOriginal != null && rowPriceOriginal !== addDraftSkuPrice(draft, rowSpec) ? '<del class="order-add-sku-original-price">¥' + compactAmount(rowPriceOriginal) + '</del>' : '') + '<button type="button" class="order-add-sku-price__edit" data-edit-sku-price="' + encodeURIComponent(rowSpec) + '" aria-label="编辑' + escapeHtml(rowSpec) + '价格"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button></div>' : '')
+        + (rowState && (rowState.showSkuPrice || draft.useSkuPrices) ? '<div class="order-add-sku-price"><span>' + moneyMarkup(addDraftSkuPrice(draft, rowSpec), true) + '</span>' + (rowPriceOriginal != null && rowPriceOriginal !== addDraftSkuPrice(draft, rowSpec) ? '<del class="order-add-sku-original-price">' + moneyMarkup(rowPriceOriginal, true) + '</del>' : '') + '<button type="button" class="order-add-sku-price__edit" data-edit-sku-price="' + encodeURIComponent(rowSpec) + '" aria-label="编辑' + escapeHtml(rowSpec) + '价格"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button></div>' : '')
         + '</div>'
         + '<div class="order-add-sku-operation">'
         + '<div class="counter' + (counterDisabled ? ' is-disabled' : '') + '" data-component="counter" data-component-slug="counter" data-variant-name="Counter_32">'
@@ -5932,20 +6226,20 @@
     var productSummary = '<div class="order-add-product order-add-product--pricing">' + image(product, 'order-add-product__image')
       + '<div class="order-add-product__content"><div><strong>' + escapeHtml(product.name) + '</strong><small>' + escapeHtml(product.code) + '</small></div>'
       + '<div class="order-add-product__actions">'
-      +   '<strong class="order-add-current-price">' + (desktop ? addProductPrice(unitPrice) : money(unitPrice)) + '</strong>'
-      +   (desktop && draft.lastDiscountTipVisible ? '<div class="order-add-last-price">上次优惠价 ' + money(lastDiscountPrice) + '<button type="button" data-use-last-discount>使用</button></div>' : '')
+      +   '<strong class="order-add-current-price">' + (desktop ? addProductPrice(unitPrice) : moneyMarkup(unitPrice)) + '</strong>'
+      +   (desktop && draft.lastDiscountTipVisible ? '<div class="order-add-last-price">上次优惠价 ' + moneyMarkup(lastDiscountPrice) + '<button type="button" data-use-last-discount>使用</button></div>' : '')
       +   (desktop ? '<div class="order-add-product__operation-buttons">' : '')
       +     '<button type="button" data-toggle-add-discount><i class="wego-iconfont-s icon-youhui order-add-discount-icon" aria-hidden="true"></i>优惠</button>'
       +     '<button type="button" data-edit-add-product><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i>编辑商品</button>'
       +     '<button type="button" data-add-purchase-history><i class="wego-iconfont-s icon-shijian" aria-hidden="true"></i>采购记录</button>'
       +   (desktop ? '</div>' : '')
       + '</div>'
-      + (!desktop && draft.lastDiscountTipVisible ? '<div class="order-add-last-price">上次优惠价 ' + money(lastDiscountPrice) + '<button type="button" data-use-last-discount>使用</button></div>' : '')
+      + (!desktop && draft.lastDiscountTipVisible ? '<div class="order-add-last-price">上次优惠价 ' + moneyMarkup(lastDiscountPrice) + '<button type="button" data-use-last-discount>使用</button></div>' : '')
       + '</div></div>';
     var priceModes = '<fieldset class="order-add-price-modes" aria-label="开单价格">'
-      + '<span class="order-add-price-option tag tag--28 ' + (draft.priceMode === 'cost' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag"><button type="button" class="order-add-cost-visibility" data-toggle-cost-price aria-label="' + (draft.costPriceVisible ? '隐藏拿货价' : '显示拿货价') + '"><i class="wego-iconfont-s ' + (draft.costPriceVisible ? 'icon-xianshi' : 'icon-yincang') + '" aria-hidden="true"></i></button><button type="button" class="order-add-price-select" data-add-price-mode="cost" aria-pressed="' + String(draft.priceMode === 'cost') + '"><span class="tag__label">拿货价 ' + (draft.costPriceVisible ? money(productCostPrice(product)) : '***') + '</span></button></span>'
-      + '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'retail' || draft.priceMode === 'discount' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="retail" aria-pressed="' + String(draft.priceMode === 'retail' || draft.priceMode === 'discount') + '"><span class="tag__label">' + (draft.priceMode === 'discount' ? '优惠价 ' + money(unitPrice) : '售价 ' + money(customerPrice(product))) + '</span></button>'
-      + (state.customer && Number(state.memberDiscount) < 100 ? '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'member' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="member" aria-pressed="' + String(draft.priceMode === 'member') + '"><span class="tag__label">会员价 ' + money(memberPrice(product.listPrice)) + '</span></button>' : '')
+      + '<span class="order-add-price-option tag tag--28 ' + (draft.priceMode === 'cost' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag"><button type="button" class="order-add-cost-visibility" data-toggle-cost-price aria-label="' + (draft.costPriceVisible ? '隐藏拿货价' : '显示拿货价') + '"><i class="wego-iconfont-s ' + (draft.costPriceVisible ? 'icon-xianshi' : 'icon-yincang') + '" aria-hidden="true"></i></button><button type="button" class="order-add-price-select" data-add-price-mode="cost" aria-pressed="' + String(draft.priceMode === 'cost') + '"><span class="tag__label">拿货价 ' + (draft.costPriceVisible ? moneyMarkup(productCostPrice(product)) : '***') + '</span></button></span>'
+      + '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'retail' || draft.priceMode === 'discount' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="retail" aria-pressed="' + String(draft.priceMode === 'retail' || draft.priceMode === 'discount') + '"><span class="tag__label">' + (draft.priceMode === 'discount' ? '优惠价 ' + moneyMarkup(unitPrice) : '售价 ' + moneyMarkup(customerPrice(product))) + '</span></button>'
+      + (state.customer && Number(state.memberDiscount) < 100 ? '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'member' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="member" aria-pressed="' + String(draft.priceMode === 'member') + '"><span class="tag__label">会员价 ' + moneyMarkup(memberPrice(product.listPrice)) + '</span></button>' : '')
       + '</fieldset>';
     var selectorContent = (desktop ? '' : '<div class="order-segment order-add-mode-switch"><button class="' + (draft.mode === 'single' ? 'is-active' : '') + '" data-add-mode="single">单买</button><button class="' + (draft.mode === 'batch' ? 'is-active' : '') + '" data-add-mode="batch">多买</button></div>')
       + (draft.mode === 'batch' ? addBatchPicker(draft, desktop) : addSinglePicker(draft, desktop))
@@ -5960,7 +6254,7 @@
     return ''
       + (desktop ? '<div class="order-add-product-fixed">' + productSummary + priceModes + '</div><div class="order-add-scroll">' + selectorContent + '</div>'
         : '<div class="order-add-scroll"><div class="order-side-panel__head"><strong>添加商品</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>' + productSummary + priceModes + selectorContent + '</div>')
-      + '<div class="order-add-footer"><span>' + (desktop ? '<strong data-add-total-amount>' + addProductPrice(addDraftAmount(draft)) + '</strong><small>共 <b data-add-total-qty>' + total + '</b> 件</small>' : '合计：<b data-add-total-qty>' + total + '</b> 件 <strong data-add-total-amount>' + money(addDraftAmount(draft)) + '</strong>') + '</span><div class="order-add-footer__actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button('添加', 'strong', 'md', 'data-confirm-add') + '</div></div>';
+      + '<div class="order-add-footer"><span>' + (desktop ? '<strong data-add-total-amount>' + addProductPrice(addDraftAmount(draft)) + '</strong><small>共 <b data-add-total-qty>' + total + '</b> 件</small>' : '合计：<b data-add-total-qty>' + total + '</b> 件 <strong data-add-total-amount>' + moneyMarkup(addDraftAmount(draft)) + '</strong>') + '</span><div class="order-add-footer__actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button('添加', 'strong', 'md', 'data-confirm-add') + '</div></div>';
   }
 
   function skuPricePreview(edit) {
@@ -5980,7 +6274,8 @@
   }
 
   function skuPriceChangeText(value) {
-    return (value < 0 ? '-' : value > 0 ? '+' : '') + money(Math.abs(value));
+    var text = money(value);
+    return value > 0 && text !== '¥0.00' ? '+' + text : text;
   }
 
   function syncSkuPricePreview(root) {
@@ -5994,7 +6289,7 @@
       change.textContent = skuPriceChangeText(preview.change);
       change.classList.toggle('is-negative', preview.change < 0);
     }
-    if (after) after.textContent = money(preview.after);
+    if (after) setMoneyText(after, preview.after);
     if (error) error.textContent = edit.input && !preview.valid ? (edit.mode === 'discount' ? '请输入 0–100 的百分比' : '请输入有效金额，最多两位小数') : '';
   }
 
@@ -6014,7 +6309,7 @@
             }).join('') + '</div></div>'
       +     '<label class="order-sku-price-field"><span>' + (edit.mode === 'discount' ? '折扣比例' : edit.mode === 'amount' ? '优惠金额' : '一口价') + '</span><span class="input number-input order-sku-price-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input data-scenario-component="InputPrice"><input class="number-input__field" type="text" inputmode="decimal" autocomplete="off" value="' + escapeHtml(edit.input) + '" placeholder="请输入" data-sku-price-input aria-label="' + (edit.mode === 'discount' ? '折扣百分比' : '改价金额') + '"><span class="number-input__suffix">' + unit + '</span></span></label>'
       +     '<small class="order-sku-price-error" data-sku-price-error>' + (edit.input && !preview.valid ? '请输入有效金额' : '') + '</small>'
-      +     '<div class="order-sku-price-preview" data-scenario-component="PriceNew"><div><span>原价</span><strong>' + money(edit.original) + '</strong></div><div><span>改价金额</span><strong data-sku-price-change class="' + (preview.change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(preview.change) + '</strong></div><div class="order-sku-price-preview__after"><span>改后价格</span><strong data-sku-price-after>' + money(preview.after) + '</strong></div></div>'
+      +     '<div class="order-sku-price-preview" data-scenario-component="PriceNew"><div><span>原价</span><strong>' + moneyMarkup(edit.original) + '</strong></div><div><span>改价金额</span><strong data-sku-price-change class="' + (preview.change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(preview.change) + '</strong></div><div class="order-sku-price-preview__after"><span>改后价格</span><strong data-sku-price-after>' + moneyMarkup(preview.after) + '</strong></div></div>'
       +   '</div>'
       +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-sku-price') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-sku-price>确认改价</button></footer>'
       + '</div></div>';
@@ -6121,7 +6416,7 @@
       +     (modes ? '<div class="order-sku-price-method-row"><span class="order-sku-price-method-label" id="order-promotion-method-label">' + methodLabel + '</span><div class="order-sku-price-modes" role="radiogroup" aria-labelledby="order-promotion-method-label">' + options + '</div></div>' : '')
       +     (hasInput ? '<label class="order-sku-price-field">' + (isTotal ? '' : '<span data-order-promotion-field-label>' + inputLabel + '</span>') + '<span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" type="text" inputmode="decimal" autocomplete="off" value="' + escapeHtml(draft.input) + '" placeholder="' + (isTotal ? '请输入改价后的金额' : '请输入') + '" data-order-promotion-input aria-label="' + inputLabel + '"><span class="number-input__suffix" data-order-promotion-unit>' + unit + '</span></span></label>' : '')
       +     (hasInput ? '<small class="order-sku-price-error" data-order-promotion-error>' + (draft.input && !preview.valid ? preview.error : '') + '</small>' : '')
-      +     (isMember || isTotal ? '' : '<div class="order-sku-price-preview"><div><span>订单金额</span><strong data-order-promotion-before>' + money(original / 100) + '</strong></div><div><span>改价金额</span><strong data-order-promotion-change class="' + (change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(change / 100) + '</strong></div><div class="order-sku-price-preview__after"><span>应收金额</span><strong data-order-promotion-after>' + money(after / 100) + '</strong></div></div>')
+      +     (isMember || isTotal ? '' : '<div class="order-sku-price-preview"><div><span>订单金额</span><strong data-order-promotion-before>' + moneyMarkup(original / 100) + '</strong></div><div><span>改价金额</span><strong data-order-promotion-change class="' + (change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(change / 100) + '</strong></div><div class="order-sku-price-preview__after"><span>应收金额</span><strong data-order-promotion-after>' + moneyMarkup(after / 100) + '</strong></div></div>')
       +   '</div>'
       +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-order-promotion') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-order-promotion>确认</button></footer>'
       + '</div></div>';
@@ -6137,7 +6432,7 @@
     var original = orderPromotionBaseCents();
     var afterCents = preview.valid ? preview.calculation.actualCents : original;
     if (error) error.textContent = draft.input && !preview.valid ? preview.error : '';
-    if (after) after.textContent = money(afterCents / 100);
+    if (after) setMoneyText(after, afterCents / 100);
     if (change) {
       change.textContent = skuPriceChangeText((afterCents - original) / 100);
       change.classList.toggle('is-negative', afterCents < original);
@@ -6431,7 +6726,7 @@
       +       '<section class="order-fan-profile-group" aria-label="业务信息">'
       +         '<div class="order-fan-profile-info-row"><span>会员等级</span><strong>' + escapeHtml(customer.level || '非会员') + '</strong></div>'
       +         '<div class="order-fan-profile-info-row"><span>下单记录</span><strong class="order-fan-profile-status">老客</strong></div>'
-      +         '<button type="button" class="order-fan-profile-info-row" data-fan-profile-action="查看余额"><span>当前余额</span><strong>' + money(customer.balance) + '</strong><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
+      +         '<button type="button" class="order-fan-profile-info-row" data-fan-profile-action="查看余额"><span>当前余额</span><strong>' + moneyMarkup(customer.balance) + '</strong><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
       +       '</section>'
       +       '<section class="order-fan-profile-balance-actions" aria-label="余额操作"><button type="button" data-fan-profile-action="对账"><i class="wego-iconfont-s icon-dingdan" aria-hidden="true"></i><span>对账</span></button><button type="button" data-fan-profile-action="减余额"><i class="wego-iconfont-s icon-jian16" aria-hidden="true"></i><span>减余额</span></button><button type="button" data-fan-profile-action="加余额"><i class="wego-iconfont-s icon-jia16" aria-hidden="true"></i><span>加余额</span></button></section>'
       +       '<section class="order-fan-profile-group" aria-label="粉丝设置">'
@@ -6533,17 +6828,32 @@
       + '<div class="dialog dialog--text" role="dialog" aria-modal="true" aria-labelledby="order-clear-confirm-title" aria-describedby="order-clear-confirm-content" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_2" data-variant-cn="按钮数量=2">'
       +   '<div class="dialog__card">'
       +     '<div class="dialog__body">'
-      +       '<div class="dialog__header"><h3 class="dialog__title" id="order-clear-confirm-title">确定清空已添加商品？</h3></div>'
+      +       '<div class="dialog__header"><h3 class="dialog__title" id="order-clear-confirm-title">确认清空已添加商品？</h3></div>'
       +       '<div class="dialog__content" id="order-clear-confirm-content">清空后，已添加商品将无法恢复。</div>'
       +     '</div>'
       +     '<div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual">'
       +       '<button type="button" class="dialog__btn dialog__btn--dismiss" data-clear-cancel>取消</button>'
       +       '<span class="dialog__divider" aria-hidden="true"></span>'
-      +       '<button type="button" class="dialog__btn dialog__btn--danger" data-clear-confirm>确定清空</button>'
+      +       '<button type="button" class="dialog__btn dialog__btn--danger" data-clear-confirm>确认清空</button>'
       +     '</div></div>'
       +   '</div>'
       + '</div>';
   }
+
+  function orderRowRemovalConfirm() {
+    if (!state.pendingRowRemoval) return '';
+    var title = state.pendingRowRemoval.spec !== null ? '确认移除该规格吗？' : '确认移除该商品吗？';
+    return ''
+      + '<div class="dialog dialog--title order-row-remove-dialog" role="dialog" aria-modal="true" aria-labelledby="order-row-remove-title" data-state="open" data-component="dialog" data-variant-name="Dialog_Title_2" data-variant-cn="按钮数量=2">'
+      +   '<div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="order-row-remove-title">' + title + '</h3></div></div>'
+      +     '<div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual">'
+      +       '<button type="button" class="dialog__btn dialog__btn--dismiss" data-row-remove-cancel>取消</button><span class="dialog__divider" aria-hidden="true"></span>'
+      +       '<button type="button" class="dialog__btn dialog__btn--danger" data-row-remove-confirm>确认移除</button>'
+      +     '</div></div>'
+      +   '</div>'
+      + '</div>';
+  }
+
 
   function returnDraftConfirm() {
     if (!state.returnDraftConfirmOpen) return '';
@@ -6652,7 +6962,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + orderRowRemovalConfirm() + productAvailabilityDialog() + orderStockWarningDialog() + '</div>';
   }
 
   function openRechargeMenu(trigger, root, ctx) {
@@ -6673,6 +6983,16 @@
     destroySegmentControls();
     root.innerHTML = rootTemplate();
     bindSegmentControls(root, ctx);
+    if (state.orderStockWarning) {
+      root.querySelectorAll('.order-v2-page > :not(.order-stock-warning-dialog)').forEach(function (node) { node.setAttribute('inert', ''); });
+      var stockAction = root.querySelector('[data-order-stock-cancel]');
+      if (stockAction) stockAction.focus({ preventScroll: true });
+    }
+    if (state.productAvailabilityDialog) {
+      root.querySelectorAll('.order-v2-page > :not(.order-product-availability-dialog)').forEach(function (node) { node.setAttribute('inert', ''); });
+      var availabilityAction = root.querySelector('.order-product-availability-dialog button');
+      if (availabilityAction) availabilityAction.focus({ preventScroll: true });
+    }
     if (focusScope && focusValue) {
       var nextFocus = root.querySelector('[data-order-segment="' + focusScope + '"] [data-value="' + focusValue + '"]');
       if (nextFocus) nextFocus.focus({ preventScroll: true });
@@ -7169,6 +7489,8 @@
         existing.orderSpecs = itemOrderSpecs(existing);
       }
       Object.keys(skuQty).forEach(function (spec) {
+        if (!existing.skuStocks) existing.skuStocks = {};
+        if (!Object.prototype.hasOwnProperty.call(existing.skuStocks, spec)) existing.skuStocks[spec] = skuRowDetail(product, spec).stock;
         if (!existing.skuPriceDetails) existing.skuPriceDetails = {};
         if (!existing.skuPriceDetails[spec]) existing.skuPriceDetails[spec] = skuPriceDetails[spec];
         if (Number(skuQty[spec] || 0) !== 0 && existing.orderSpecs.indexOf(spec) < 0) existing.orderSpecs.push(spec);
@@ -7180,6 +7502,7 @@
       if (note && !existing.note) existing.note = note;
       existing.used_multi_picture_search = Boolean(existing.used_multi_picture_search || searchMeta.used_multi_picture_search);
       existing.used_picture_precise_search = Boolean(existing.used_picture_precise_search || searchMeta.used_picture_precise_search);
+      existing.isUndeliverable = isUndeliverableAtAddress(existing);
       return existing;
     }
     var created = {
@@ -7190,8 +7513,13 @@
       price: unitPrice,
       skuPrices: skuPrices,
       skuPriceDetails: skuPriceDetails,
+      skuStocks: Object.keys(skuQty).reduce(function (stocks, spec) { stocks[spec] = product.skuStocks && Object.prototype.hasOwnProperty.call(product.skuStocks, spec) ? product.skuStocks[spec] : skuRowDetail(product, spec).stock; return stocks; }, {}),
+      overSaleFlag: Boolean(product.overSaleFlag),
+      allowSellerOverSale: Boolean(product.allowSellerOverSale),
+      addAnyway: Boolean(product.addAnyway),
       priceMode: priceMode,
       image: product.image,
+      wholeSaleInfo: product.wholeSaleInfo ? Object.assign({}, product.wholeSaleInfo) : null,
       freightTemplate: product.freightTemplate ? Object.assign({}, product.freightTemplate) : { requiresRealName: false },
       qty: Object.keys(skuQty).reduce(function (sum, spec) { return sum + Number(skuQty[spec] || 0); }, 0),
       mode: mode,
@@ -7204,6 +7532,7 @@
       createdType: createdType
     };
     state.products.push(created);
+    created.isUndeliverable = isUndeliverableAtAddress(created);
     return created;
   }
 
@@ -7215,7 +7544,7 @@
     root.querySelectorAll('[data-add-total-amount]').forEach(function (node) {
       var amount = addDraftAmount(draft);
       if (node.querySelector('.order-add-price__major')) node.innerHTML = addProductPrice(amount);
-      else node.textContent = money(amount);
+      else setMoneyText(node, amount);
     });
   }
 
@@ -7234,6 +7563,7 @@
         item.skuPriceDetails[spec] = { price: original, basePrice: original, finallyPrice: original, discountType: null, discountValue: null, priceRecords: [] };
       });
     });
+    refreshDeliveryRestrictions();
     state.orderTotalAdjustment = 0;
     applyCustomer(CUSTOMERS[0]);
     state.draftAvailable = false;
@@ -7381,6 +7711,69 @@
       state.panel = null; state.activeDraftId = ''; state.saveStatus = '模拟上次开单';
       return;
     }
+    if (reviewState === 'product-invalid' || reviewState === 'partial-product-invalid' || reviewState === 'sku-delisted') {
+      // Isolated fixture: the first product becomes unavailable in the simulated submit response.
+      resetOrder();
+      state.delivery = 'none'; state.address = null; state.displayMode = 'flat';
+      mergeProductIntoOrder(PRODUCTS[0], { '白色/M': 1, '黑色/L': 2 }, 'single', '');
+      mergeProductIntoOrder(PRODUCTS[1], { '蓝色/28': 1 }, 'single', '');
+      if (reviewState === 'partial-product-invalid') {
+        // Already-known failure: only black/L is invalid; white/M stays editable.
+        state.products[0].invalidSpecs = ['黑色/L'];
+      } else if (reviewState === 'sku-delisted') {
+        // Prototype submit response: delisted black/L triggers the requested whole-product refresh.
+        state.prototypeDelistedSkus = [{ code: PRODUCTS[0].code, spec: '黑色/L' }];
+      } else state.prototypeInvalidProductCodes = [PRODUCTS[0].code];
+      state.panel = null;
+      return;
+    }
+    if (reviewState === 'wholesale-price' || reviewState === 'wholesale-price-delivery-restriction') {
+      // 原型能力：六件商品展示批发配置的条件组合，不接真实价格或起购校验服务。
+      resetOrder();
+      state.displayMode = 'flat';
+      state.delivery = 'express';
+      state.address = { name: '陈小姐', phone: '13800138000', detail: '浙江省杭州市上城区九堡街道新江花园12幢' };
+      var rules = [
+        { mixedBatchType: 2, saleUnitType: 'hand', saleUnitPieceQty: 6, miniSaleQty: 6 },
+        { mixedBatchType: 3, saleUnitType: 'dozen', saleUnitPieceQty: 12, miniSaleQty: 12 },
+        { mixedBatchType: 4, saleUnitType: 'box', saleUnitPieceQty: 24, miniSaleQty: 24 },
+        { mixedBatchType: 5, saleUnitType: 'single', saleUnitPieceQty: 1, miniSaleQty: 1 },
+        { mixedBatchType: 1, saleUnitType: 'hand', saleUnitPieceQty: 1, miniSaleQty: 1 },
+        { mixedBatchType: 2, saleUnitType: 'box', saleUnitPieceQty: 24, miniSaleQty: 24 }
+      ];
+      rules.forEach(function (config, index) {
+        var demo = Object.assign({}, PRODUCTS[index], { wholeSaleInfo: config });
+        if (index === 0 && reviewState === 'wholesale-price-delivery-restriction') demo.freightTemplate = { requiresRealName: false, undeliverableRegions: ['浙江省杭州市上城区'] };
+        // 原型能力：三种单位均可直接体验一次步进；首件继续提供库存确认。
+        if (index < 3) { demo.skuStocks = {}; demo.skuStocks[demo.specs[0]] = [16, 36, 72][index]; demo.allowSellerOverSale = index === 0; }
+        var quantities = {}; quantities[demo.specs[0]] = index < 3 ? config.miniSaleQty : 1;
+        mergeProductIntoOrder(demo, quantities, 'single', '', { priceMode: index === 5 ? 'retail' : 'wholesale', unitPrice: demo.listPrice });
+      });
+      var stockScenario = new URLSearchParams(window.location.search).get('wholesaleStockScenario');
+      if (stockScenario === 'blocked' || stockScenario === 'zero' || stockScenario === 'decreased') {
+        var stockItem = state.products[0], stockSpec = stockItem.orderSpecs[0];
+        stockItem.allowSellerOverSale = false;
+        if (stockScenario === 'zero') { stockItem.skuStocks[stockSpec] = 0; setProductQuantity(0, stockSpec, 12); }
+        if (stockScenario === 'decreased') setProductQuantity(0, stockSpec, 24);
+      }
+      state.panel = null;
+      return;
+    }
+    if (reviewState === 'delivery-restriction') {
+      var demoProduct = PRODUCTS[0];
+      state.delivery = 'express';
+      state.address = { name: '陈小姐', phone: '13800138000', detail: '浙江省杭州市上城区九堡街道新江花园12幢' };
+      state.realNameInfo = { name: '', idCard: '', mode: 'group' };
+      state.products = [{
+        id: 'delivery-restriction-demo', code: demoProduct.code, name: demoProduct.name,
+        listPrice: demoProduct.listPrice, price: demoProduct.listPrice, image: demoProduct.image,
+        freightTemplate: { requiresRealName: true, undeliverableRegions: ['浙江省杭州市上城区'] },
+        qty: 1, mode: 'single', skuQty: { '白色/M': 1 }, orderSpecs: ['白色/M'], note: ''
+      }];
+      refreshDeliveryRestrictions();
+      state.panel = null;
+      return;
+    }
     if (['checkout-sale', 'refund-checkout', 'refund-checkout-guest', 'refund-sync-prompt', 'return-list', 'return-mixed-positive', 'return-mixed-zero', 'return-mixed-negative', 'refund-sync', 'refund-sync-quantity', 'refund-sync-amount', 'refund-sync-many', 'refund-sync-remembered', 'refund-sync-skip', 'refund-sync-refund-failed', 'refund-no-sync-refund-failed', 'refund-temporary'].indexOf(reviewState) < 0) return;
     state.products = [{
       id: 'refund-review-product',
@@ -7507,6 +7900,7 @@
   function confirmPayment(ctx) {
     if (state.paymentStatus === 'processing' || state.paymentStatus === 'success' || refundSyncState().checking) return;
     if (!validateCheckout(ctx)) return;
+    if (rejectUnavailableProducts()) return;
     validateRefundSync(ctx, function () { confirmPaymentAfterSync(ctx); }, true);
   }
 
@@ -7850,9 +8244,81 @@
     ctx.navigate('workspace-order-success');
   }
 
+  function usesWholesaleQuantityRules(item) {
+    // 数量规则只看当前批发价配置；混拿/拿全名称只控制说明文案，不能过滤步进。
+    return Boolean(item && item.priceMode === 'wholesale' && item.wholeSaleInfo);
+  }
+
+  function orderSkuStock(item, spec) {
+    var stock = item && item.skuStocks && item.skuStocks[spec];
+    return typeof stock === 'number' && Number.isFinite(stock) ? stock : null;
+  }
+
+  function steppedOrderQuantity(item, current, delta) {
+    var config = item && item.wholeSaleInfo || {};
+    var unit = Number(config.saleUnitPieceQty);
+    if (!usesWholesaleQuantityRules(item) || ['hand', 'dozen', 'box'].indexOf(config.saleUnitType) < 0 || !Number.isFinite(unit) || unit <= 1) return current + delta;
+    // 与原getSkuQuantity一致：保留JS带符号余数，不能改成floor/ceil。
+    var remainder = current % unit;
+    return delta > 0 ? current + (remainder ? unit - remainder : unit) : current - (remainder || unit);
+  }
+
+  function requestOrderSkuQuantity(itemIndex, spec, proposed, action, ctx) {
+    var item = state.products[itemIndex];
+    if (!item || state.orderStockWarning || isOrderSkuInvalid(item, spec)) return false;
+    var value = signedQuantity(proposed);
+    var stock = orderSkuStock(item, spec);
+    var bypass = item.addAnyway || item.overSaleFlag || (item.createdType && item.createdType !== 'product');
+    if (usesWholesaleQuantityRules(item) && !bypass && value && stock != null) {
+      if (action === 'minus' && stock > 0 && stock < value) value = stock;
+      else if (value >= 0 && value > stock) {
+        state.orderStockWarning = { item: item, spec: spec, quantity: value, stock: stock,
+          kind: action === 'minus' && stock <= 0 && !item.allowSellerOverSale ? 'remove' : 'insufficient' };
+        state.rowContextMenu = null;
+        renderActive();
+        return false;
+      }
+    }
+    setProductQuantity(itemIndex, spec, value);
+    markDirty(ctx);
+    return true;
+  }
+
+  function finishOrderStockWarning(action, ctx) {
+    var pending = state.orderStockWarning;
+    if (!pending) return;
+    state.orderStockWarning = null;
+    var index = state.products.indexOf(pending.item);
+    var changed = false;
+    if (index >= 0 && itemSpecRows(pending.item).some(function (row) { return row.spec === pending.spec; }) && !isOrderSkuInvalid(pending.item, pending.spec)) {
+      if (action === 'remove' && pending.kind === 'remove') { removeOrderRow(index, pending.spec); changed = true; }
+      else if (action === 'confirm' && pending.kind === 'insufficient' && pending.item.allowSellerOverSale) {
+        pending.item.addAnyway = true;
+        setProductQuantity(index, pending.spec, pending.quantity);
+        changed = true;
+      }
+    }
+    if (changed) markDirty(ctx); else renderActive();
+    if (action === 'settings') ctx.toast('库存设置入口已保留');
+    var root = activeContext && activeContext.root;
+    var control = root && root.querySelector('[data-row-qty][data-item-index="' + index + '"][data-qty-spec="' + encodeURIComponent(pending.spec) + '"]');
+    if (control) control.focus({ preventScroll: true });
+  }
+
+  function orderStockWarningDialog() {
+    var pending = state.orderStockWarning;
+    if (!pending) return '';
+    var remove = pending.kind === 'remove';
+    var allow = Boolean(pending.item.allowSellerOverSale);
+    var content = remove ? '库存为' + pending.stock + '，要移除该规格吗？' : '已设置库存不足，' + (allow ? '允许' : '不允许') + '超卖开单 <button type="button" class="link link--inline" data-order-stock-settings>去修改设置</button>';
+    var buttons = '<button type="button" class="dialog__btn ' + (remove || allow ? 'dialog__btn--dismiss' : 'dialog__btn--confirm') + '" data-order-stock-cancel>' + (remove || allow ? '取消' : '我知道了') + '</button>';
+    if (remove || allow) buttons += '<span class="dialog__divider" aria-hidden="true"></span><button type="button" class="dialog__btn ' + (remove ? 'dialog__btn--danger' : 'dialog__btn--confirm') + '" ' + (remove ? 'data-order-stock-remove' : 'data-order-stock-confirm') + '>' + (remove ? '移除' : '仍要添加') + '</button>';
+    return '<div class="dialog dialog--text order-stock-warning-dialog" role="dialog" aria-modal="true" aria-labelledby="order-stock-warning-title" data-component="dialog" data-variant-name="Dialog_Text_' + (remove || allow ? '2' : '1') + '"><div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="order-stock-warning-title">库存不足</h3></div><div class="dialog__content">' + content + '</div></div><div class="dialog__actions"><div class="dialog__buttons' + (remove || allow ? ' dialog__buttons--dual' : '') + '">' + buttons + '</div></div></div></div>';
+  }
+
   function setProductQuantity(itemIndex, spec, nextQty) {
     var item = state.products[itemIndex];
-    if (!item) return;
+    if (!item || (spec ? isOrderSkuInvalid(item, spec) : hasInvalidOrderSku(item))) return;
     var requestedQuantity = Number(nextQty);
     if (!Number.isFinite(requestedQuantity)) requestedQuantity = 1;
     var value = Math.max(QUANTITY_MIN, Math.min(QUANTITY_MAX, Math.trunc(requestedQuantity)));
@@ -7879,6 +8345,28 @@
   }
 
   function handleClick(event, root, ctx) {
+    if (state.orderStockWarning) {
+      if (event.target.closest('[data-order-stock-cancel]')) finishOrderStockWarning('cancel', ctx);
+      else if (event.target.closest('[data-order-stock-confirm]')) finishOrderStockWarning('confirm', ctx);
+      else if (event.target.closest('[data-order-stock-remove]')) finishOrderStockWarning('remove', ctx);
+      else if (event.target.closest('[data-order-stock-settings]')) finishOrderStockWarning('settings', ctx);
+      return;
+    }
+    if (state.productAvailabilityDialog) {
+      if (state.productAvailabilityDialog === 'notice' && event.target.closest('[data-view-invalid-products]')) viewUnavailableProducts(ctx);
+      else if (state.productAvailabilityDialog === 'sku' && event.target.closest('[data-invalid-sku-remove], [data-invalid-sku-cancel]')) finishInvalidSkuRemoval(Boolean(event.target.closest('[data-invalid-sku-remove]')), ctx);
+      return;
+    }
+    if (state.pendingRowRemoval) {
+      var removalAction = event.target.closest('[data-row-remove-cancel], [data-row-remove-confirm]');
+      if (removalAction) finishOrderRowRemoval(removalAction.matches('[data-row-remove-confirm]'), root, ctx);
+      return;
+    }
+    var invalidSkuAction = event.target.closest('[data-open-invalid-sku]');
+    if (invalidSkuAction && !event.target.closest('[data-delete-row], [data-delete]')) {
+      openInvalidSku(Number(invalidSkuAction.dataset.openInvalidSku), decodeURIComponent(invalidSkuAction.dataset.invalidSpec || ''));
+      return;
+    }
     if (state.paymentDraft && state.paymentDraft.refundWarehouseMenuOpen && !event.target.closest('.order-refund-warehouse-popmenu')) closeRefundWarehouseMenu(root);
     var target = event.target.closest('button, [data-clickable]');
     if (courierState().menu && !event.target.closest('.order-courier-menu') && !(target && target.matches('[data-courier-field], [data-courier-select]'))) closeCourierMenu(root);
@@ -7961,7 +8449,7 @@
       if (validateCheckout(ctx)) resumeRefundCheckout();
       return;
     }
-    if (refundSyncState().dialog || (orderHasReturnSku() && state.paymentStatus === 'processing')) return;
+    if (state.orderStockWarning || refundSyncState().dialog || (orderHasReturnSku() && state.paymentStatus === 'processing')) return;
     if (!target || !root.contains(target)) return;
     if (state.orderPromotionDraft) {
       if (!target.closest('.order-promotion-modal')) return;
@@ -8059,7 +8547,7 @@
       var orderItemIndex = Number(target.dataset.editOrderSkuPrice);
       var orderItem = state.products[orderItemIndex];
       var orderSpec = decodeURIComponent(target.dataset.orderSkuSpec || '');
-      if (!orderItem || (isSkuMode(orderItem.mode) && !Object.prototype.hasOwnProperty.call(orderItem.skuQty || {}, orderSpec))) return;
+      if (!orderItem || isOrderSkuInvalid(orderItem, orderSpec) || (isSkuMode(orderItem.mode) && !Object.prototype.hasOwnProperty.call(orderItem.skuQty || {}, orderSpec))) return;
       state.skuPriceDraft = { source: 'order', itemIndex: orderItemIndex, spec: orderSpec, original: itemSkuOriginalPrice(orderItem, orderSpec), current: itemSkuPrice(orderItem, orderSpec), mode: 'fixed', input: '' };
       renderActive();
       var orderSkuPriceInput = root.querySelector('[data-sku-price-input]');
@@ -8485,6 +8973,10 @@
     }
     if (target.matches('[data-open-panel]')) {
       var type = target.dataset.openPanel;
+      if (type === 'quick' && target.dataset.quickOp === 'coupon') {
+        ctx.toast('即将上线，敬请期待');
+        return;
+      }
       if (type === 'quick' && ['member', 'orderRate', 'orderAmount', 'rounding'].indexOf(target.dataset.quickOp) >= 0) {
         var promotionType = target.dataset.quickOp;
         if (promotionType === 'member' && (!state.customer || Number(state.memberDiscount) >= 100)) {
@@ -8665,6 +9157,7 @@
         detail: recipientRegionLabel(clipboardDraft) + String(clipboardDraft.detail).trim(),
         source: addressSource
       };
+      refreshDeliveryRestrictions();
       if (orderRequiresRealName() && clipboardDraft.idCard) state.realNameInfo = { name: state.address.name, idCard: clipboardDraft.idCard, mode: 'direct' };
       rememberCurrentDeliveryPreference();
       closeClipboardRecipientModal();
@@ -8690,7 +9183,7 @@
       }
       if (pointsInput) pointsInput.value = nextPoints || '';
       var pointsAmount = root.querySelector('[data-points-deduction]');
-      if (pointsAmount) pointsAmount.textContent = money(pointsDeduction(nextPoints));
+      if (pointsAmount) setMoneyText(pointsAmount, pointsDeduction(nextPoints));
       if (pointsMode === 'custom' && pointsInput) {
         pointsInput.focus({ preventScroll: true });
         pointsInput.select();
@@ -9312,6 +9805,7 @@
       state.delivery = saveDraft.delivery;
       state.deliveryRealNameAttention = false;
       if (saveDraft.delivery === 'express' || saveDraft.delivery === 'freight') state.address = saveDraft.address ? Object.assign({}, saveDraft.address) : null;
+      refreshDeliveryRestrictions();
       if (saveDraft.delivery === 'express' || saveDraft.delivery === 'freight') state.realNameInfo = saveDraft.realNameInfo ? Object.assign({}, saveDraft.realNameInfo) : state.realNameInfo;
       if (savesAddressDelivery) state.senderMode = saveDraft.senderMode || state.senderMode;
       if (savesAddressDelivery) state.senderInfo = saveDraft.senderInfo ? Object.assign({}, saveDraft.senderInfo) : state.senderInfo;
@@ -9572,7 +10066,6 @@
       cancelNoteEditor('order');
       markDirty(ctx);
       renderActive();
-      ctx.toast('整单备注已保存');
       return;
     }
     if (target.matches('[data-confirm-add]')) {
@@ -9602,7 +10095,7 @@
       state.panel = null;
       state.addDraft = null;
       markDirty(ctx, true);
-      ctx.toast('商品已加入订单');
+      ctx.toast('添加成功');
       return;
     }
     if (target.matches('[data-plus], [data-minus]')) {
@@ -9617,8 +10110,8 @@
       var quantitySpec = target.dataset.qtySpec ? decodeURIComponent(target.dataset.qtySpec) : '';
       var currentItem = state.products[quantityIndex];
       var currentQty = quantitySpec && isSkuMode(currentItem.mode) ? Number(currentItem.skuQty[quantitySpec] || 0) : currentItem.qty;
-      setProductQuantity(quantityIndex, quantitySpec, currentQty + Number(target.dataset.rowQtyDelta));
-      markDirty(ctx);
+      var rowDelta = Number(target.dataset.rowQtyDelta);
+      requestOrderSkuQuantity(quantityIndex, quantitySpec, steppedOrderQuantity(currentItem, currentQty, rowDelta), rowDelta > 0 ? 'add' : 'minus', ctx);
       return;
     }
     if (target.matches('[data-delete]')) {
@@ -9631,9 +10124,7 @@
       return;
     }
     if (target.matches('[data-delete-row]')) {
-      removeOrderRow(Number(target.dataset.deleteRow), target.dataset.deleteRowSpec ? decodeURIComponent(target.dataset.deleteRowSpec) : '');
-      markDirty(ctx);
-      ctx.toast('已删除商品行');
+      requestOrderRowRemoval(Number(target.dataset.deleteRow), typeof target.dataset.deleteRowSpec === 'string' ? decodeURIComponent(target.dataset.deleteRowSpec) : null, root);
       return;
     }
     if (target.matches('[data-delete-selected]')) {
@@ -9997,7 +10488,12 @@
       ctx.toast('收款凭证上传将在生产环境接入');
       return;
     }
+    if (target.matches('[data-open-receipt-printer]')) {
+      openReceiptPrinter('settings', ctx);
+      return;
+    }
     if (target.matches('[data-auto-print-receipt]')) {
+      if (state.paymentDraft && !state.paymentDraft.autoPrintReceipt && !receiptPrinter()) { openReceiptPrinter('toggle', ctx); return; }
       if (state.paymentDraft) { state.paymentDraft.autoPrintReceipt = !state.paymentDraft.autoPrintReceipt; renderPaymentPreservingScroll(root); }
       return;
     }
@@ -10110,7 +10606,7 @@
   }
 
   function handleInput(event, root, ctx) {
-    if (refundSyncState().dialog || (orderHasReturnSku() && state.paymentStatus === 'processing')) return;
+    if (state.orderStockWarning || refundSyncState().dialog || (orderHasReturnSku() && state.paymentStatus === 'processing')) return;
     var target = event.target;
     if (target.matches('[data-order-promotion-input]') && state.orderPromotionDraft) {
       state.orderPromotionDraft.input = target.value;
@@ -10313,7 +10809,7 @@
         customBox.hidden = false;
       }
       var deductionNode = root.querySelector('[data-points-deduction]');
-      if (deductionNode) deductionNode.textContent = money(pointsDeduction(nextPoints));
+      if (deductionNode) setMoneyText(deductionNode, pointsDeduction(nextPoints));
       return;
     }
     if (target.matches('[data-row-qty]')) {
@@ -10321,6 +10817,10 @@
       var directItemIndex = Number(target.dataset.itemIndex);
       var directItem = state.products[directItemIndex];
       var directQtySpec = target.dataset.qtySpec ? decodeURIComponent(target.dataset.qtySpec) : '';
+      if (directQtySpec ? isOrderSkuInvalid(directItem, directQtySpec) : hasInvalidOrderSku(directItem)) {
+        target.value = String(directQtySpec ? directItem.skuQty[directQtySpec] : directItem.qty);
+        return;
+      }
       var isSignedSkuInput = Boolean(directItem);
       if (isSignedSkuInput) {
         var signedRaw = String(target.value || '').replace(/[^\d-]/g, '');
@@ -10333,15 +10833,23 @@
         rawQuantity = signedDigits ? String(signedQuantity(negativePrefix + signedDigits)) : (event.type === 'input' ? '' : '0');
       }
       target.value = rawQuantity;
+      if (usesWholesaleQuantityRules(directItem)) {
+        if (event.type === 'change') requestOrderSkuQuantity(directItemIndex, directQtySpec, Number(rawQuantity || 0), 'change', ctx);
+        return;
+      }
       if (rawQuantity || isSignedSkuInput) {
         setProductQuantity(directItemIndex, directQtySpec, Number(rawQuantity || 0));
         var directProductRow = target.closest('.order-desktop-product-row');
+        if (!directProductRow) {
+          if (event.type === 'change') markDirty(ctx);
+          return;
+        }
         var directRowTotal = directProductRow?.querySelector('[data-product-total-value]');
         var currentAmount = directProductRow.classList.contains('order-desktop-product-row--grouped')
           ? itemAmount(directItem)
           : itemSkuPrice(directItem, directQtySpec) * Number(rawQuantity || 0);
         if (directRowTotal) {
-          directRowTotal.textContent = money(currentAmount);
+          setMoneyText(directRowTotal, currentAmount);
           directRowTotal.classList.toggle('is-negative', currentAmount < 0);
         }
         var directProductQty = directProductRow?.querySelector('[data-product-quantity-summary]');
@@ -10660,6 +11168,7 @@
     }, 220);
     scheduleClipboardRecipientCheck();
     root.addEventListener('pointerdown', function (event) {
+      if (state.orderStockWarning || state.productAvailabilityDialog || state.pendingRowRemoval) return;
       if (event.button !== 0) return;
       if (beginCatalogResize(event, root)) return;
       var comboLabel = event.target.closest('[data-combo-fill]');
@@ -10917,6 +11426,36 @@
       markDirty(ctx);
     }, true);
     root.addEventListener('keydown', function (event) {
+      if (state.orderStockWarning) {
+        if (event.key === 'Escape') { event.preventDefault(); finishOrderStockWarning('cancel', ctx); }
+        else if (event.key === 'Tab') {
+          var stockControls = Array.from(root.querySelectorAll('.order-stock-warning-dialog button'));
+          var firstStock = stockControls[0], lastStock = stockControls[stockControls.length - 1];
+          if ((event.shiftKey && document.activeElement === firstStock) || (!event.shiftKey && document.activeElement === lastStock)) {
+            event.preventDefault(); (event.shiftKey ? lastStock : firstStock).focus({ preventScroll: true });
+          }
+        }
+        return;
+      }
+      if (state.productAvailabilityDialog) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (state.productAvailabilityDialog === 'sku') finishInvalidSkuRemoval(false, ctx);
+        } else if (event.key === 'Tab') {
+          var availabilityControls = Array.from(root.querySelectorAll('.order-product-availability-dialog button'));
+          var firstAvailability = availabilityControls[0], lastAvailability = availabilityControls[availabilityControls.length - 1];
+          if (firstAvailability && ((event.shiftKey && document.activeElement === firstAvailability) || (!event.shiftKey && document.activeElement === lastAvailability))) {
+            event.preventDefault(); (event.shiftKey ? lastAvailability : firstAvailability).focus({ preventScroll: true });
+          }
+        }
+        return;
+      }
+      if (handleOrderRowRemovalKeydown(event, root, ctx)) return;
+      if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('[data-open-invalid-sku]')) {
+        event.preventDefault();
+        openInvalidSku(Number(event.target.dataset.openInvalidSku), decodeURIComponent(event.target.dataset.invalidSpec || ''));
+        return;
+      }
       if (courierState().view) {
         if (courierState().leaving) { event.preventDefault(); return; }
         if (event.key === 'Escape') { event.preventDefault(); if (courierState().menu) { courierState().menu = ''; renderCourier(); } else if (courierState().view === 'config') closeCourier(); else courierBack(); return; }
@@ -11180,7 +11719,7 @@
       +   '<main class="order-success-v2__body">'
       +     '<div class="order-success-v2__icon" aria-hidden="true">✓</div>'
       +     '<h1 id="order-success-title">' + resultTitle + '</h1>'
-      +     '<p>' + escapeHtml(state.paymentSummary || '已收款') + ' · ' + money(t.payable) + '</p>'
+      +     '<p>' + escapeHtml(state.paymentSummary || '已收款') + ' · ' + moneyMarkup(t.payable) + '</p>'
       +     '<dl><div><dt>订单号</dt><dd>' + escapeHtml(state.orderNo) + '</dd></div><div><dt>客户</dt><dd>' + escapeHtml(state.customer ? state.customer.name : '散客') + '</dd></div><div><dt>仓库</dt><dd>' + escapeHtml(state.warehouse.name) + '</dd></div><div><dt>商品</dt><dd>' + t.styles + '款 ' + t.pieces + '件</dd></div>' + (isPureReturn ? '<div><dt>订单状态</dt><dd>已退款</dd></div>' : '') + '<div><dt>' + statusLabel + '</dt><dd>' + paymentState + '</dd></div></dl>'
       +     (state.paymentPostActions && (state.paymentPostActions.print || state.paymentPostActions.dispatch) ? '<div class="order-success-v2__post-actions">' + (state.paymentPostActions.print ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>小票打印任务已创建</span>' : '') + courierPrintResult() + '<small>打印结果不影响已创建的订单。</small></div>' : '')
       +     '<div class="order-success-v2__actions">' + button('继续开单', 'strong', 'lg', 'data-new-order') + button('查看订单', 'weak', 'lg', 'data-view-order') + '</div>'
@@ -11190,6 +11729,13 @@
   }
 
   function resetOrder() {
+    state.pendingRowRemoval = null;
+    state.orderStockWarning = null;
+    state.productAvailabilityDialog = '';
+    state.pendingInvalidProducts = [];
+    state.invalidSkuTarget = null;
+    state.prototypeInvalidProductCodes = [];
+    state.prototypeDelistedSkus = [];
     applyCustomer(null);
     state.warehouse = WAREHOUSES[0];
     state.products = [];
@@ -11232,6 +11778,7 @@
     state.paymentScrollSpacer = 0;
     state.paymentPostActions = null;
     state.courier = null;
+    state.receipt = null;
     state.dailyTotalRecorded = false;
     state.saveStatus = '新订单';
     state.activeDraftId = '';

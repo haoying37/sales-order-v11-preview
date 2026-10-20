@@ -11905,6 +11905,10 @@ button.order-payment-method-card {
   grid-template-rows: repeat(2, minmax(var(--size-48), 1fr));
 }
 
+.order-quick-op[data-quick-op="coupon"] {
+  order: 1;
+}
+
 .order-quick-op[data-quick-op="orderRate"] {
   order: 2;
 }
@@ -12451,6 +12455,108 @@ button.order-payment-method-card {
 .order-promotion-modal--total .order-sku-price-modal__panel { width: min(300px, 100%); }
 .order-summary-row--total .order-summary-total-edit strong.is-negative { color: var(--red_100); }
 
+/* Freight-template restriction belongs to the added-products area. */
+.order-delivery-restriction-inline {
+  display: block;
+  overflow: hidden;
+  color: var(--red_100);
+  font-size: var(--Font12-font-size);
+  font-weight: var(--Font14-normal-font-weight);
+  line-height: var(--Font16-line-height);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-desktop-product-name .order-delivery-restriction-inline {
+  color: var(--red_100);
+}
+
+.order-delivery-restriction-banner {
+  display: flex;
+  flex: 0 0 44px;
+  align-items: center;
+  gap: var(--spacer-8);
+  width: 100%;
+  min-width: 0;
+  padding: 0 var(--spacer-12);
+  color: var(--red_100);
+  background: var(--red_10);
+  font-family: var(--Font14-font-family);
+  font-size: var(--Font14-font-size);
+  font-weight: var(--Font14-medium-font-weight);
+}
+
+.order-delivery-restriction-banner .wego-iconfont-s {
+  display: inline-flex;
+  flex: 0 0 var(--size-16);
+  align-items: center;
+  justify-content: center;
+  width: var(--size-16);
+  height: var(--size-16);
+  font-size: var(--size-16);
+  line-height: 1;
+}
+
+/* Unavailable products stay in the order until the user removes their rows. */
+.order-desktop-product-row.is-invalid .order-desktop-product-name strong,
+.order-desktop-product-row.is-invalid .order-desktop-product-name span,
+.order-desktop-product-row.is-invalid .order-desktop-sku-price,
+.order-desktop-product-row.is-invalid .order-desktop-sku-price button,
+.order-desktop-product-row.is-invalid .order-desktop-sku-price__original,
+.order-desktop-product-row.is-invalid .order-desktop-product-spec,
+.order-desktop-product-row.is-invalid .order-spec-label__text,
+.order-desktop-product-row.is-invalid .order-desktop-grouped-sku-stack--spec .order-desktop-grouped-sku-line,
+.order-desktop-product-row.is-invalid .order-desktop-product-total,
+.order-desktop-product-row.is-invalid .order-desktop-product-total__value,
+.order-desktop-product-row.is-invalid .order-money--negative,
+.order-mobile-line.is-invalid .order-line-title,
+.order-mobile-line.is-invalid .order-line-title strong,
+.order-mobile-line.is-invalid .order-line-title span,
+.order-mobile-line.is-invalid .order-mobile-invalid-sku > span:first-child,
+.order-mobile-line.is-invalid .order-mobile-invalid-sku__price,
+.order-mobile-line.is-invalid .order-money--negative,
+.order-desktop-grouped-sku-line.is-invalid .order-spec-label__text,
+.order-desktop-grouped-sku-stack--spec .order-desktop-grouped-sku-line.is-invalid,
+.order-desktop-grouped-sku-line.is-invalid .order-desktop-sku-price,
+.order-desktop-grouped-sku-line.is-invalid .order-desktop-sku-price button,
+.order-desktop-grouped-sku-line.is-invalid .order-desktop-sku-price__original,
+.order-desktop-grouped-sku-line.is-invalid .order-money--negative,
+.order-mobile-invalid-sku.is-invalid > span:first-child,
+.order-mobile-invalid-sku.is-invalid .order-mobile-invalid-sku__price,
+.order-mobile-invalid-sku.is-invalid .order-money--negative {
+  color: var(--text_30) !important;
+}
+
+.is-invalid .counter,
+.is-invalid .order-desktop-sku-price button,
+.is-invalid .order-desktop-product-name {
+  pointer-events: none;
+}
+
+.counter__hint.order-invalid-sku-message {
+  display: block;
+  color: var(--red_100) !important;
+}
+
+[data-open-invalid-sku] { cursor: pointer; }
+.order-mobile-invalid-skus { display: grid; gap: var(--spacer-8); margin-top: var(--spacer-8); }
+.order-mobile-invalid-sku { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacer-4) var(--spacer-8); }
+.order-mobile-invalid-sku > span:first-child { flex: 1 1 100%; }
+.order-mobile-invalid-sku .counter { margin-left: auto; }
+.order-mobile-line.is-invalid .order-line-main { min-width: 0; }
+
+.order-v2-mobile.has-delivery-restriction .order-v2-mobile__scroll {
+  padding-bottom: calc(var(--safe-area-bottom-content) + var(--size-72) + 44px);
+}
+
+.order-v2-mobile > .order-delivery-restriction-banner {
+  position: absolute;
+  right: 0;
+  bottom: calc(var(--size-72) + var(--safe-area-bottom));
+  left: 0;
+  z-index: var(--z-sticky);
+}
+
 /* 已添加区：字段保持可读下限，只有商品表格扩宽；备注跟随可视区。 */
 .order-note-bar__group {
   display: flex;
@@ -12723,12 +12829,16 @@ button.order-payment-method-card {
 /* Current walkthrough: native Counter widths; inline auxiliary choices. */
 .order-return-inventory-remember { gap: 4px; }
 .order-add-price-modes .tag:not(.tag--selected) { background: var(--bg_gray_03_pack); border: 0; }
-.order-reference-payment__post-option--courier { grid-template-columns: minmax(0, 1fr) auto; }
+.order-reference-payment__post-option--courier,
+.order-reference-payment__post-option--receipt { grid-template-columns: minmax(0, 1fr) auto; }
 .order-reference-payment__post-toggle { min-width: 0; padding: 0; border: 0; background: transparent; font: inherit; gap: var(--spacer-6); }
 
-.order-reference-payment__courier-printer { display: inline-flex; align-items: center; gap: 0; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text_80); font-size: var(--Font10-font-size); }
-.order-reference-payment__courier-printer > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.order-reference-payment__courier-printer > i { flex-shrink: 0; font-size: var(--size-14); }
+.order-reference-payment__courier-printer,
+.order-reference-payment__receipt-printer { display: inline-flex; align-items: center; gap: 0; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text_80); font-size: var(--Font10-font-size); }
+.order-reference-payment__courier-printer > span,
+.order-reference-payment__receipt-printer > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.order-reference-payment__courier-printer > i,
+.order-reference-payment__receipt-printer > i { flex-shrink: 0; font-size: var(--size-14); }
 
 
 .order-catalog-view-switch, .order-add-view-seg { flex: 0 0 auto; }
@@ -12893,6 +13003,9 @@ button.order-payment-method-card {
 .order-courier-heading { display: flex; align-items: center; min-width: 0; gap: var(--spacer-8); }
 .order-courier-heading > strong { font-size: var(--Font16-font-size); font-weight: var(--Font14-medium-font-weight); line-height: var(--Font16-line-height); }
 .order-courier-add-waybill { padding: var(--spacer-12) var(--spacer-16); }
+.order-courier-modal .cell-group:has(.order-courier-waybill-empty),
+.order-courier-modal .cell-group__content:has(> .order-courier-waybill-empty) { height: 100%; }
+.order-courier-waybill-empty { --result-page-height: 100%; height: 100%; }
 .order-courier-printer-value { min-width: 0; text-align: right; }
 .order-courier-page--enter { animation: courier-page-enter 220ms ease-out; }
 @keyframes courier-page-enter { from { transform: translateX(100%); } to { transform: translateX(0); } }
@@ -12925,3 +13038,38 @@ button.order-payment-method-card {
 /* A portal keeps the standard PopMenu clear of the checkout clipping/stacking context. */
 .order-recharge-layer { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 5); pointer-events: none; }
 .order-recharge-layer > .popmenu { position: fixed; pointer-events: auto; }
+
+/* Signed amounts: apply to both plain text updates and split Metric / price typography. */
+.order-money--negative,
+.order-money--negative * {
+  color: var(--red_100, #fa5051) !important;
+}
+
+/* 商品行批发说明：有效片段拼成一个Tag_20，长文案保留完整title。 */
+.order-wholesale-tags,
+.order-desktop-product-name .order-wholesale-tags {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--spacer-4);
+  max-width: 100%;
+  margin-top: var(--spacer-4);
+  margin-bottom: var(--spacer-4);
+  overflow: visible;
+  white-space: normal;
+}
+.order-wholesale-tags .order-wholesale-tag {
+  max-width: 100%;
+  background: var(--yellow_1_10);
+  color: var(--yellow_100, var(--yellow_1_100)) !important;
+  font-size: var(--Font12-font-size);
+  line-height: 1;
+}
+.order-wholesale-tags .order-wholesale-tag .tag__label {
+  color: var(--yellow_100, var(--yellow_1_100)) !important;
+  font-size: var(--Font12-font-size);
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
