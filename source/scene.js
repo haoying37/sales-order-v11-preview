@@ -419,7 +419,7 @@
       return {
         kind: saved.kind,
         mode: featureEnabled('comboPayment') && saved.mode === 'combo' ? 'combo' : 'single',
-        method: PAYMENT_METHODS.some(function (method) { return method.id === saved.method; }) ? saved.method : ''
+        method: paymentMethodCatalog().some(function (method) { return method.id === saved.method; }) ? saved.method : ''
       };
     } catch (error) {
       return null;
@@ -435,6 +435,15 @@
         method: draft.mode === 'single' ? draft.method : ''
       }));
     } catch (error) {}
+  }
+
+  function paymentMethodCatalog() {
+    // 服务返回可用 id 及顺序；原型仅渲染有既定组件映射的渠道。
+    if (!Array.isArray(state.paymentMethodOptions)) return PAYMENT_METHODS;
+    return state.paymentMethodOptions.map(function (entry) {
+      var id = typeof entry === 'string' ? entry : entry && entry.id;
+      return PAYMENT_METHODS.find(function (method) { return method.id === id; });
+    }).filter(Boolean);
   }
 
   function localDateKey(date) {
@@ -885,6 +894,11 @@
     products: [],
     delivery: 'none',
     deliveryDraft: null,
+    deliveryTouchedThisOrder: false,
+    checkoutGuard: null,
+    checkoutWarnings: {},
+    // 原型可注入服务响应；正式实现由最近订单、会员权益和配送方式接口提供。
+    checkoutPolicy: { recentOrderWithin90Days: true, memberEligible: true, requirePickupContact: true },
     address: null,
     guestDeliveryPreference: {
       delivery: 'none',
@@ -896,6 +910,7 @@
     pickupContact: null,
     realNameInfo: null,
     deliveryRealNameAttention: false,
+    deliveryPickupAttention: false,
     deliveryScrollSpacer: 0,
     paymentScrollSpacer: 0,
     senderMode: 'default',
@@ -1426,20 +1441,22 @@
     var productAmount = Math.round(state.products.reduce(function (sum, item) {
       return sum + itemOriginalAmount(item);
     }, 0) * 100) / 100;
-    var totalDiscount = Math.round((productAmount - finalProductAmount) * 100) / 100;
+    var freightDiscount = state.orderPromotion && state.orderPromotionFreightBase != null && showsFreightAmount()
+      ? Math.round((Number(state.orderPromotionFreightBase) - Number(state.freight || 0)) * 100) / 100 : 0;
+    var totalDiscount = Math.round((productAmount - finalProductAmount + freightDiscount) * 100) / 100;
     var promotionDiscountAmount = Math.round(state.products.reduce(function (sum, item) {
       return sum + Object.keys(item.skuPriceDetails || {}).reduce(function (skuSum, spec) {
         var detail = item.skuPriceDetails[spec];
         var qty = isSkuMode(item.mode) ? Number(item.skuQty[spec] || 0) : Number(item.qty || 0);
         return skuSum + (detail.discountType ? (Number(detail.basePrice) - Number(detail.finallyPrice)) * qty : 0);
       }, 0);
-    }, 0) * 100) / 100;
+    }, 0) * 100) / 100 + freightDiscount;
     var productDiscountAmount = Math.round((totalDiscount - promotionDiscountAmount) * 100) / 100;
     var memberDiscountAmount = state.orderPromotion && state.orderPromotion.type === 'member' ? promotionDiscountAmount : 0;
     var discountAmount = state.orderPromotion && (state.orderPromotion.type === 'orderRate' || state.orderPromotion.type === 'orderAmount' || state.orderPromotion.type === 'total') ? promotionDiscountAmount : 0;
     var roundingAmount = state.orderPromotion && state.orderPromotion.type === 'rounding' ? promotionDiscountAmount : 0;
     var freight = isPureReturnOrder() ? 0 : Number(state.freight || 0);
-    var freightIncluded = state.delivery === 'express' || state.delivery === 'freight';
+    var freightIncluded = showsFreightAmount();
     var payable = Math.round((finalProductAmount + (freightIncluded ? freight : 0)) * 100) / 100;
     return {
       productAmount: productAmount,
@@ -1957,6 +1974,32 @@
     return entries;
   }
 
+  function deliverySettlementRule() {
+    // Prototype data mirrors the fields needed from the delivery-method service.
+    var configured = state.deliverySettlementRules && state.deliverySettlementRules[state.delivery];
+    return configured || {
+      requiresRecipient: state.delivery === 'express' || state.delivery === 'freight',
+      showFreight: true,
+      supportsSenderInfo: state.delivery === 'express' || state.delivery === 'freight',
+      name: ({ express: '快递', freight: '快运', pickup: '自提', none: '现场取货' })[state.delivery] || ''
+    };
+  }
+
+  function showsFreightRow() {
+    if (isPureReturnOrder()) return false;
+    var rule = deliverySettlementRule();
+    if (!rule.requiresRecipient) return false;
+    return quantityBreakdown(state.products).sales > 0 || hasAddressContent(state.address);
+  }
+
+  function showsFreightAmount() {
+    return showsFreightRow() && deliverySettlementRule().showFreight !== false;
+  }
+
+  function canOpenOrderPromotion() {
+    return orderPriceEntries().length > 0 || showsFreightRow();
+  }
+
   function hasMemberPriceSku() {
     return orderPriceEntries().some(function (entry) { return entry.item.priceMode === 'member' || entry.item.memberPromotionApplied; });
   }
@@ -1981,21 +2024,24 @@
   function orderPromotionCalculation(type, mode, value, memberApplyAll) {
     var entries = orderPriceEntries();
     var originalProductCents = entries.reduce(function (sum, entry) { return sum + entry.originalCents * entry.qty; }, 0);
-    var includesFreight = state.delivery === 'express' || state.delivery === 'freight';
+    var includesFreight = showsFreightAmount();
     var freightCents = includesFreight ? toCents(state.orderPromotionFreightBase == null ? state.freight : state.orderPromotionFreightBase) : 0;
     var targetTotalCents = originalProductCents + freightCents;
     var targetProductCents = originalProductCents;
     var nextFreightCents = freightCents;
     var perSku = type === 'member' || (type === 'orderRate' && mode === 'item-rate') || (type === 'orderAmount' && mode === 'item-amount');
-    if (type === 'orderRate' && mode === 'order-rate') targetTotalCents = Math.round(originalProductCents * value / 100) + freightCents;
-    if (type === 'orderAmount' && mode === 'order-amount') targetTotalCents = Math.max(0, targetTotalCents - toCents(value));
+    if (type === 'orderRate' && mode === 'order-rate') targetTotalCents = Math.round((originalProductCents + freightCents) * value / 100);
+    if (type === 'orderAmount' && mode === 'order-amount') targetTotalCents = originalProductCents > 0
+      ? Math.max(0, targetTotalCents - toCents(value)) : targetTotalCents - toCents(value);
     if (type === 'total') targetTotalCents = toCents(value);
     if (type === 'rounding') {
-      var unit = mode === 'ones' ? 1000 : 100;
+      var unit = ({ integer: 100, ones: 1000, tens: 10000, hundreds: 100000 })[mode] || 100;
       targetTotalCents = Math.floor(targetTotalCents / unit) * unit;
     }
     if (!perSku) {
-      nextFreightCents = Math.min(freightCents, Math.max(0, targetTotalCents));
+      nextFreightCents = originalProductCents > 0
+        ? Math.min(freightCents, Math.max(0, targetTotalCents))
+        : (type === 'total' ? Math.min(freightCents, targetTotalCents) : targetTotalCents);
       targetProductCents = Math.max(0, targetTotalCents - nextFreightCents);
     }
     var priced = entries.map(function (entry) {
@@ -2017,7 +2063,8 @@
       originalCents: originalProductCents + freightCents,
       actualCents: actualProductCents + nextFreightCents,
       freightCents: nextFreightCents,
-      valid: perSku || targetProductCents <= 0 || originalProductCents > 0
+      valid: !(type === 'total' && !state.products.length && includesFreight && toCents(value) > toCents(state.freight))
+        && (perSku || !entries.length || targetProductCents <= 0 || originalProductCents > 0)
     };
   }
 
@@ -2086,7 +2133,7 @@
       item.skuPrices[entry.spec] = nextPrice;
       if (!isSkuMode(item.mode)) item.price = nextPrice;
     });
-    if (state.delivery === 'express' || state.delivery === 'freight') {
+    if (showsFreightAmount()) {
       if (state.orderPromotionFreightBase == null) state.orderPromotionFreightBase = Number(state.freight || 0);
       state.freight = calculation.freightCents / 100;
     }
@@ -2203,6 +2250,23 @@
     );
   }
 
+  // 主动存草稿按当前开单内容判断；临时商品也属于“已添加商品”。
+  function hasManualDraftContent() {
+    var pickupContact = pickupContactValues(state.pickupContact);
+    return Boolean(
+      state.products.length
+      || state.customer
+      || hasAddressContent(state.address)
+      || (state.senderMode === 'proxy' && state.senderInfo && (hasText(state.senderInfo.name) || hasText(state.senderInfo.phone)))
+      || hasText(state.orderNoteMerchant)
+      || hasText(state.orderNoteBuyer)
+      || state.orderNoteMerchantImages.length
+      || state.orderNoteBuyerImages.length
+      || hasText(pickupContact.name)
+      || hasText(pickupContact.phone)
+    );
+  }
+
   function saveCurrentDraft() {
     if (!state.activeDraftId) state.activeDraftId = 'draft-current';
     state.draftAvailable = true;
@@ -2255,7 +2319,6 @@
     '.order-add-scroll',
     '.order-batch-matrix-wrap',
     '.order-catalog-category-tabs',
-    '.order-catalog-history__list',
     '.order-desktop-modal--checkout .order-desktop-modal__body',
     '.order-v2-modal .order-v2-modal__body',
     '.order-refund-sync-dialog__body', '.order-refund-sync-problems', '.order-reference-payment__sheet',
@@ -2303,7 +2366,7 @@
     if (activeContext && activeContext.root && activeContext.root.isConnected) {
       var renderScrollPositions = captureRenderScrollPositions(activeContext.root);
       // Pad 选品会暂时收起商品库；容器卸载期间仍保留浏览位置，重新展开时恢复。
-      var catalogScrollSelectors = ['.order-desktop__catalog-scroll', '.order-catalog-category-tabs', '.order-catalog-history__list'];
+      var catalogScrollSelectors = ['.order-desktop__catalog-scroll', '.order-catalog-category-tabs'];
       state.catalogScrollPositions = state.catalogScrollPositions || {};
       renderScrollPositions.forEach(function (snapshot) {
         if (catalogScrollSelectors.indexOf(snapshot.selector) !== -1) state.catalogScrollPositions[snapshot.selector] = snapshot;
@@ -2691,6 +2754,26 @@
         section.scrollIntoView({ block: 'start', behavior: 'smooth' });
       }
       var firstInvalid = section.querySelector('.form-body--error input');
+      if (firstInvalid) firstInvalid.focus({ preventScroll: true });
+    });
+  }
+
+  function focusDeliveryPickup(root) {
+    if (!state.deliveryPickupAttention || !root) return;
+    window.requestAnimationFrame(function () {
+      var sections = root.querySelectorAll('.order-desktop-modal--delivery .order-pickup-contact, .order-v2-modal--sheet .order-pickup-contact');
+      var section = Array.prototype.find.call(sections, function (node) { return node.getClientRects().length > 0; }) || sections[0];
+      if (!section) return;
+      var scroller = section.closest('.order-delivery-panel__scroll');
+      if (scroller) {
+        var choices = scroller.querySelector('.order-delivery-choices');
+        var sectionTop = section.getBoundingClientRect().top;
+        var scrollTop = scroller.scrollTop + sectionTop - scroller.getBoundingClientRect().top;
+        scroller.scrollTo({ top: Math.max(0, scrollTop - (choices ? choices.offsetHeight : 0) - 8), behavior: 'smooth' });
+      } else {
+        section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+      var firstInvalid = section.querySelector('.order-pickup-field--error input');
       if (firstInvalid) firstInvalid.focus({ preventScroll: true });
     });
   }
@@ -4211,9 +4294,6 @@
   }
 
   function desktopCatalogBody() {
-    var historyProducts = merchantRecentProducts().filter(function (item) {
-      return catalogProductMatchesFilters(item, state.catalogFilters);
-    });
     var searchMatches = desktopProductMatches(state.desktopProductKeyword);
     var showingSearchResults = state.desktopCatalogSearchActive && Boolean(state.desktopProductKeyword.trim());
     var showingImageResults = imageSearchHasImages();
@@ -4239,7 +4319,6 @@
       +   '<header class="order-catalog-header"><div class="order-catalog-header__title"><strong>商品库</strong>' + segmentControlMarkup('catalog', state.catalogViewMode, [['grid', '大图'], ['list', '列表']], 'data-catalog-view', 'order-catalog-view-switch', '商品库显示模式') + '</div><div class="order-catalog-create-anchor"><button type="button" class="btn btn--weak btn--sm order-catalog-publish" data-component-slug="button" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="btn__icon icon-yuanjia" aria-hidden="true"></i>创建</button></div></header>'
       +   desktopProductSearch(true)
       +   '<div class="order-desktop__catalog-scroll">'
-      +   (!showingResultMode && historyProducts.length ? '<section class="order-catalog-history" aria-label="最近成交商品"><div class="order-catalog-history__list layout-scroll-row" data-component="layout-scroll-row" data-component-slug="layout-scroll-row" data-item-size="auto" data-snap="start" data-peek="none">' + catalogList(true, historyProducts, false) + '</div></section>' : '')
       +   '<div class="order-catalog-sticky-stack">'
       +     catalogHiddenControls()
       +     (showingResultMode ? '' : '<div class="order-catalog-toolbar">' + catalogCategoryTabs() + '</div>')
@@ -4307,10 +4386,8 @@
   function discountDetailText(t) {
     if (t.totalDiscount === 0) return '';
     var name = state.orderPromotion ? ({ member: '会员折扣', orderRate: '整单折扣', orderAmount: '整单优惠', rounding: '整单抹零', total: '整单改价' })[state.orderPromotion.type] : '商品优惠';
-    var details = [];
-    if (t.productDiscountAmount !== 0) details.push('商品优惠' + compactNumber(t.productDiscountAmount) + '元');
-    if (t.promotionDiscountAmount !== 0) details.push(name + compactNumber(t.promotionDiscountAmount) + '元');
-    return details.join('，');
+    if (state.orderPromotion && t.promotionDiscountAmount !== 0) return name + compactNumber(t.promotionDiscountAmount) + '元';
+    return '商品优惠' + compactNumber(t.productDiscountAmount) + '元';
   }
 
   function discountDisplayAmount(amount) {
@@ -4321,18 +4398,21 @@
   function desktopSummaryDetails() {
     var t = totals();
     var discountText = discountDetailText(t);
-    var showFreight = !isPureReturnOrder() && (state.delivery === 'express' || state.delivery === 'freight');
+    var showFreight = showsFreightRow();
+    var showFreightAmount = showsFreightAmount();
     return ''
       + '<div class="order-desktop__summary-details" aria-label="本单金额明细">'
       +   summaryDetailRow('商品总价', '<em class="order-summary-row__meta" data-summary-meta>' + quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces }) + '</em><strong data-summary-product-amount>' + moneyMarkup(t.productAmount) + '</strong>')
-      +   (isPureReturnOrder() ? '' : '<div class="order-summary-row order-summary-row--deduction">'
+      +   (isPureReturnOrder() || !state.products.length || t.totalDiscount === 0 ? '' : '<div class="order-summary-row order-summary-row--deduction">'
       +     '<span class="order-summary-row__label">优惠</span>'
       +     '<span class="order-summary-row__value order-summary-discount">'
       +       '<strong data-summary-discount-total>' + (t.totalDiscount < 0 ? '+' : '') + moneyMarkup(-t.totalDiscount) + '</strong>'
       +       '<span class="order-summary-discount__detail" data-summary-discount-detail' + (discountText ? '' : ' hidden') + '>' + escapeHtml(discountText) + '</span>'
       +     '</span>'
       +   '</div>')
-      +   (showFreight ? summaryDetailRow('运费', '<strong data-summary-freight>' + moneyMarkup(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>') : '')
+      +   (showFreight ? (showFreightAmount
+        ? summaryDetailRow('运费', '<strong data-summary-freight>' + moneyMarkup(t.freight) + '</strong><button type="button" class="order-summary-row__edit" data-edit-freight aria-label="编辑运费"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>')
+        : summaryDetailRow('配送方式', '<strong>' + escapeHtml(deliverySettlementRule().name || '') + '</strong>')) : '')
       +   summaryDetailRow('订单总价', (orderHasReturnSku() ? '<strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong>' : '<button type="button" class="order-summary-total-edit" data-edit-total aria-label="修改订单总价"><strong class="' + (t.payable < 0 ? 'is-negative' : '') + '" data-summary-payable>' + money(t.payable) + '</strong><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button>'), 'order-summary-row--total')
       +   refundSyncEntry()
       + '</div>';
@@ -4537,10 +4617,12 @@
     if (op === 'points' && Number(state.pointsUsed) > 0) return '扣' + Math.round(Number(state.pointsUsed)) + '积分';
     if (op === 'coupon' && Number(state.couponCount) > 0 && Number(state.couponDiscount) > 0) return '用' + Math.round(Number(state.couponCount)) + '张';
     if (op === 'promotion' && Number(state.promotionThreshold) > 0 && Number(state.promotionDiscount) > 0) return '满' + compactNumber(state.promotionThreshold) + '减' + compactNumber(state.promotionDiscount);
-    if (op === 'orderRate' && state.orderPromotion && state.orderPromotion.type === 'orderRate' && hasActiveOrderPromotionSku()) return compactNumber(Number(state.orderPromotion.value) / 10) + '折';
-    if (op === 'orderAmount' && state.orderPromotion && state.orderPromotion.type === 'orderAmount' && hasActiveOrderPromotionSku()) return (state.orderPromotion.mode === 'item-amount' ? '每件优惠' : '整单优惠') + compactNumber(state.orderPromotion.value) + '元';
+    var promotionHasEffect = totals().promotionDiscountAmount !== 0;
+    var freightOnlyPromotion = orderPriceEntries().length === 0 && showsFreightAmount() && state.orderPromotionFreightBase != null;
+    if (op === 'orderRate' && state.orderPromotion && state.orderPromotion.type === 'orderRate' && promotionHasEffect && (hasActiveOrderPromotionSku() || freightOnlyPromotion)) return compactNumber(Number(state.orderPromotion.value) / 10) + '折';
+    if (op === 'orderAmount' && state.orderPromotion && state.orderPromotion.type === 'orderAmount' && promotionHasEffect && (hasActiveOrderPromotionSku() || freightOnlyPromotion)) return (state.orderPromotion.mode === 'item-amount' ? '每件优惠' : '整单优惠') + compactNumber(state.orderPromotion.value) + '元';
     if (op === 'discount' && state.discountMode && Number(state.discountValue) > 0) return DISCOUNT_MODE_LABELS[state.discountMode] || null;
-    if (op === 'rounding' && state.orderPromotion && state.orderPromotion.type === 'rounding' && hasActiveOrderPromotionSku()) return state.orderPromotion.mode === 'integer' ? '整数' : '个位';
+    if (op === 'rounding' && state.orderPromotion && state.orderPromotion.type === 'rounding' && promotionHasEffect && (hasActiveOrderPromotionSku() || freightOnlyPromotion)) return ({ integer: '整数', ones: '个位', tens: '十位', hundreds: '百位' })[state.orderPromotion.mode] || '整数';
     return null;
   }
 
@@ -4649,15 +4731,15 @@
     applyPaymentFeatureVisibility(draft);
     var t = totals();
     if (!draft) return '';
-    if (t.payable < 0 || isPureReturnOrder()) return refundCheckoutPanel(draft, t);
+    if (t.payable < 0) return refundCheckoutPanel(draft, t);
     var isCollecting = draft.kind === 'online' || draft.kind === 'private';
     var balanceCents = paymentBalanceCents(draft, t.payable);
     var targetCents = Math.max(0, toCents(t.payable) - balanceCents);
     var confirmState = paymentConfirmState(draft, t.payable);
     if (refundSyncState().checking) confirmState.enabled = false;
     var collectionContent = '';
-    var showZeroMixedCollection = orderHasReturnSku() && !isPureReturnOrder() && t.payable === 0 && !draft.useBalance;
-    if (targetCents > 0 || showZeroMixedCollection) {
+    var showZeroCollection = t.payable === 0 && !draft.useBalance;
+    if (targetCents > 0 || showZeroCollection) {
       collectionContent = '<div class="order-reference-payment__status-row' + (isCollecting ? ' is-guided' : '') + '">'
         + '<div class="order-payment-kind" role="radiogroup" aria-label="收款状态">'
         + paymentKindOption('unpaid', '未收款', draft.kind === 'unpaid', orderHasReturnSku())
@@ -5189,7 +5271,7 @@
   }
 
   function paymentMethodsForKind(kind) {
-    return PAYMENT_METHODS.filter(function (method) { return method.category === kind; });
+    return paymentMethodCatalog().filter(function (method) { return method.category === kind; });
   }
 
   function paymentMethodIconClass(method) {
@@ -5197,7 +5279,7 @@
   }
 
   function paymentMethodById(id) {
-    return PAYMENT_METHODS.find(function (method) { return method.id === id; }) || null;
+    return paymentMethodCatalog().find(function (method) { return method.id === id; }) || null;
   }
 
   function paymentBalanceCents(draft, payable) {
@@ -5280,17 +5362,18 @@
   }
 
   function paymentConfirmState(draft, payable) {
-    if (Number(payable || 0) < 0 || isPureReturnOrder()) {
+    if (Number(payable || 0) < 0) {
       if (state.paymentStatus === 'processing') return { enabled: false, label: '正在确认…' };
       return { enabled: true, label: '确认开单' };
     }
-    if (!draft || !draft.kind) return { enabled: false, label: '请选择收款状态' };
+    if (!draft) return { enabled: false, label: '请选择收款状态' };
     var targetCents = Math.max(0, toCents(payable) - paymentBalanceCents(draft, payable));
     if (isSingleQrCodePayment(draft) && draft.flowMethodId === 'qrpay' && state.paymentStatus !== 'idle') {
       return { enabled: false, label: '扫码支付中' };
     }
     if (state.paymentStatus === 'processing') return { enabled: false, label: '正在确认…' };
-    if (targetCents === 0) return { enabled: true, label: '确认开单' };
+    if (targetCents === 0 && (draft.useBalance || draft.kind)) return { enabled: true, label: '确认开单' };
+    if (!draft.kind) return { enabled: false, label: '请选择收款状态' };
     if (draft.kind === 'unpaid') return { enabled: true, label: '确认开单' };
     if (draft.kind === 'debt') return { enabled: Boolean(state.customer), label: '确认开单' };
     if (targetCents > 0 && isSingleQrCodePayment(draft)) {
@@ -5999,6 +6082,7 @@
     var draft = activeDeliveryDraft();
     var selectedPoint = currentPickupPoint(draft.pickupPointId);
     var contact = pickupContactValues(draft.pickupContact);
+    var showPickupError = state.deliveryPickupAttention;
     return ''
       + '<div class="order-panel-form order-pickup-form">'
       +   (PICKUP_POINTS.length ? ''
@@ -6009,8 +6093,8 @@
             }).join('')
         + '</div></section>' : '')
       +   '<section class="order-pickup-contact"><strong>提货人信息</strong><div class="order-delivery-address-fields">'
-      +     '<div class="input-group" data-component-slug="input"><label class="field-label" for="pickup-name">姓名</label><div class="input-wrapper"><input id="pickup-name" type="text" value="' + escapeHtml(contact.name) + '" placeholder="请输入姓名" data-pickup-name></div></div>'
-      +     '<div class="input-group" data-component-slug="input"><label class="field-label" for="pickup-phone">手机号</label><div class="input-wrapper"><input id="pickup-phone" type="text" inputmode="tel" value="' + escapeHtml(contact.phone) + '" placeholder="请输入手机号" data-pickup-phone></div></div>'
+      +     '<div class="input-group order-pickup-field' + (showPickupError && !contact.name.trim() ? ' order-pickup-field--error' : '') + '" data-component-slug="input"><label class="field-label" for="pickup-name">姓名</label><div class="input-wrapper"><input id="pickup-name" type="text" value="' + escapeHtml(contact.name) + '" placeholder="请输入姓名" data-pickup-name' + (showPickupError && !contact.name.trim() ? ' aria-invalid="true"' : '') + '></div></div>'
+      +     '<div class="input-group order-pickup-field' + (showPickupError && !contact.phone.trim() ? ' order-pickup-field--error' : '') + '" data-component-slug="input"><label class="field-label" for="pickup-phone">手机号</label><div class="input-wrapper"><input id="pickup-phone" type="text" inputmode="tel" value="' + escapeHtml(contact.phone) + '" placeholder="请输入手机号" data-pickup-phone' + (showPickupError && !contact.phone.trim() ? ' aria-invalid="true"' : '') + '></div></div>'
       +   '</div></section>'
       + '</div>';
   }
@@ -6044,7 +6128,7 @@
       + '</div>';
   }
 
-  function deliveryPanel() {
+  function deliveryPanel(mobile) {
     var draft = activeDeliveryDraft();
     var addressRequired = draft.delivery === 'express' || draft.delivery === 'freight';
     var detailContent = addressRequired ? addressForm() : (draft.delivery === 'pickup' ? pickupForm() : '');
@@ -6052,7 +6136,7 @@
       ? '<div class="order-delivery-detail order-delivery-detail--' + draft.delivery + '">' + detailContent + '</div>'
       : '';
     return ''
-      + '<div class="order-side-panel__head"><strong>选择发货方式</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>'
+      + (mobile ? '' : '<div class="order-side-panel__head"><strong>选择发货方式</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>')
       + '<div class="order-delivery-panel">'
       +   '<div class="order-delivery-panel__scroll">' + deliveryChoices() + detail + (state.deliveryScrollSpacer ? '<div class="order-delivery-scroll-spacer" style="height:' + state.deliveryScrollSpacer + 'px" aria-hidden="true"></div>' : '') + '</div>'
       +   '<div class="order-side-actions order-delivery-actions"><button type="button" class="link order-delivery-settings-link" data-component="link" data-component-slug="link" data-variant-name="Link_14" data-open-shipping-settings>发货/运费设置</button>' + button('取消', 'weak', 'md', 'data-close-panel') + button('确定', 'strong', 'md', 'data-save-delivery') + '</div>'
@@ -6343,9 +6427,11 @@
   function openOrderPromotion(type) {
     var selected = state.orderPromotion && state.orderPromotion.type === type ? state.orderPromotion : null;
     var defaults = { orderRate: 'item-rate', orderAmount: 'item-amount', rounding: 'integer', total: 'fixed' };
+    var selectedMode = selected ? selected.mode : defaults[type] || 'member-rate';
+    if (type === 'rounding' && roundingModes().indexOf(selectedMode) < 0) selectedMode = 'integer';
     state.orderPromotionDraft = {
       type: type,
-      mode: selected ? selected.mode : defaults[type] || 'member-rate',
+      mode: selectedMode,
       input: selected && type !== 'rounding' && type !== 'member' ? String(selected.value) : (type === 'total' ? totals().payable.toFixed(2) : ''),
       memberChoice: type === 'member' ? (state.memberDiscountChoice || '') : ''
     };
@@ -6363,22 +6449,39 @@
       if (draft.memberChoice === 'use') return { valid: true, calculation: orderPromotionCalculation('member', 'member-rate', state.memberDiscount) };
       return { valid: true, calculation: { actualCents: orderPromotionBaseCents() } };
     }
-    if (draft.type === 'rounding') return { valid: true, calculation: orderPromotionCalculation('rounding', draft.mode, 0) };
-    if (!raw) return { valid: false, error: '请输入有效金额' };
-    var decimal = /^\d+(?:\.\d{0,2})?$/.test(raw) && Number.isFinite(Number(raw));
+    if (draft.type === 'rounding') {
+      if (roundingModes().indexOf(draft.mode) < 0) return { valid: false, error: '金额过小无法抹零' };
+      return { valid: true, calculation: orderPromotionCalculation('rounding', draft.mode, 0) };
+    }
+    if (!raw) return { valid: true, noOp: true, calculation: { actualCents: orderPromotionBaseCents() } };
+    var decimal = /^(?:0|[1-9]\d{0,9})(?:\.\d{1,2})?$/.test(raw) && Number.isFinite(Number(raw));
     var value = Number(raw);
-    if (!decimal) return { valid: false, error: '请输入有效数字，最多两位小数' };
+    if (!decimal) return { valid: false, error: '请输入有效数字，整数最多十位、小数最多两位' };
     if (draft.type === 'orderRate' && (value < 0 || value > 99.99)) return { valid: false, error: '请输入 0–99.99 的百分比' };
-    if (draft.type === 'orderAmount' && value < 0) return { valid: false, error: '请输入非负优惠金额' };
+    if (draft.type !== 'orderRate' && value > 100000000) return { valid: false, error: '金额不能大于1亿元' };
+    if (draft.type === 'total' && !state.products.length && showsFreightAmount() && toCents(value) > toCents(state.freight)) {
+      return { valid: false, error: '改价金额不能超过当前运费' };
+    }
+    if (draft.type === 'orderAmount' && draft.mode === 'order-amount' && orderPriceEntries().length > 0 && Math.round(value * 100) > orderPromotionBaseCents()) return { valid: false, error: '优惠金额不能大于订单金额' };
     var calculation = orderPromotionCalculation(draft.type, draft.mode, value);
     return { valid: calculation.valid, error: calculation.valid ? '' : '商品原价为零，无法分配金额', calculation: calculation, value: value };
   }
 
   function orderPromotionBaseCents() {
     var goods = orderPriceEntries().reduce(function (sum, entry) { return sum + entry.originalCents * entry.qty; }, 0);
-    var freight = state.delivery === 'express' || state.delivery === 'freight'
+    var freight = showsFreightAmount()
       ? toCents(state.orderPromotionFreightBase == null ? state.freight : state.orderPromotionFreightBase) : 0;
     return goods + freight;
+  }
+
+  function roundingModes() {
+    var amount = orderPromotionBaseCents();
+    if (amount <= 100) return [];
+    var modes = ['integer'];
+    if (amount >= 1000) modes.push('ones');
+    if (amount >= 10000) modes.push('tens');
+    if (amount >= 100000) modes.push('hundreds');
+    return modes;
   }
 
   function orderPromotionOption(mode, label, selected, attr) {
@@ -6396,7 +6499,7 @@
     var titles = { member: '会员折扣', orderRate: '整单折扣', orderAmount: '整单优惠', rounding: '整单抹零', total: '整单改价' };
     var modes = draft.type === 'orderRate' ? { 'item-rate': '每件折扣', 'order-rate': '整单折扣' }
       : draft.type === 'orderAmount' ? { 'item-amount': '每件优惠', 'order-amount': '整单优惠' }
-      : draft.type === 'rounding' ? { integer: '整数', ones: '个位' } : null;
+      : draft.type === 'rounding' ? Object.fromEntries(roundingModes().map(function (mode) { return [mode, ({ integer: '整数', ones: '个位', tens: '十位', hundreds: '百位' })[mode]]; })) : null;
     var methodLabel = draft.type === 'orderRate' ? '折扣方式' : draft.type === 'orderAmount' ? '优惠方式' : '抹零方式';
     var options = modes ? Object.keys(modes).map(function (mode) { return orderPromotionOption(mode, modes[mode], draft.mode === mode, 'data-order-promotion-mode'); }).join('') : '';
     var inputLabel = draft.type === 'total' ? '改价后金额' : modes && modes[draft.mode] || '';
@@ -6414,7 +6517,8 @@
       +   '<div class="order-sku-price-modal__body">'
       +     (isMember ? '<div class="cell-group order-promotion-member-list" data-component="cell" data-variant-name="Cell_Action"><div class="cell-group__content">' + orderMemberChoiceCell('use', '使用会员折扣（' + compactNumber(Number(state.memberDiscount) / 10) + '折）', draft.memberChoice === 'use', true) + orderMemberChoiceCell('none', '不使用', draft.memberChoice === 'none', false) + '</div></div>' : '')
       +     (modes ? '<div class="order-sku-price-method-row"><span class="order-sku-price-method-label" id="order-promotion-method-label">' + methodLabel + '</span><div class="order-sku-price-modes" role="radiogroup" aria-labelledby="order-promotion-method-label">' + options + '</div></div>' : '')
-      +     (hasInput ? '<label class="order-sku-price-field">' + (isTotal ? '' : '<span data-order-promotion-field-label>' + inputLabel + '</span>') + '<span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" type="text" inputmode="decimal" autocomplete="off" value="' + escapeHtml(draft.input) + '" placeholder="' + (isTotal ? '请输入改价后的金额' : '请输入') + '" data-order-promotion-input aria-label="' + inputLabel + '"><span class="number-input__suffix" data-order-promotion-unit>' + unit + '</span></span></label>' : '')
+      +     (hasInput ? '<label class="order-sku-price-field">' + (isTotal ? '' : '<span data-order-promotion-field-label>' + inputLabel + '</span>') + '<span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" type="text" inputmode="decimal" autocomplete="off" value="' + escapeHtml(draft.input) + '" placeholder="' + (isTotal ? '请输入改价后的金额' : '请输入') + '" data-order-promotion-input aria-label="' + inputLabel + '"' + (isTotal && !state.products.length && showsFreightAmount() ? ' aria-describedby="order-promotion-freight-limit"' : '') + '><span class="number-input__suffix" data-order-promotion-unit>' + unit + '</span></span></label>' : '')
+      +     (isTotal && !state.products.length && showsFreightAmount() ? '<small class="order-sku-price-limit" id="order-promotion-freight-limit">改价后金额不超过当前运费 ' + money(state.freight) + '</small>' : '')
       +     (hasInput ? '<small class="order-sku-price-error" data-order-promotion-error>' + (draft.input && !preview.valid ? preview.error : '') + '</small>' : '')
       +     (isMember || isTotal ? '' : '<div class="order-sku-price-preview"><div><span>订单金额</span><strong data-order-promotion-before>' + moneyMarkup(original / 100) + '</strong></div><div><span>改价金额</span><strong data-order-promotion-change class="' + (change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(change / 100) + '</strong></div><div class="order-sku-price-preview__after"><span>应收金额</span><strong data-order-promotion-after>' + moneyMarkup(after / 100) + '</strong></div></div>')
       +   '</div>'
@@ -6751,11 +6855,11 @@
     var isNote = state.panel === 'note';
     var isCheckout = state.panel === 'checkout' || state.panel === 'payment';
     var isQuick = state.panel === 'quick';
-    var checkoutTitle = (totals().payable < 0 || isPureReturnOrder()) ? '退款处理' : '支付结算';
+    var checkoutTitle = totals().payable < 0 ? '退款处理' : '支付结算';
     var modalTitle = isQuick && QUICK_OP_DEFS[state.quickOp] ? QUICK_OP_DEFS[state.quickOp].title : (isCustomerCreate ? '新建客户' : (isDelivery ? '选择发货方式' : (isNote ? '商品备注' : (isCheckout ? checkoutTitle : '添加商品'))));
     // Exception: 宿主 modal 当前只有全宽面板，无法承载 PC 中宽新建客户、发货方式与商品录入；此处仅回退承载层，内容仍消费正式组件。
     return ''
-      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 || isPureReturnOrder() ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
+      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
       +   '<div class="order-desktop-modal__panel">'
       +     '<div class="order-desktop-modal__head"><strong id="order-desktop-modal-title">' + modalTitle + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon ' + (isDelivery ? 'icon-cha' : 'icon-cha16') + '" aria-hidden="true"></i></button></div>'
       +     '<div class="order-desktop-modal__body">' + (isQuick ? quickOpPanel(true) : (isCustomerCreate ? desktopNewCustomerModalContent() : (isDelivery ? deliveryPanel() : (isNote ? spuNotePanel() : (isCheckout ? checkoutPanel() : addPanel(true)))))) + '</div>'
@@ -6840,6 +6944,25 @@
       + '</div>';
   }
 
+  function checkoutGuardDialog() {
+    var guard = state.checkoutGuard;
+    if (!guard) return '';
+    var details = {
+      pickupPhone: { title: '提货人手机号格式有误', body: '请核对提货人手机号，仍可忽略提醒继续。', buttons: [['去看看', 'review'], ['忽略提醒', 'ignore']] },
+      recipient: { title: '未填写收货人信息', body: '请设置收货人信息，或跳过后继续结算。', buttons: [['去设置', 'review'], ['跳过', 'ignore'], ['取消', 'cancel']] },
+      recipientPhone: { title: '收货人手机号格式有误', body: '请核对收货人手机号，仍可忽略提醒继续。', buttons: [['去看看', 'review'], ['忽略提醒', 'ignore']] },
+      qualification: { title: '暂不能开单', body: '请先开通会员或试用资格。', buttons: [['我知道了', 'cancel']] },
+      addProduct: { title: '请添加商品', body: '当前配送方式与收款状态不支持无商品开单。', buttons: [['我知道了', 'cancel']] },
+      zeroSku: { title: '存在数量为 0 的商品', body: '确认后移除数量为 0 的规格，再继续结算。', buttons: [['取消', 'cancel'], ['移除并继续', 'remove']] }
+    }[guard.type];
+    if (!details) return '';
+    return '<div class="dialog dialog--text order-checkout-guard-dialog" role="dialog" aria-modal="true" aria-labelledby="order-checkout-guard-title" aria-describedby="order-checkout-guard-content" data-component="dialog" data-variant-name="Dialog_Text_' + details.buttons.length + '" data-state="open">'
+      + '<div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="order-checkout-guard-title">' + details.title + '</h3></div><div class="dialog__content" id="order-checkout-guard-content">' + details.body + '</div></div>'
+      + '<div class="dialog__actions"><div class="dialog__buttons' + (details.buttons.length > 1 ? ' dialog__buttons--' + (details.buttons.length === 3 ? 'triple' : 'dual') : '') + '">'
+      + details.buttons.map(function (button, index) { return (index ? '<span class="dialog__divider" aria-hidden="true"></span>' : '') + '<button type="button" class="dialog__btn dialog__btn--' + (button[1] === 'ignore' || button[1] === 'remove' ? 'confirm' : details.buttons.length === 1 ? 'default' : 'dismiss') + '" data-checkout-guard-action="' + button[1] + '">' + button[0] + '</button>'; }).join('')
+      + '</div></div></div></div>';
+  }
+
   function orderRowRemovalConfirm() {
     if (!state.pendingRowRemoval) return '';
     var title = state.pendingRowRemoval.spec !== null ? '确认移除该规格吗？' : '确认移除该商品吗？';
@@ -6920,10 +7043,10 @@
     }
     if (state.panel === 'delivery' || state.panel === 'address') {
       return ''
-        + '<div class="modal modal--frame-x modal--has-actions order-v2-modal order-v2-modal--sheet" role="dialog" aria-modal="true" data-state="open" data-component-slug="modal">'
+        + '<div class="modal modal--frame-x modal--has-actions order-v2-modal order-v2-modal--sheet' + (state.panel === 'delivery' ? ' order-v2-modal--delivery' : '') + '" role="dialog" aria-modal="true" data-state="open" data-component-slug="modal">'
         +   '<div class="modal__panel">'
         +     '<div class="modal__title modal__title--default"><nav class="navbar" data-component-slug="navbar"><div class="navbar__body"><div class="navbar__left"></div><div class="navbar__center"><span class="navbar__title">' + panelTitle() + '</span></div><div class="navbar__right navbar__right--text"><button type="button" class="navbar__action navbar__action--text" data-close-panel><span class="navbar__action-label">取消</span></button></div></div></nav></div>'
-        +     '<div class="modal__body order-v2-modal__body">' + (state.panel === 'delivery' ? deliveryChoices() : addressPanel()) + '</div>'
+        +     '<div class="modal__body order-v2-modal__body">' + (state.panel === 'delivery' ? deliveryPanel(true) : addressPanel()) + '</div>'
         +   '</div>'
         + '</div>';
     }
@@ -6962,7 +7085,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + orderRowRemovalConfirm() + productAvailabilityDialog() + orderStockWarningDialog() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + orderRowRemovalConfirm() + productAvailabilityDialog() + orderStockWarningDialog() + checkoutGuardDialog() + '</div>';
   }
 
   function openRechargeMenu(trigger, root, ctx) {
@@ -7574,35 +7697,98 @@
     ctx.toast('草稿已恢复');
   }
 
-  function validateCheckout(ctx) {
+  function hasZeroQuantitySpec() {
+    return state.products.some(function (item) {
+      return isSkuMode(item.mode)
+        ? itemOrderSpecs(item).some(function (spec) { return Number(item.skuQty[spec]) === 0; })
+        : Number(item.qty) === 0;
+    });
+  }
+
+  function removeZeroQuantitySpecs() {
+    state.products = state.products.filter(function (item) {
+      if (!isSkuMode(item.mode)) return Number(item.qty) !== 0;
+      Object.keys(item.skuQty || {}).forEach(function (spec) {
+        if (Number(item.skuQty[spec]) !== 0) return;
+        delete item.skuQty[spec];
+        if (item.skuPriceDetails) delete item.skuPriceDetails[spec];
+        if (item.skuPrices) delete item.skuPrices[spec];
+        if (Array.isArray(item.orderSpecs)) item.orderSpecs = item.orderSpecs.filter(function (rowSpec) { return rowSpec !== spec; });
+      });
+      item.qty = Object.keys(item.skuQty || {}).reduce(function (sum, spec) { return sum + Number(item.skuQty[spec] || 0); }, 0);
+      return Object.keys(item.skuQty || {}).length > 0;
+    });
+  }
+
+  function openCheckoutGuard(type, phase) {
+    state.checkoutGuard = { type: type, phase: phase || 'entry' };
+    renderActive();
+    return false;
+  }
+
+  function validateCheckout(ctx, phase) {
+    phase = phase || 'entry';
     normalizeReturnDelivery();
-    if (!state.products.length) {
-      ctx.toast('请先添加商品');
-      return false;
+    var policy = state.checkoutPolicy || {};
+    if (!state.products.length && deliverySettlementRule().requiresRecipient && !(state.address && hasText(state.address.name))) {
+      return openCheckoutGuard('addProduct', phase);
     }
-    if (isPureReturnOrder()) return true;
-    if (!state.delivery && state.customer) {
-      state.panel = 'delivery';
-      renderActive();
-      ctx.toast('请选择发货方式');
-      return false;
+    if (!isPureReturnOrder()) {
+      var cachedDelivery = Boolean((state.customer && state.customer.lastDelivery && state.customer.lastDelivery !== 'none') || (state.guestDeliveryPreference && state.guestDeliveryPreference.delivery && state.guestDeliveryPreference.delivery !== 'none'));
+      if (policy.recentOrderWithin90Days === false && !state.deliveryTouchedThisOrder && !cachedDelivery) {
+        ctx.toast('请选择发货方式');
+        return false;
+      }
+      if (state.delivery === 'pickup' && policy.requirePickupContact !== false) {
+        if (!state.pickupContact || !String(state.pickupContact.name || '').trim() || !String(state.pickupContact.phone || '').trim()) {
+          state.deliveryPickupAttention = true;
+          state.deliveryDraft = deliveryDraftFromState();
+          state.panel = 'delivery';
+          renderActive();
+          ctx.toast('请填写提货人信息');
+          focusDeliveryPickup(activeContext && activeContext.root);
+          return false;
+        }
+        if (!recipientPhoneValid(state.pickupContact.phone) && !state.checkoutWarnings.pickupPhone) return openCheckoutGuard('pickupPhone', phase);
+      }
+      if ((state.delivery === 'express' || state.delivery === 'freight') && orderRequiresRealName() && !realNameComplete(state.realNameInfo)) {
+        state.deliveryRealNameAttention = true;
+        state.deliveryDraft = deliveryDraftFromState();
+        state.panel = 'delivery';
+        renderActive();
+        ctx.toast('请完善必填的实名信息');
+        focusDeliveryRealName(activeContext && activeContext.root);
+        return false;
+      }
+      if (deliverySettlementRule().requiresRecipient) {
+        var recipientNamed = state.address && hasText(state.address.name);
+        if (!recipientNamed && !state.checkoutWarnings.recipient) return openCheckoutGuard('recipient', phase);
+        if (recipientNamed && !recipientPhoneValid(state.address.phone) && !state.checkoutWarnings.recipientPhone) return openCheckoutGuard('recipientPhone', phase);
+      }
     }
-    if ((state.delivery === 'express' || state.delivery === 'freight') && orderRequiresRealName() && !realNameComplete(state.realNameInfo)) {
-      state.deliveryRealNameAttention = true;
+    if (policy.memberEligible === false) return openCheckoutGuard('qualification', phase);
+    if (hasZeroQuantitySpec()) return openCheckoutGuard('zeroSku', phase);
+    return true;
+  }
+
+  function finishCheckoutGuard(action, ctx) {
+    var guard = state.checkoutGuard;
+    if (!guard) return;
+    state.checkoutGuard = null;
+    if (action === 'cancel') { renderActive(); return; }
+    if (action === 'review') {
       state.deliveryDraft = deliveryDraftFromState();
       state.panel = 'delivery';
       renderActive();
-      ctx.toast('请完善必填的实名信息');
-      focusDeliveryRealName(activeContext && activeContext.root);
-      return false;
+      return;
     }
-    if (state.delivery === 'pickup' && (!state.pickupContact || !state.pickupContact.name || !state.pickupContact.phone)) {
-      state.panel = 'delivery';
-      renderActive();
-      ctx.toast('请填写提货人姓名和手机号');
-      return false;
+    if (action === 'ignore') {
+      if (guard.type === 'recipient' && !state.products.length) { openCheckoutGuard('addProduct', guard.phase); return; }
+      state.checkoutWarnings[guard.type] = true;
     }
-    return true;
+    if (action === 'remove') removeZeroQuantitySpecs();
+    if (guard.phase === 'submit') confirmPayment(ctx);
+    else beginPayment(ctx);
   }
 
   function applyPaymentFeatureVisibility(draft) {
@@ -7629,16 +7815,26 @@
   }
 
   function createPaymentDraft() {
+    var cachedPayment = storedPaymentPreference();
+    var configuredKind = state.checkoutPolicy && state.checkoutPolicy.defaultPaymentKind;
+    var defaultKind = cachedPayment ? cachedPayment.kind : (['unpaid', 'online', 'private', 'debt'].indexOf(configuredKind) >= 0 ? configuredKind : '');
+    if (defaultKind === 'online' && !featureEnabled('onlinePayment')) defaultKind = '';
+    if (orderHasReturnSku() && defaultKind === 'unpaid') defaultKind = 'private';
+    if (orderHasReturnSku() && defaultKind === 'debt' && !returnDebtAllowed()) defaultKind = 'private';
+    if (defaultKind === 'debt' && !state.customer) defaultKind = '';
+    var availableMethods = paymentMethodsForKind(defaultKind);
+    var preferredMethod = cachedPayment && availableMethods.find(function (method) { return method.id === cachedPayment.method; });
+    var selectedMethod = preferredMethod || availableMethods[0] || null;
     var draft = {
-      kind: orderHasReturnSku() ? 'private' : 'unpaid',
+      kind: defaultKind,
       mode: 'single',
-      method: '',
-      singleAmount: '',
+      method: selectedMethod ? selectedMethod.id : '',
+      singleAmount: selectedMethod && totals().payable >= 0 ? (Math.max(0, toCents(totals().payable) - paymentBalanceCents({ useBalance: Boolean(state.customer && Number(state.customer.balance || 0) > 0) }, totals().payable)) / 100).toFixed(2) : '',
       editingPrivateAmount: '',
       privateAmountBeforeEdit: '',
-      lastSingleMethod: '',
+      lastSingleMethod: selectedMethod ? selectedMethod.id : '',
       lastSingleAmount: '',
-      selectedMethods: [],
+      selectedMethods: selectedMethod ? [selectedMethod.id] : [],
       lastComboMethods: null,
       onlineAmountTouched: {},
       useBalance: Boolean(state.customer && Number(state.customer.balance || 0) > 0),
@@ -7664,7 +7860,8 @@
       flowCompletedIds: [],
       showShortageDialog: false
     };
-    PAYMENT_METHODS.forEach(function (method) { draft[method.id] = ''; });
+    paymentMethodCatalog().forEach(function (method) { draft[method.id] = ''; });
+    draft.lastSingleAmount = draft.singleAmount;
     if (orderHasReturnSku()) {
       draft.inventoryConfigExistSend = !isHistoryRefundSync() || refundSyncState().choices.indexOf('syncSend') >= 0;
       var config = refundPrototypeConfig();
@@ -7680,7 +7877,7 @@
 
   function beginPayment(ctx) {
     if (state.paymentStatus === 'processing' || refundSyncState().checking) return;
-    if (!validateCheckout(ctx)) return;
+    if (!validateCheckout(ctx, 'entry')) return;
     validateRefundSync(ctx, function () { enterPayment(); });
   }
 
@@ -7899,7 +8096,7 @@
 
   function confirmPayment(ctx) {
     if (state.paymentStatus === 'processing' || state.paymentStatus === 'success' || refundSyncState().checking) return;
-    if (!validateCheckout(ctx)) return;
+    if (!validateCheckout(ctx, 'submit')) return;
     if (rejectUnavailableProducts()) return;
     validateRefundSync(ctx, function () { confirmPaymentAfterSync(ctx); }, true);
   }
@@ -7908,11 +8105,15 @@
     var draft = state.paymentDraft;
     applyPaymentFeatureVisibility(draft);
     var payable = totals().payable;
-    if (payable < 0 || isPureReturnOrder()) {
+    if (!state.products.length && (!deliverySettlementRule().supportsSenderInfo || !draft || !(['private', 'debt'].indexOf(draft.kind) >= 0 || draft.useBalance))) {
+      openCheckoutGuard('addProduct', 'submit');
+      return;
+    }
+    if (payable < 0) {
       confirmRefund(ctx, draft);
       return;
     }
-    if (!draft || !draft.kind) {
+    if (!draft || (!draft.kind && !draft.useBalance)) {
       ctx.toast('请选择结算方式');
       return;
     }
@@ -7921,7 +8122,7 @@
     draft.balanceAdjustmentCents = null;
     draft.receivedAmount = 0; draft.balanceAmount = 0; draft.shortage = 0; draft.excess = 0;
     var coveredBalanceCents = paymentBalanceCents(draft, payable);
-    if (toCents(payable) - coveredBalanceCents <= 0) {
+    if (draft.useBalance && toCents(payable) - coveredBalanceCents <= 0) {
       draft.kind = 'private';
       draft.receivedAmount = 0; draft.balanceAmount = coveredBalanceCents / 100;
       draft.shortage = 0; draft.excess = 0;
@@ -8203,7 +8404,7 @@
   function finishOrder(ctx) {
     state.paymentStatus = 'success';
     state.orderNo = 'SO' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 9000) + 1000);
-    var isRefundOrder = totals().payable < 0 || isPureReturnOrder();
+    var isRefundOrder = totals().payable < 0;
     if (state.paymentDraft) state.paymentDraft.orderBusinessStatus = orderDeliveryStatus();
     var paymentKind = state.paymentDraft ? state.paymentDraft.kind : 'private';
     if (!isRefundOrder) {
@@ -8345,6 +8546,11 @@
   }
 
   function handleClick(event, root, ctx) {
+    if (state.checkoutGuard) {
+      var checkoutGuardAction = event.target.closest('[data-checkout-guard-action]');
+      if (checkoutGuardAction) finishCheckoutGuard(checkoutGuardAction.dataset.checkoutGuardAction, ctx);
+      return;
+    }
     if (state.orderStockWarning) {
       if (event.target.closest('[data-order-stock-cancel]')) finishOrderStockWarning('cancel', ctx);
       else if (event.target.closest('[data-order-stock-confirm]')) finishOrderStockWarning('confirm', ctx);
@@ -8475,6 +8681,11 @@
       if (target.matches('[data-confirm-order-promotion]')) {
         var orderDraft = state.orderPromotionDraft;
         var draftPreview = orderPromotionDraftPreview(orderDraft);
+        if (draftPreview.noOp) {
+          state.orderPromotionDraft = null;
+          renderActive();
+          return;
+        }
         if (!draftPreview.valid) {
           syncOrderPromotionPreview(root);
           ctx.toast(draftPreview.error || '请输入有效改价金额');
@@ -8493,7 +8704,6 @@
         }
         state.orderPromotionDraft = null;
         markDirty(ctx);
-        ctx.toast('整单改价已更新');
         return;
       }
       return;
@@ -8722,7 +8932,13 @@
       return;
     }
     if (target.matches('[data-save-draft]')) {
+      if (!hasManualDraftContent()) {
+        ctx.toast('无内容需保存');
+        return;
+      }
       saveCurrentDraft();
+      state.draftCount += 1;
+      resetOrder();
       renderActive();
       ctx.toast('草稿已保存');
       return;
@@ -8983,12 +9199,16 @@
           ctx.toast('请先选择客户');
           return;
         }
-        if (promotionType !== 'member' && orderPriceEntries().length === 0) {
-          ctx.toast('请先添加商品');
+        if (promotionType !== 'member' && !canOpenOrderPromotion()) {
+          ctx.toast('请先选择商品');
           return;
         }
         if (promotionType !== 'member' && orderHasReturnSku()) {
           ctx.toast('含退货商品，无法整单改价');
+          return;
+        }
+        if (promotionType === 'rounding' && !roundingModes().length) {
+          ctx.toast('金额过小无法抹零');
           return;
         }
         openOrderPromotion(promotionType);
@@ -9023,6 +9243,7 @@
         if (type === 'delivery') {
           state.deliveryDraft = deliveryDraftFromState();
           state.deliveryRealNameAttention = target.hasAttribute('data-real-name-pending');
+          state.deliveryPickupAttention = false;
           state.deliveryScrollSpacer = 0;
         }
         openPanel(type);
@@ -9377,6 +9598,7 @@
       if (closingDelivery) {
         state.deliveryDraft = null;
         state.deliveryRealNameAttention = false;
+        state.deliveryPickupAttention = false;
         state.deliveryScrollSpacer = 0;
       }
       state.panel = productEditReturnPanel || null;
@@ -9786,7 +10008,15 @@
         var pickupName = deliveryScope.querySelector('[data-pickup-name]')?.value.trim();
         var pickupPhone = deliveryScope.querySelector('[data-pickup-phone]')?.value.trim();
         if (!pickupName || !pickupPhone) {
-          ctx.toast('请完整填写提货人姓名和手机号');
+          state.deliveryPickupAttention = true;
+          [deliveryScope.querySelector('[data-pickup-name]'), deliveryScope.querySelector('[data-pickup-phone]')].forEach(function (input) {
+            if (!input) return;
+            var invalid = !input.value.trim();
+            input.closest('.order-pickup-field')?.classList.toggle('order-pickup-field--error', invalid);
+            input.toggleAttribute('aria-invalid', invalid);
+          });
+          ctx.toast('请填写提货人信息');
+          focusDeliveryPickup(root);
           return;
         }
         if (PICKUP_POINTS.length && !currentPickupPoint(saveDraft.pickupPointId)) saveDraft.pickupPointId = PICKUP_POINTS[0].id;
@@ -9803,7 +10033,10 @@
         saveDraft.senderInfo = { name: senderName, phone: senderPhone };
       }
       state.delivery = saveDraft.delivery;
+      state.deliveryTouchedThisOrder = true;
+      state.checkoutWarnings = {};
       state.deliveryRealNameAttention = false;
+      state.deliveryPickupAttention = false;
       if (saveDraft.delivery === 'express' || saveDraft.delivery === 'freight') state.address = saveDraft.address ? Object.assign({}, saveDraft.address) : null;
       refreshDeliveryRestrictions();
       if (saveDraft.delivery === 'express' || saveDraft.delivery === 'freight') state.realNameInfo = saveDraft.realNameInfo ? Object.assign({}, saveDraft.realNameInfo) : state.realNameInfo;
@@ -9817,7 +10050,6 @@
       state.deliveryDraft = null;
       state.panel = null;
       markDirty(ctx);
-      ctx.toast('发货信息已保存');
       scheduleClipboardRecipientCheck();
       return;
     }
@@ -10014,8 +10246,8 @@
       return;
     }
     if (target.matches('[data-edit-total]')) {
-      if (orderPriceEntries().length === 0) {
-        ctx.toast('请先添加商品');
+      if (!canOpenOrderPromotion()) {
+        ctx.toast('请先选择商品');
         return;
       }
       if (orderHasReturnSku()) {
@@ -10038,6 +10270,10 @@
       var currentTotals = totals();
       if (!rawNextPayable || !Number.isFinite(nextPayable) || nextPayable < 0) {
         ctx.toast('请输入有效的订单总价');
+        return;
+      }
+      if (!state.products.length && showsFreightAmount() && toCents(nextPayable) > toCents(state.freight)) {
+        ctx.toast('改价金额不能超过当前运费');
         return;
       }
       state.orderTotalAdjustment = Math.round((nextPayable - currentTotals.calculatedPayable) * 100) / 100;
@@ -10609,7 +10845,15 @@
     if (state.orderStockWarning || refundSyncState().dialog || (orderHasReturnSku() && state.paymentStatus === 'processing')) return;
     var target = event.target;
     if (target.matches('[data-order-promotion-input]') && state.orderPromotionDraft) {
-      state.orderPromotionDraft.input = target.value;
+      var inputValue = String(target.value || '');
+      if (inputValue && (!/^(?:0|[1-9]\d{0,9})(?:\.\d{0,2})?$/.test(inputValue)
+        || (state.orderPromotionDraft.type === 'orderRate' && Number(inputValue) > 99.99)
+        || (state.orderPromotionDraft.type !== 'orderRate' && Number(inputValue) > 100000000)
+        || (state.orderPromotionDraft.type === 'total' && !state.products.length && showsFreightAmount() && toCents(Number(inputValue)) > toCents(state.freight)))) {
+        target.value = state.orderPromotionDraft.input;
+        return;
+      }
+      state.orderPromotionDraft.input = inputValue;
       syncOrderPromotionPreview(root);
       return;
     }
@@ -10687,6 +10931,18 @@
           : realNameIdCardValid(target.value);
         if (realNameFieldBody) realNameFieldBody.classList.toggle('form-body--error', !validRealNameField);
         target.toggleAttribute('aria-invalid', !validRealNameField);
+      }
+      return;
+    }
+    if (state.panel === 'delivery' && target.matches('[data-pickup-name], [data-pickup-phone]')) {
+      var inputPickupDraft = activeDeliveryDraft();
+      inputPickupDraft.pickupContact = Object.assign({}, inputPickupDraft.pickupContact || {});
+      if (target.matches('[data-pickup-name]')) inputPickupDraft.pickupContact.name = target.value;
+      if (target.matches('[data-pickup-phone]')) inputPickupDraft.pickupContact.phone = target.value;
+      if (state.deliveryPickupAttention) {
+        var invalidPickupField = !target.value.trim();
+        target.closest('.order-pickup-field')?.classList.toggle('order-pickup-field--error', invalidPickupField);
+        target.toggleAttribute('aria-invalid', invalidPickupField);
       }
       return;
     }
@@ -11707,11 +11963,11 @@
 
   function successTemplate() {
     var t = totals();
-    var isRefund = t.payable < 0 || isPureReturnOrder();
+    var isRefund = t.payable < 0;
     var isUnpaid = state.paymentSummary === '未收款';
     var isDebt = state.paymentSummary === '记欠款';
-    var isPureReturn = Boolean(isRefund && state.paymentDraft && state.paymentDraft.orderBusinessStatus === 'returned');
-    var resultTitle = isRefund ? (isPureReturn ? '退货单已生成，退款已处理' : '退款已处理，订单已生成') : (isUnpaid ? '订单已生成，待收款' : (isDebt ? '订单已生成，已记欠款' : '收款成功，订单已生成'));
+    var isPureReturn = Boolean(state.paymentDraft && state.paymentDraft.orderBusinessStatus === 'returned');
+    var resultTitle = isRefund ? (isPureReturn ? '退货单已生成，退款已处理' : '退款已处理，订单已生成') : (isPureReturn ? '退货单已生成' : (isUnpaid ? '订单已生成，待收款' : (isDebt ? '订单已生成，已记欠款' : '收款成功，订单已生成')));
     var paymentState = isRefund ? '已处理' : (isUnpaid ? '未收款' : (isDebt ? '已记欠款' : '已收款'));
     var statusLabel = isRefund ? '退款状态' : '收款状态';
     return ''
@@ -11729,7 +11985,13 @@
   }
 
   function resetOrder() {
+    clearTimeout(state.saveTimer);
+    state.saveTimer = null;
     state.pendingRowRemoval = null;
+    state.deliveryTouchedThisOrder = false;
+    state.checkoutGuard = null;
+    state.deliveryPickupAttention = false;
+    state.checkoutWarnings = {};
     state.orderStockWarning = null;
     state.productAvailabilityDialog = '';
     state.pendingInvalidProducts = [];
