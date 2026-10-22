@@ -5840,10 +5840,10 @@
     return Promise.reject(new Error('clipboard-unavailable'));
   }
 
-  function openClipboardRecipientModal(text) {
+  function openClipboardRecipientModal(text, preview) {
     var source = String(text || '').trim();
     var key = clipboardContentKey(source);
-    if (!source || storedClipboardRecipientKeys().indexOf(key) >= 0 || state.panel) return false;
+    if (!source || (!preview && storedClipboardRecipientKeys().indexOf(key) >= 0) || state.panel) return false;
     var draft = recognizeClipboardRecipient(source);
     if (!clipboardRecipientCanOpen(draft)) return false;
     state.clipboardAddressDraft = draft;
@@ -5855,7 +5855,7 @@
     state.clipboardRegionPickerOpen = false;
     state.clipboardRegionSelection = null;
     state.panel = 'clipboard-address';
-    rememberClipboardRecipientKey(key);
+    if (!preview) rememberClipboardRecipientKey(key);
     renderActive();
     window.requestAnimationFrame(function () {
       var firstField = activeContext && activeContext.root.querySelector('[data-clipboard-address-field="name"]');
@@ -7902,6 +7902,16 @@
     try { reviewState = new URLSearchParams(window.location.search).get('state') || ''; } catch (error) {}
     // Explicit isolated review states: simulate a previous cart, never restore a saved draft or real cache.
     if (reviewState === 'new-order-demo') { resetOrder(); state.panel = null; return; }
+    if (reviewState === 'clipboard-recipient-preview') {
+      // Prototype-only entry: reuse recognition and editing without reading the
+      // real clipboard or changing its content-deduplication history.
+      resetOrder();
+      state.delivery = 'express';
+      state.address = null;
+      state.panel = null;
+      openClipboardRecipientModal('王小明 13912345678 浙江省杭州市西湖区文三路168号', true);
+      return;
+    }
     if (reviewState === 'last-order-demo') {
       state.customer = CUSTOMERS[0];
       state.products = [Object.assign({}, PRODUCTS[0], { id: 'last-order-demo-product', price: PRODUCTS[0].listPrice, qty: 2, mode: 'single', skuQty: { '白色/M': 2 }, note: '' })];
