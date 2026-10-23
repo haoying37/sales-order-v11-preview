@@ -61,6 +61,34 @@ window.wegoPreviewProjects = [
         "path": "projects/business-cloud/sales-order/v1.1.0/pages/clipboard-recipient-preview.html"
       },
       {
+        "name": "add-sku-delisted-preview",
+        "title": "部分规格已下架",
+        "view": "添加商品演示",
+        "scenario": "部分规格已下架",
+        "path": "projects/business-cloud/sales-order/v1.1.0/pages/add-sku-delisted-preview.html"
+      },
+      {
+        "name": "add-all-sku-delisted-preview",
+        "title": "全部规格已下架",
+        "view": "添加商品演示",
+        "scenario": "全部规格已下架",
+        "path": "projects/business-cloud/sales-order/v1.1.0/pages/add-all-sku-delisted-preview.html"
+      },
+      {
+        "name": "add-format-guide-preview",
+        "title": "默认规格气泡引导",
+        "view": "添加商品演示",
+        "scenario": "默认规格气泡引导",
+        "path": "projects/business-cloud/sales-order/v1.1.0/pages/add-format-guide-preview.html"
+      },
+      {
+        "name": "add-wholesale-preview",
+        "title": "批发规则与起批提醒",
+        "view": "添加商品演示",
+        "scenario": "批发规则与起批提醒",
+        "path": "projects/business-cloud/sales-order/v1.1.0/pages/add-wholesale-preview.html"
+      },
+      {
         "name": "delivery-restriction-preview",
         "title": "不可配送地区提醒",
         "view": "已添加区域演示",

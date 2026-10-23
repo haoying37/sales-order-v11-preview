@@ -1699,22 +1699,21 @@ body[data-order-layout="landscape"] .phone-indicator {
   outline-offset: -2px;
 }
 
-.order-add-last-price {
-  position: absolute;
-  z-index: var(--z-popover);
-  bottom: calc(var(--spacer-4) * -1);
-  left: calc(var(--size-64) + var(--spacer-24));
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacer-6);
-  margin-top: 0;
-  padding: var(--spacer-4) var(--spacer-8);
-  color: var(--bg_white_100);
-  font-size: var(--Font10-font-size);
-  background: var(--bg_modal_80);
-  border-radius: var(--radius-4);
+.order-last-price-slot {
+  display: inline-block;
+  flex: 0 1 auto;
+  width: min(224px, 100%);
+  min-width: 0;
+  height: 40px;
+  vertical-align: middle;
 }
-
+.order-add-product__content > .order-last-price-slot { margin-top: var(--spacer-4); }
+.order-add-last-price.popover {
+  position: fixed;
+  z-index: calc(var(--z-modal) + 1);
+  max-width: min(240px, calc(100vw - 32px));
+}
+.order-add-last-price[hidden] { display: none; }
 .order-add-last-price button {
   padding: 0;
   color: var(--green_1_100);
@@ -3722,9 +3721,18 @@ button.order-payment-method-card {
     box-shadow: var(--shadow-lg);
   }
 
+  .order-sku-rack.sku_rack__stage--pc .sku_rack__modal {
+    padding: var(--spacer-24);
+  }
+
+  .order-desktop-modal--add .order-desktop-modal__panel,
+  .order-sku-rack.sku_rack__stage--pc .sku_rack__panel {
+    height: min(calc(var(--size-104) * 6), calc(100% - var(--spacer-48)));
+    max-height: min(calc(var(--size-104) * 6), calc(100% - var(--spacer-48)));
+  }
+
   .order-desktop-modal--add .order-desktop-modal__panel {
     width: min(calc(var(--size-104) * 4 + var(--size-64)), calc(100% - var(--spacer-48)));
-    height: min(calc(var(--size-104) * 6), calc(100% - var(--spacer-48)));
     background: var(--bg_100);
   }
 
@@ -3765,18 +3773,21 @@ button.order-payment-method-card {
     border-bottom: var(--stroke-hairline) solid var(--bg_line_08);
   }
 
-  .order-desktop-modal--add .order-desktop-modal__head {
+  .order-desktop-modal--add .order-desktop-modal__head,
+  .order-sku-rack.sku_rack__stage--pc .order-desktop-modal__head {
     min-height: var(--size-56);
     background: var(--bg_100);
     border-bottom: 0;
   }
 
-  .order-desktop-modal--add .order-desktop-modal__head > strong {
+  .order-desktop-modal--add .order-desktop-modal__head > strong,
+  .order-sku-rack.sku_rack__stage--pc .order-desktop-modal__head > strong {
     font-size: var(--Font16-font-size);
     font-weight: var(--Font14-medium-font-weight);
   }
 
-  .order-desktop-modal--add .order-desktop-modal__head > .btn {
+  .order-desktop-modal--add .order-desktop-modal__head > .btn,
+  .order-sku-rack.sku_rack__stage--pc .order-desktop-modal__head > .btn {
     width: var(--size-24);
     min-width: var(--size-24);
     height: var(--size-24);
@@ -3834,10 +3845,6 @@ button.order-payment-method-card {
     gap: var(--spacer-12);
   }
 
-  .order-desktop-modal--add .order-add-last-price {
-    position: static;
-    align-self: flex-start;
-  }
 
   .order-desktop-modal--add .order-add-scroll {
     overflow-anchor: none;
@@ -4176,7 +4183,8 @@ button.order-payment-method-card {
     font-size: var(--size-16);
   }
 
-  .order-desktop-modal--add .order-add-footer {
+  .order-desktop-modal--add .order-add-footer,
+  .order-sku-rack.sku_rack__stage--pc .order-add-footer {
     min-height: var(--size-64);
     padding: var(--spacer-12) var(--spacer-16);
     border-top: 0;
@@ -4218,7 +4226,8 @@ button.order-payment-method-card {
     color: var(--text_100);
   }
 
-  .order-desktop-modal--add .order-add-footer__actions .btn {
+  .order-desktop-modal--add .order-add-footer__actions .btn,
+  .order-sku-rack.sku_rack__stage--pc .order-add-footer__actions .btn {
     width: calc(var(--size-72) + var(--spacer-4));
     min-width: calc(var(--size-72) + var(--spacer-4));
     height: var(--size-40);
@@ -12277,13 +12286,19 @@ button.order-payment-method-card {
   padding-bottom: var(--spacer-12);
 }
 .order-add-choice-list--colors .btn {
+  position: relative;
+  overflow: visible;
   display: inline-flex;
   align-items: center;
   gap: var(--spacer-4);
 }
-.order-add-color-count {
-  color: var(--text_80);
-  font-size: var(--Font12-font-size);
+.order-add-color-count { vertical-align: middle; }
+.order-batch-matrix thead th:not(.order-batch-corner) > button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacer-4);
 }
 .order-add-color-count[hidden] {
   display: none;
@@ -13095,4 +13110,108 @@ button.order-payment-method-card {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* SkuRack host adaptation; component DOM/styles come from the locked 38edefc Preview. */
+.order-add-view-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--spacer-12); }
+.order-add-rack-notice { display: flex; align-items: center; justify-content: flex-start; gap: var(--spacer-8); padding: var(--spacer-12) 0; color: var(--text_80); font-size: var(--Font14-font-size); }
+.order-sku-rack.sku_rack__stage { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 3); width: 100%; height: 100dvh; min-height: 0; margin: 0; border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.order-sku-rack .sku_rack__modal { pointer-events: none; }
+.order-sku-rack .sku_rack__panel { pointer-events: auto; display: flex; flex-direction: column; max-height: calc(100dvh - 32px); min-height: 0; overflow: hidden; }
+.order-sku-rack.sku_rack__stage--pc .sku_rack__body { flex: 1 1 auto; min-height: 0; }
+.order-sku-rack.sku_rack__stage--pc .sku_rack__table-wrap { flex: 1 1 auto; height: auto; min-height: 0; max-height: none; overflow: auto; }
+.order-sku-rack.sku_rack__stage--mobile .sku_rack__panel { height: auto; max-height: calc(100dvh - 16px); }
+.order-sku-rack.sku_rack__stage--mobile .sku_rack__table-wrap { height: auto; max-height: min(496px, calc(100dvh - 112px)); overflow: auto; }
+.order-sku-rack .sku_rack__table-head { position: sticky; top: 0; z-index: 1; background: var(--bg_gray_03_pack); }
+.order-sku-rack-error { padding: var(--spacer-8) var(--spacer-12); border-radius: var(--radius-8); color: var(--red_100); background: var(--bg_100); white-space: nowrap; }
+.order-sku-rack-saving { position: absolute; inset: 0; z-index: 25; background: var(--bg_modal_30); }
+.order-sku-rack [disabled] { cursor: default; }
+
+.order-add-rack-notice .order-add-rack-link { color: var(--text_80); font-weight: var(--Font14-normal-font-weight); }
+
+/* SkuRack host chrome shares the Add Product rules above. */
+.order-sku-rack .order-sku-rack-help { flex: 0 0 auto; margin: 0; padding: var(--spacer-8) var(--spacer-8); color: var(--text_80); font-size: var(--Font12-font-size); line-height: var(--Font12-line-height); }
+@media (prefers-reduced-motion: reduce) {
+  .order-sku-rack .switch, .order-sku-rack .switch__thumb { transition: none; }
+}
+
+/* Default-SKU guide: above Add Specification; outside clicks/scroll do not dismiss. */
+.order-add-view-head > .order-format-guide-anchor { position: relative; display: inline-flex; margin-left: auto; flex: 0 0 auto; }
+.order-format-guide { position: fixed; z-index: calc(var(--z-modal) + 1); max-width: min(240px, calc(100vw - 64px)); }
+.order-format-guide[data-placement="top"][data-align="end"] .popover__arrow { right: var(--order-format-guide-arrow-right, 16px); }
+.order-format-guide-apply { display: block; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--bg_white_100); text-align: left; cursor: pointer; }
+.order-format-guide-apply .popover__text { display: block; white-space: normal; overflow-wrap: anywhere; }
+.order-format-save { position: fixed; inset: 0; z-index: calc(var(--z-modal) + 5); display: flex; align-items: center; justify-content: center; background: var(--bg_modal_30); }
+
+/* Wholesale rules share existing quantity/tool rows; price switching adds no row. */
+.order-wholesale-tags.order-add-wholesale-rules {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--size-32);
+  margin: 0;
+  gap: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.order-add-wholesale-rules::-webkit-scrollbar { display: none; }
+.order-wholesale-tags.order-add-wholesale-rules .order-wholesale-tag {
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+}
+.order-wholesale-tags.order-add-wholesale-rules .order-wholesale-tag .tag__label {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+.order-batch-tools {
+  flex-wrap: nowrap;
+  gap: var(--spacer-8);
+  height: var(--size-32);
+  min-height: var(--size-32);
+}
+.order-batch-tools__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--spacer-12);
+  white-space: nowrap;
+}
+.order-batch-tools .order-add-wholesale-rules .order-wholesale-tag { margin-left: auto; }
+.order-single-picker .order-single-qty { gap: var(--spacer-8); }
+.order-single-picker .order-single-qty > small,
+.order-single-picker .order-single-qty > .counter { flex-shrink: 0; }
+.order-single-picker .order-single-qty > small { white-space: nowrap; }
+@media (min-width: 768px) {
+  .order-add-spec-counter-head {
+    box-sizing: border-box;
+    height: calc(var(--size-32) + var(--spacer-16) + var(--stroke-hairline));
+    min-height: calc(var(--size-32) + var(--spacer-16) + var(--stroke-hairline));
+    gap: var(--spacer-8);
+    flex-wrap: nowrap;
+  }
+  .order-add-spec-counter-head > small,
+  .order-add-spec-counter-head > .counter { flex: 0 0 auto; }
+  .order-add-spec-counter-head:empty { height: 0; min-height: 0; }
+  .order-add-spec-counter-row--default { gap: var(--spacer-8); }
+  .order-add-spec-counter-row--default .order-add-spec-counter-row__info {
+    flex: 0 0 auto;
+    padding-right: 0;
+  }
+}
+.order-add-minimum-dialog { z-index: calc(var(--z-modal) + 8); }
+
+/* Selection strokes do not participate in layout; corner badges do not widen hosts. */
+.order-add-price-modes .tag.tag--selected,
+.order-add-choice-list .btn.is-selected {
+  box-shadow: inset 0 0 0 var(--stroke-1) var(--green_100, var(--green_1_100));
+}
+/* Table quantities follow the color text; list badges remain at the button corner. */
+.order-batch-matrix thead .order-add-color-count {
+  position: relative;
+  inset: auto;
+  transform: none;
 }
