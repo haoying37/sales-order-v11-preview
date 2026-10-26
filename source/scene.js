@@ -929,6 +929,9 @@
     desktopOrderScrollTop: 0,
     catalogCollapsed: storedCatalogCollapsed(),
     tabletCatalogAutoCollapsed: true,
+    catalogDrawerMotion: '',
+    catalogDrawerCloseTimer: null,
+    catalogToggleUsed: { expand: false, collapse: false },
     catalogWidth: null,
     catalogResizePointerId: null,
     catalogViewMode: storedCatalogViewMode(),
@@ -987,6 +990,7 @@
     scannerConnected: true,
     scannerRequesting: false,
     scannerOpen: false,
+    scannerEntering: false,
     scannerMessage: '扫描商品条码',
     scannerImagePreview: null,
     scannerImageRecognizing: false,
@@ -1019,6 +1023,7 @@
     productEditReturnPanel: null,
     productCreateDraft: null,
     catalogCreateMenuOpen: false,
+    catalogCreateMenuAnchor: 'catalog',
     rowContextMenu: null,
     clipboardAddressDraft: null,
     clipboardAddressSourceText: '',
@@ -2672,9 +2677,14 @@
     });
   }
 
+  function activeDesktopProductSearchInput(root) {
+    return root.querySelector('.order-tablet-drawer [data-header-catalog-search], .order-landscape-scanner-drawer [data-header-catalog-search]')
+      || root.querySelector('[data-header-catalog-search]');
+  }
+
   function focusDesktopProductSearch() {
     if (!activeContext || !isDesktopWorkbench()) return;
-    var input = activeContext.root.querySelector('[data-header-catalog-search]');
+    var input = activeDesktopProductSearchInput(activeContext.root);
     if (!input) return;
     input.focus({ preventScroll: true });
     input.setSelectionRange(input.value.length, input.value.length);
@@ -2688,7 +2698,7 @@
 
   function focusCatalogCreateTrigger() {
     if (!activeContext || !activeContext.root) return;
-    var trigger = activeContext.root.querySelector('[data-toggle-product-create-menu]');
+    var trigger = catalogCreateTrigger(activeContext.root);
     if (trigger) trigger.focus({ preventScroll: true });
   }
 
@@ -4007,11 +4017,12 @@
     return ''
       + '<div class="order-desktop-product-search ' + (inCatalog ? 'order-desktop-product-search--catalog' : 'order-desktop-product-search--collapsed') + listSearchResultClass + '">'
       +   '<div class="order-desktop-product-search__row">'
-      +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-context-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="搜索商品" aria-label="搜索商品名称或货号" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
+      +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-' + (inCatalog ? 'catalog' : 'context') + '-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="搜索商品" aria-label="搜索商品名称或货号" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
       +     '<input type="file" accept="image/jpeg,image/png,image/jpg,image/bmp,image/webp,video/mp4" multiple data-header-image-input hidden>'
       +     (inCatalog ? '' : '<button type="button" class="btn btn--medium btn--sm order-desktop-product-search__submit" data-component-slug="button" data-submit-header-search ' + (state.desktopProductKeyword.trim() ? '' : 'hidden') + '>搜索</button>')
-      +     (inCatalog ? sidebarFilterButton : collapsedFilterButton)
-      +     '<button type="button" class="btn btn--weak btn--sm btn--icon-only order-desktop-barcode-search is-active ' + scannerConnectedClass + '" data-component-slug="button" data-scan aria-label="扫条码" title="扫条码"><i class="btn__icon wego-iconfont-s icon-saotiaoma" aria-hidden="true"></i></button>'
+      +     (inCatalog ? sidebarFilterButton : '<div class="order-desktop-search-actions">' + collapsedFilterButton)
+      +     '<button type="button" class="search-toolbar__action ' + scannerConnectedClass + '" data-scan aria-label="扫条码" title="扫条码"><i class="search-toolbar__action-icon wego-iconfont-s icon-saotiaoma" aria-hidden="true"></i><span>扫条码</span></button>'
+      +     (inCatalog ? '' : '<button type="button" class="search-toolbar__action" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="search-toolbar__action-icon wego-iconfont-s icon-yuanjia" aria-hidden="true"></i><span>创建</span></button></div>')
       +   '</div>'
       +   imageSearchStrip()
       +   (inCatalog || imageSearchActive ? '' : desktopSearchResultDropdown())
@@ -4023,12 +4034,10 @@
       ? '<img class="order-barcode-scanner__image-preview" src="' + state.scannerImagePreview + '" alt="图搜所选图片" aria-hidden="true">'
       : '';
     var recognizingClass = state.scannerImageRecognizing ? ' is-recognizing' : '';
-    var drawerClass = inDrawer ? (isTabletPortrait() ? ' order-tablet-drawer' : ' order-landscape-scanner-drawer') : '';
-    var drawerStyle = inDrawer && !isTabletPortrait()
-      ? ' style="width:' + Math.max(320, Math.min(560, state.catalogWidth != null ? state.catalogWidth : 379)) + 'px"'
-      : '';
+    var topPanel = inDrawer && isTabletPortrait();
+    var drawerClass = inDrawer ? (topPanel ? ' order-barcode-top-panel' : ' order-landscape-scanner-pane') + (state.scannerEntering ? ' is-entering' : '') : '';
     return ''
-      + '<aside class="order-desktop__catalog order-desktop__catalog--scanner' + drawerClass + recognizingClass + '"' + (inDrawer ? ' role="dialog" aria-modal="true"' : '') + drawerStyle + ' aria-label="扫一扫">'
+      + '<aside class="order-desktop__catalog order-desktop__catalog--scanner' + drawerClass + recognizingClass + '" role="region" aria-label="扫一扫">'
       +   '<div class="order-barcode-scanner">'
       +     '<video class="order-barcode-scanner__video" data-barcode-video autoplay muted playsinline aria-label="摄像头实时画面"></video>'
       +     imagePreview
@@ -4041,6 +4050,16 @@
       +     '<p class="order-barcode-scanner__message" data-barcode-message>' + escapeHtml(state.scannerMessage) + '</p>'
       +   '</div>'
       + '</aside>';
+  }
+
+  function syncPortraitScannerBounds(root) {
+    if (!root || !isTabletPortrait()) return;
+    var scanner = root.querySelector('.order-barcode-top-panel');
+    var fields = root.querySelector('.order-desktop__table-head');
+    if (!scanner || !fields) return;
+    // Cover the added-list toolbar and stop at the visible field-header edge.
+    var height = Math.max(0, Math.min(window.innerHeight, fields.getBoundingClientRect().top));
+    scanner.style.setProperty('--order-scanner-top-height', height + 'px');
   }
 
   function emptyCatalogFilters() {
@@ -4341,47 +4360,75 @@
     ].join(', '));
   }
 
+  function catalogToggleButton(collapsed, drawerClose) {
+    var compact = state.catalogToggleUsed.expand && state.catalogToggleUsed.collapse;
+    var label = collapsed ? '展开' : '收起';
+    var action = drawerClose ? 'data-close-catalog-drawer' : 'data-toggle-catalog';
+    var variant = drawerClose ? ' order-tablet-drawer__close' : (collapsed ? ' order-desktop-catalog-toggle--expand' : ' order-desktop-catalog-toggle--collapse');
+    return '<button type="button" class="btn btn--weak btn--sm order-desktop-catalog-toggle' + variant + (compact ? ' is-compact' : '') + '" data-component-slug="button" ' + action + ' aria-label="' + label + '商品库"><i class="btn__icon ' + (collapsed ? 'icon-zuojiantou16' : 'icon-youjiantou16') + '" aria-hidden="true"></i><span>' + label + (compact ? '' : '商品库') + '</span></button>';
+  }
+
+  function setPortraitCatalogCollapsed(collapsed, afterClose) {
+    if (collapsed && state.catalogDrawerMotion === 'leaving' && !afterClose) return;
+    window.clearTimeout(state.catalogDrawerCloseTimer);
+    state.catalogDrawerCloseTimer = null;
+    if (collapsed && !state.tabletCatalogAutoCollapsed) {
+      state.catalogDrawerMotion = 'leaving';
+      renderActive();
+      state.catalogDrawerCloseTimer = window.setTimeout(function () {
+        state.catalogDrawerCloseTimer = null;
+        state.tabletCatalogAutoCollapsed = true;
+        state.catalogDrawerMotion = '';
+        resetDesktopProductSearch();
+        renderActive();
+        if (afterClose) afterClose();
+      }, 180);
+      return;
+    }
+    state.tabletCatalogAutoCollapsed = collapsed;
+    state.catalogDrawerMotion = collapsed ? '' : 'entering';
+    resetDesktopProductSearch();
+    renderActive();
+    // 入场类只交给这次渲染；切大图/列表、搜索或改数量后的重绘不重复入场。
+    state.catalogDrawerMotion = '';
+    if (collapsed && afterClose) afterClose();
+  }
+
+  function desktopCatalogBackground() {
+    if (isTabletPortrait() || effectiveCatalogCollapsed()) {
+      return '<aside class="order-desktop__catalog order-desktop__catalog--collapsed">'
+        + catalogToggleButton(true, false) + '</aside>';
+    }
+    return '<aside class="order-desktop__catalog">'
+      + catalogToggleButton(false, false)
+      + desktopCatalogBody() + '</aside>';
+  }
+
   function desktopCatalog() {
     if (state.catalogCategoryPanelOpen) {
-      var categoryUsesDrawer = isTabletPortrait() || effectiveCatalogCollapsed();
-      return categoryUsesDrawer
-        ? '<div class="order-tablet-drawer-mask order-scanner-drawer-mask" data-clickable data-close-catalog-category aria-hidden="true"></div>' + desktopCatalogCategoryPanel(true)
-        : desktopCatalogCategoryPanel(false);
+      return desktopCatalogBackground()
+        + '<div class="order-tablet-drawer-mask order-scanner-drawer-mask" data-clickable data-close-catalog-category aria-hidden="true"></div>' + desktopCatalogCategoryPanel(true);
     }
     if (state.catalogFilterPanelOpen) {
-      var filterUsesDrawer = isTabletPortrait() || effectiveCatalogCollapsed();
-      return filterUsesDrawer
-        ? '<div class="order-tablet-drawer-mask order-scanner-drawer-mask" data-clickable data-close-catalog-filter aria-hidden="true"></div>' + desktopCatalogFilter(true)
-        : desktopCatalogFilter(false);
+      return desktopCatalogBackground()
+        + '<div class="order-tablet-drawer-mask order-scanner-drawer-mask" data-clickable data-close-catalog-filter aria-hidden="true"></div>' + desktopCatalogFilter(true);
     }
     if (state.scannerOpen) {
-      var scannerUsesDrawer = isTabletPortrait() || effectiveCatalogCollapsed();
-      return scannerUsesDrawer
-        ? '<div class="order-tablet-drawer-mask order-scanner-drawer-mask" data-clickable data-close-barcode-scanner aria-hidden="true"></div>' + desktopBarcodeScanner(true)
-        : desktopBarcodeScanner(false);
+      return (isTabletPortrait() ? desktopCatalogBackground() : '<aside class="order-landscape-scanner-slot" aria-hidden="true"></aside>')
+        + desktopBarcodeScanner(true);
     }
     if (effectiveCatalogCollapsed()) {
-      return ''
-        + '<aside class="order-desktop__catalog order-desktop__catalog--collapsed">'
-        +   '<button type="button" class="btn btn--weak btn--sm order-desktop-catalog-toggle order-desktop-catalog-toggle--expand" data-component-slug="button" data-toggle-catalog aria-label="展开商品库">'
-        +     '<i class="btn__icon icon-zuojiantou16" aria-hidden="true"></i>展开商品库'
-        +   '</button>'
-        + '</aside>';
+      return desktopCatalogBackground();
     }
-    var catalogBody = desktopCatalogBody();
     if (isTabletPortrait()) {
-      return ''
+      return desktopCatalogBackground()
         + '<div class="order-tablet-drawer-mask" data-clickable data-close-catalog-drawer aria-hidden="true"></div>'
-        + '<aside class="order-desktop__catalog order-tablet-drawer" role="dialog" aria-modal="true" aria-label="商品库">'
-        +   '<button type="button" class="btn btn--weak btn--sm order-desktop-catalog-toggle order-tablet-drawer__close" data-component-slug="button" data-close-catalog-drawer aria-label="收起商品库"><i class="btn__icon icon-youjiantou16" aria-hidden="true"></i>收起商品库</button>'
-        +   catalogBody
+        + '<aside class="order-desktop__catalog order-tablet-drawer order-catalog-drawer' + (state.catalogDrawerMotion ? ' is-' + state.catalogDrawerMotion : '') + '" role="dialog" aria-modal="true" aria-label="商品库">'
+        +   catalogToggleButton(false, true)
+        +   desktopCatalogBody()
         + '</aside>';
     }
-    return ''
-      + '<aside class="order-desktop__catalog">'
-      +   '<button type="button" class="btn btn--weak btn--sm order-desktop-catalog-toggle order-desktop-catalog-toggle--collapse" data-component-slug="button" data-toggle-catalog aria-label="收起商品库"><i class="btn__icon icon-youjiantou16" aria-hidden="true"></i>收起商品库</button>'
-      +   catalogBody
-      + '</aside>';
+    return desktopCatalogBackground();
   }
 
   function desktopCatalogBody() {
@@ -4427,7 +4474,7 @@
       +   '<div class="order-desktop__context' + (isPureReturnOrder() ? ' order-desktop__context--pure-return' : '') + (state.panel === 'customer' ? ' order-desktop__context--customer-open' : '') + '">'
       +     desktopCustomerAnchor()
       +     desktopDeliveryCard()
-      +     (effectiveCatalogCollapsed() ? desktopProductSearch(false) : '')
+      +     (isTabletPortrait() || (effectiveCatalogCollapsed() && !state.scannerOpen) ? desktopProductSearch(false) : '')
       +   '</div>'
       +   '<section class="order-desktop__list-card" aria-labelledby="order-desktop-list-title">'
       +     '<div class="order-desktop__table' + (state.desktopShowProductImages ? ' is-showing-images' : '') + (!featureEnabled('productNoteColumn') ? ' is-product-note-hidden' : '') + '">'
@@ -7187,6 +7234,11 @@
     var draftPanelClass = state.panel === 'drafts'
       ? ' order-desktop__side--drafts' + (state.draftPanelMotion ? ' is-' + state.draftPanelMotion : '')
       : '';
+    if (state.panel === 'drafts' && isTabletPortrait()) {
+      return desktopCatalogBackground()
+        + '<div class="order-tablet-drawer-mask" data-clickable data-close-panel aria-hidden="true"></div>'
+        + '<aside class="order-desktop__side' + draftPanelClass + ' order-tablet-drawer order-draft-drawer" role="dialog" aria-modal="true" aria-label="草稿箱">' + sidePanelContent() + '</aside>';
+    }
     return '<aside class="order-desktop__side' + draftPanelClass + '">' + sidePanelContent() + '</aside>';
   }
 
@@ -7195,6 +7247,10 @@
   }
 
   function desktopWorkspaceStyle() {
+    if (state.scannerOpen && !isTabletPortrait()) {
+      var width = Math.max(320, Math.min(560, state.catalogWidth != null ? state.catalogWidth : 379));
+      return ' style="--order-scanner-side-width:' + width + 'px"';
+    }
     return '';
   }
 
@@ -7388,7 +7444,7 @@
     var modalTitle = isQuick && QUICK_OP_DEFS[state.quickOp] ? QUICK_OP_DEFS[state.quickOp].title : (isCustomerCreate ? '新建客户' : (isDelivery ? '选择发货方式' : (isNote ? '商品备注' : (isCheckout ? checkoutTitle : '添加商品'))));
     // Exception: 宿主 modal 当前只有全宽面板，无法承载 PC 中宽新建客户、发货方式与商品录入；此处仅回退承载层，内容仍消费正式组件。
     return ''
-      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
+      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isCustomerCreate ? ' order-desktop-modal--customer-create' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
       +   '<div class="order-desktop-modal__panel">'
       +     '<div class="order-desktop-modal__head"><strong id="order-desktop-modal-title">' + modalTitle + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon ' + (isDelivery ? 'icon-cha' : 'icon-cha16') + '" aria-hidden="true"></i></button></div>'
       +     '<div class="order-desktop-modal__body">' + (isQuick ? quickOpPanel(true) : (isCustomerCreate ? desktopNewCustomerModalContent() : (isDelivery ? deliveryPanel() : (isNote ? spuNotePanel() : (isCheckout ? checkoutPanel() : addPanel(true)))))) + '</div>'
@@ -7431,10 +7487,11 @@
     state.clerkDailyTotal = storedClerkDailyTotal();
     var scanning = state.scannerOpen;
     var tabletPortraitLayout = isTabletPortrait();
+    var sideScanning = scanning && !tabletPortraitLayout;
     var orderFullscreen = state.desktopOrderFullscreen;
-    var catalogCollapsedClass = desktopShowsCatalog() && (tabletPortraitLayout || effectiveCatalogCollapsed()) ? ' order-desktop__workspace--catalog-collapsed' : '';
-    var catalogResizableClass = desktopShowsCatalog() && !orderFullscreen && !tabletPortraitLayout && !effectiveCatalogCollapsed() ? ' order-desktop__workspace--with-resizer' : '';
-    var catalogResizeHandle = desktopShowsCatalog() && !orderFullscreen && !tabletPortraitLayout && !effectiveCatalogCollapsed()
+    var catalogCollapsedClass = !sideScanning && ((desktopShowsCatalog() && (tabletPortraitLayout || effectiveCatalogCollapsed())) || (tabletPortraitLayout && state.panel === 'drafts')) ? ' order-desktop__workspace--catalog-collapsed' : '';
+    var catalogResizableClass = desktopShowsCatalog() && !sideScanning && !orderFullscreen && !tabletPortraitLayout && !effectiveCatalogCollapsed() ? ' order-desktop__workspace--with-resizer' : '';
+    var catalogResizeHandle = desktopShowsCatalog() && !sideScanning && !orderFullscreen && !tabletPortraitLayout && !effectiveCatalogCollapsed()
       ? '<div class="order-desktop__catalog-resizer" role="separator" aria-orientation="vertical" aria-label="拖动调整商品库宽度" data-catalog-resizer></div>'
       : '';
     var modalBackgroundAttrs = state.guidePickerOpen || state.panel === 'product-edit' || state.panel === 'product-create' || state.panel === 'product-temp-create' || state.panel === 'fan-profile' || state.panel === 'clipboard-address' ? ' inert aria-hidden="true"' : '';
@@ -7446,7 +7503,7 @@
       +     '<div class="order-desktop__header-center"></div>'
       +     '<div class="order-desktop__header-right"><div class="order-industry-switch"><button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-toggle-industry-menu aria-haspopup="menu" aria-expanded="' + state.industryMenuOpen + '">切换行业<i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></button>' + (state.industryMenuOpen ? '<div class="order-industry-menu" role="menu" aria-label="切换行业"><button type="button" role="menuitemradio" aria-checked="' + (state.industry === 'clothing') + '" data-industry="clothing"><span>服装</span>' + (state.industry === 'clothing' ? '<i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>' : '') + '</button><button type="button" role="menuitemradio" aria-checked="' + (state.industry === 'phone') + '" data-industry="phone"><span>手机</span>' + (state.industry === 'phone' ? '<i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>' : '') + '</button></div>' : '') + '</div><button type="button" class="btn btn--weak btn--sm" data-component-slug="button" data-open-panel="drafts"><i class="btn__icon icon-caogaoxiang" aria-hidden="true"></i>草稿箱 (' + state.draftCount + ')</button><button type="button" class="btn btn--weak btn--sm order-desktop-history" data-component-slug="button"><i class="btn__icon icon-dingdan" aria-hidden="true"></i>历史订单</button><div class="order-desktop-guide-anchor"><button type="button" class="btn btn--weak btn--sm order-desktop-guide-selector" data-component-slug="button" data-toggle-guide data-action="open-employee-picker" aria-haspopup="dialog" aria-expanded="' + state.guidePickerOpen + '">员工：' + escapeHtml(state.guide.name) + '<i class="wego-iconfont-s icon-xiajiantou16" aria-hidden="true"></i></button></div><div class="order-desktop-clerk-summary">' + (featureEnabled('clerkIdentity') ? '<span class="order-desktop-clerk">开单员：' + escapeHtml(CURRENT_CLERK.name) + '</span><span class="order-desktop-clerk-divider" aria-hidden="true"></span>' : '') + '<span class="order-desktop-daily-total">今日合计：' + state.clerkDailyTotal.count + '单 ' + dailyTotalAmount(state.clerkDailyTotal.amount) + '元</span></div></div>'
       +   '</header>'
-      +   '<div class="order-desktop__workspace' + catalogCollapsedClass + catalogResizableClass + orderFullscreenClass + '"' + desktopWorkspaceStyle() + '>'
+      +   '<div class="order-desktop__workspace' + catalogCollapsedClass + catalogResizableClass + orderFullscreenClass + (sideScanning ? ' order-desktop__workspace--scanning' : '') + '"' + desktopWorkspaceStyle() + '>'
       +     desktopOrder()
       +     catalogResizeHandle
       +     desktopRightPanel()
@@ -7676,15 +7733,9 @@
         failBarcodeScanner(ctx);
       });
     }
-    if (!state.desktopOrderFullscreen && state.scannerOpen && isDesktopWorkbench() && !isTabletPortrait() && !effectiveCatalogCollapsed()) {
-      var scannerWidth = state.catalogWidth != null ? state.catalogWidth : 379;
-      var scanningWorkspace = root.querySelector('.order-desktop__workspace');
-      if (scanningWorkspace) {
-        scanningWorkspace.style.gridTemplateColumns = 'minmax(0,1fr) 0 minmax(0,' + Math.round(scannerWidth) + 'px)';
-      }
-      syncCatalogGridColumns(root);
-    } else if (!state.desktopOrderFullscreen && !isTabletPortrait() && state.catalogWidth != null && !effectiveCatalogCollapsed()) applyCatalogWidth(root, state.catalogWidth);
+    if (!state.scannerOpen && !state.desktopOrderFullscreen && !isTabletPortrait() && state.catalogWidth != null && !effectiveCatalogCollapsed()) applyCatalogWidth(root, state.catalogWidth);
     else syncCatalogGridColumns(root);
+    syncPortraitScannerBounds(root);
     updateInputClearButtons(root);
     syncCatalogCategoryTabs(root);
     positionDesktopDisplayModeMenu(root);
@@ -7711,9 +7762,16 @@
     });
   }
 
+  function catalogCreateTrigger(root) {
+    var selector = state.catalogCreateMenuAnchor === 'toolbar'
+      ? '.order-desktop-product-search--collapsed [data-toggle-product-create-menu]'
+      : '.order-catalog-header [data-toggle-product-create-menu]';
+    return root.querySelector(selector) || root.querySelector('[data-toggle-product-create-menu]');
+  }
+
   function positionDesktopCatalogCreateMenu(root) {
     if (!state.catalogCreateMenuOpen) return;
-    var trigger = root.querySelector('[data-toggle-product-create-menu]');
+    var trigger = catalogCreateTrigger(root);
     var menu = root.querySelector('.order-catalog-create-menu');
     if (!trigger || !menu) return;
     var triggerBounds = trigger.getBoundingClientRect();
@@ -7748,8 +7806,11 @@
   }
 
   function catalogGridColumnsForWidth(width) {
-    var availableWidth = Math.max(0, Number(width || 0) - 16);
-    return Math.min(4, Math.max(2, Math.floor(availableWidth / 160)));
+    var horizontalPadding = 24;
+    var columnGap = 8;
+    var targetCardWidth = 104;
+    var availableWidth = Math.max(0, Number(width || 0) - horizontalPadding);
+    return Math.min(4, Math.max(3, Math.floor((availableWidth + columnGap) / (targetCardWidth + columnGap))));
   }
 
   function syncCatalogGridColumns(root, knownWidth) {
@@ -7951,6 +8012,7 @@
     stopBarcodeScanner();
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
     state.scannerOpen = false;
+    state.scannerEntering = false;
     state.scannerRequesting = false;
     state.scannerMessage = '扫描商品条码';
     state.scannerImagePreview = null;
@@ -8065,12 +8127,22 @@
       }
       probeVideo.pause();
       probeVideo.srcObject = null;
-      state.scannerRequesting = false;
-      state.scannerOpen = true;
-      if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = false;
-      state.scannerMessage = '扫描商品条码';
-      renderActive();
-      scanBarcodeFrame(ctx);
+      var showScanner = function () {
+        if (requestVersion !== scannerRequestVersion || !state.scannerRequesting) return;
+        state.scannerRequesting = false;
+        state.scannerOpen = true;
+        if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
+        state.scannerEntering = true;
+        state.scannerMessage = '扫描商品条码';
+        renderActive();
+        state.scannerEntering = false;
+        scanBarcodeFrame(ctx);
+      };
+      if (isTabletPortrait() && !state.tabletCatalogAutoCollapsed) {
+        setPortraitCatalogCollapsed(true, showScanner);
+      } else {
+        showScanner();
+      }
     } catch (error) {
       if (requestVersion !== scannerRequestVersion) return;
       failBarcodeScanner(ctx);
@@ -9564,6 +9636,7 @@
       return;
     }
     if (target.matches('[data-toggle-product-create-menu]')) {
+      state.catalogCreateMenuAnchor = target.closest('.order-desktop-product-search--collapsed') ? 'toolbar' : 'catalog';
       state.catalogCreateMenuOpen = !state.catalogCreateMenuOpen;
       renderActive();
       if (state.catalogCreateMenuOpen) focusCatalogCreateMenuItem('first');
@@ -9595,8 +9668,11 @@
       return;
     }
     if (target.matches('[data-toggle-catalog]')) {
+      var nextCollapsed = !effectiveCatalogCollapsed();
+      state.catalogToggleUsed[nextCollapsed ? 'collapse' : 'expand'] = true;
       if (isTabletPortrait()) {
-        state.tabletCatalogAutoCollapsed = !state.tabletCatalogAutoCollapsed;
+        setPortraitCatalogCollapsed(nextCollapsed);
+        return;
       } else {
         state.catalogCollapsed = !state.catalogCollapsed;
         try { window.localStorage.setItem('wego-order-catalog-collapsed', String(state.catalogCollapsed)); } catch (error) {}
@@ -9607,9 +9683,8 @@
     }
     if (target.matches('[data-close-catalog-drawer]')) {
       if (isTabletPortrait()) {
-        state.tabletCatalogAutoCollapsed = true;
-        resetDesktopProductSearch();
-        renderActive();
+        if (target.tagName === 'BUTTON') state.catalogToggleUsed.collapse = true;
+        setPortraitCatalogCollapsed(true);
       }
       return;
     }
@@ -11435,7 +11510,7 @@
       resetDesktopProductSearch();
       clearImageSearchState();
       renderActive();
-      var headerSearch = activeContext.root.querySelector('[data-header-catalog-search]');
+      var headerSearch = activeDesktopProductSearchInput(activeContext.root);
       if (headerSearch) headerSearch.focus({ preventScroll: true });
       return;
     }
@@ -12006,6 +12081,8 @@
 
   function applyLayoutWatch() {
     closeRefundWarehouseMenu(activeContext && activeContext.root);
+    syncCatalogGridColumns(activeContext && activeContext.root);
+    syncPortraitScannerBounds(activeContext && activeContext.root);
     syncOrderFrozenColumnShadow(activeContext && activeContext.root && activeContext.root.querySelector('.order-desktop__table'));
     var tabletPortrait = isTabletPortrait();
     var desktopWorkbench = isDesktopWorkbench();
@@ -12013,6 +12090,10 @@
     layoutWatchTabletPortrait = tabletPortrait;
     layoutWatchDesktop = desktopWorkbench;
     if (!layoutChanged) return;
+    if (state.catalogDrawerMotion === 'leaving' && state.scannerRequesting) closeBarcodeScanner(false);
+    window.clearTimeout(state.catalogDrawerCloseTimer);
+    state.catalogDrawerCloseTimer = null;
+    state.catalogDrawerMotion = '';
     if (tabletPortrait) state.tabletCatalogAutoCollapsed = true;
     document.body.dataset.orderLayout = desktopWorkbench ? 'landscape' : 'mobile';
     renderActive();
@@ -12566,6 +12647,9 @@
       }
     });
     ctx.onDestroy(function () {
+      window.clearTimeout(state.catalogDrawerCloseTimer);
+      state.catalogDrawerCloseTimer = null;
+      state.catalogDrawerMotion = '';
       clearFormatGuideTimers();
       if (state.addDraft && (state.addDraft.isEditFormats || formatGuideName(state.addDraft))) {
         state.addDraft = null;

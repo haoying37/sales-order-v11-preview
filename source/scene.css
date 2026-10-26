@@ -4687,6 +4687,10 @@ button.order-payment-method-card {
     overflow: hidden;
   }
 
+  .order-desktop-modal--customer-create .order-desktop-modal__panel {
+    width: min(calc(var(--size-104) * 4 + var(--size-64)), calc(100% - var(--spacer-48)));
+  }
+
   .order-desktop-modal--delivery .order-desktop-modal__panel {
     height: min(calc(var(--size-104) * 5), calc(100% - var(--spacer-48)));
   }
@@ -7140,7 +7144,7 @@ button.order-payment-method-card {
   .order-desktop-product-row {
     position: relative;
     align-items: center;
-    min-height: var(--size-72);
+    min-height: var(--size-64);
     padding: var(--spacer-4) 0;
     cursor: pointer;
     background: var(--bg_white_100);
@@ -7158,10 +7162,16 @@ button.order-payment-method-card {
     padding-bottom: var(--spacer-4);
   }
 
+  .order-desktop-product-row--grouped > .order-desktop-product-name,
+  .order-desktop-product-row--grouped > .order-product-image-button,
+  .order-desktop-product-row--grouped > .order-desktop-product-total {
+    padding-top: var(--spacer-8);
+  }
+
   .order-desktop-product-row--multi-sku {
     align-items: stretch;
-    padding-top: var(--spacer-8);
-    padding-bottom: var(--spacer-8);
+    padding-top: 0;
+    padding-bottom: 0;
   }
 
   .order-desktop-product-row--multi-sku > .order-desktop-product-name,
@@ -7179,7 +7189,7 @@ button.order-payment-method-card {
   }
 
   .order-desktop-product-row--multi-sku > .order-desktop-row-delete {
-    top: var(--spacer-8);
+    top: 0;
     transform: none;
   }
 
@@ -7219,7 +7229,7 @@ button.order-payment-method-card {
     display: flex;
     align-items: center;
     min-width: 0;
-    min-height: var(--size-64);
+    min-height: calc(var(--size-64) - var(--spacer-4));
     border-bottom: var(--stroke-hairline) solid var(--bg_line_08);
   }
 
@@ -8771,9 +8781,9 @@ button.order-payment-method-card {
   .order-desktop__table-head {
     top: var(--size-56);
     min-width: 0;
-    min-height: calc(var(--size-40) - var(--spacer-2));
+    min-height: calc(var(--size-32) - var(--spacer-2));
     margin: 0;
-    padding: var(--spacer-8) var(--spacer-12);
+    padding: var(--spacer-4) var(--spacer-12);
     border-bottom: 0;
   }
 
@@ -9040,7 +9050,7 @@ button.order-payment-method-card {
   .order-desktop__catalog-list--grid {
     --layout-grid-column-gap: var(--spacer-8);
     --layout-grid-row-gap: var(--spacer-8);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--spacer-8);
     padding: 0 var(--spacer-12) var(--spacer-12);
   }
@@ -9170,7 +9180,9 @@ button.order-payment-method-card {
     position: relative;
     overflow: hidden;
     background: var(--bg_modal_80);
-    animation: order-barcode-scanner-enter var(--duration-normal) var(--ease-enter) both;
+    border-radius: 0 0 var(--radius-8) var(--radius-8);
+    box-shadow: var(--shadow-lg);
+    animation: none;
   }
 
   .order-desktop__catalog--filter {
@@ -9583,6 +9595,10 @@ button.order-payment-method-card {
     padding: var(--size-32) var(--spacer-8) var(--spacer-8);
     border: 0;
     border-radius: var(--radius-8) 0 0 var(--radius-8);
+  }
+
+  .order-desktop-catalog-toggle.is-compact {
+    min-height: var(--size-72);
   }
 
   .order-desktop__title {
@@ -10279,8 +10295,8 @@ button.order-payment-method-card {
   }
 
   .order-desktop__workspace--order-fullscreen .order-desktop__catalog-resizer,
-  .order-desktop__workspace--order-fullscreen .order-desktop__catalog,
-  .order-desktop__workspace--order-fullscreen .order-desktop__side,
+  .order-desktop__workspace--order-fullscreen .order-desktop__catalog:not(.order-tablet-drawer):not(.order-landscape-scanner-drawer):not(.order-landscape-scanner-pane):not(.order-barcode-top-panel),
+  .order-desktop__workspace--order-fullscreen .order-desktop__side:not(.order-tablet-drawer),
   .order-desktop__workspace--order-fullscreen .order-desktop__context,
   .order-desktop__workspace--order-fullscreen .order-desktop__summary {
     display: none;
@@ -10369,14 +10385,14 @@ button.order-payment-method-card {
   }
 
   .order-scanner-drawer-mask {
-    position: absolute;
+    position: fixed;
     inset: 0;
     z-index: var(--z-modal);
     background: var(--bg_modal_30);
   }
 
   .order-landscape-scanner-drawer {
-    position: absolute;
+    position: fixed;
     top: 0;
     right: 0;
     bottom: 0;
@@ -10387,6 +10403,38 @@ button.order-payment-method-card {
     border-left: var(--stroke-hairline) solid var(--bg_line_08);
     box-shadow: var(--shadow-lg);
     animation: order-landscape-scanner-drawer-in var(--duration-normal) var(--ease-standard);
+  }
+
+  .order-desktop__workspace.order-desktop__workspace--scanning {
+    grid-template-columns: minmax(0, 1fr) var(--order-scanner-side-width);
+  }
+
+  .order-desktop__workspace--scanning > .order-desktop__order {
+    padding-right: 0;
+  }
+
+  .order-landscape-scanner-slot {
+    min-width: 0;
+    pointer-events: none;
+  }
+
+  .order-landscape-scanner-pane {
+    position: fixed;
+    top: var(--size-64);
+    right: 0;
+    bottom: 0;
+    z-index: calc(var(--z-modal) + 1);
+    width: var(--order-scanner-side-width);
+    min-width: 0;
+    border-radius: var(--radius-8);
+  }
+
+  .order-landscape-scanner-pane.is-entering {
+    animation: order-landscape-scanner-drawer-in var(--duration-normal) var(--ease-standard) both;
+  }
+
+  .order-landscape-scanner-pane .order-barcode-scanner {
+    border-radius: inherit;
   }
 
   @keyframes order-landscape-scanner-drawer-in {
@@ -10434,6 +10482,14 @@ button.order-payment-method-card {
 
 /* 竖屏平板（宽 ≥768px 且高 > 宽）：商品库默认折叠为抽屉，订单区保持全宽自适应 */
 @media (min-width: 768px) and (orientation: portrait) {
+  .order-desktop__order {
+    padding-right: 0;
+  }
+
+  .order-desktop__catalog--collapsed .order-desktop-catalog-toggle--expand {
+    right: calc(0px - var(--spacer-8));
+  }
+
   .order-desktop__context {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -10459,6 +10515,40 @@ button.order-payment-method-card {
     grid-column: 1 / -1;
     width: 100%;
     min-width: 0;
+    height: var(--size-56);
+    min-height: var(--size-56);
+  }
+
+  .order-desktop__catalog.order-barcode-top-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: auto;
+    left: 0;
+    z-index: calc(var(--z-modal) + 1);
+    width: 100%;
+    height: var(--order-scanner-top-height, 0px);
+    min-height: 0;
+    max-width: none;
+    border-radius: 0 0 var(--radius-8) var(--radius-8);
+    animation: none;
+  }
+
+  .order-barcode-top-panel.is-entering {
+    animation: order-barcode-top-in var(--duration-normal) var(--ease-enter) both;
+  }
+
+  .order-barcode-top-panel .order-barcode-scanner {
+    border-radius: inherit;
+  }
+
+  .order-barcode-top-panel .order-barcode-scanner__message {
+    bottom: var(--spacer-16);
+  }
+
+  @keyframes order-barcode-top-in {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
   }
 
   .order-desktop-product-search:not(.order-desktop-product-search--catalog) .order-desktop-product-search__row {
@@ -10474,14 +10564,14 @@ button.order-payment-method-card {
   }
 
   .order-tablet-drawer-mask {
-    position: absolute;
+    position: fixed;
     inset: 0;
     z-index: var(--z-modal);
     background: var(--bg_modal_30);
   }
 
   .order-tablet-drawer {
-    position: absolute;
+    position: fixed;
     top: 0;
     right: 0;
     bottom: 0;
@@ -10495,6 +10585,23 @@ button.order-payment-method-card {
     animation: order-tablet-drawer-in var(--duration-normal) var(--ease-standard);
   }
 
+  .order-draft-drawer,
+  .order-catalog-drawer,
+  .order-draft-drawer.is-entering .order-draft-panel,
+  .order-draft-drawer.is-leaving .order-draft-panel {
+    animation: none;
+  }
+
+  .order-draft-drawer.is-entering,
+  .order-catalog-drawer.is-entering {
+    animation: order-tablet-drawer-in var(--duration-normal) var(--ease-standard) both;
+  }
+
+  .order-draft-drawer.is-leaving,
+  .order-catalog-drawer.is-leaving {
+    animation: order-tablet-drawer-in var(--duration-fast) var(--ease-standard) reverse both;
+  }
+
   @keyframes order-tablet-drawer-in {
     from {
       transform: translateX(100%);
@@ -10502,37 +10609,6 @@ button.order-payment-method-card {
     to {
       transform: translateX(0);
     }
-  }
-
-  .order-tablet-drawer .order-desktop-catalog-toggle {
-    position: static;
-    width: auto;
-    min-height: var(--size-48);
-    padding: 0 var(--spacer-16);
-    line-height: var(--size-48);
-    white-space: nowrap;
-    writing-mode: horizontal-tb;
-    transform: none;
-    box-shadow: none;
-  }
-
-  .order-tablet-drawer .order-desktop-catalog-toggle .btn__icon {
-    position: static;
-    transform: none;
-    writing-mode: horizontal-tb;
-  }
-
-  .order-tablet-drawer .order-tablet-drawer__close {
-    position: absolute;
-    top: 50%;
-    right: 100%;
-    width: auto;
-    min-width: 0;
-    min-height: var(--size-48);
-    padding: 0 var(--spacer-12);
-    border-radius: var(--radius-8) 0 0 var(--radius-8);
-    box-shadow: var(--shadow-md);
-    transform: translateY(-50%);
   }
 
   .order-desktop__lines {
@@ -12261,13 +12337,40 @@ button.order-payment-method-card {
 }
 /* 选品工具栏：复用 Search 的纵向筛选入口，保留应用态。 */
 @media (min-width: 768px) {
-  .order-catalog-filter-anchor--search .search-toolbar__action {
+  .order-catalog-filter-anchor--search .search-toolbar__action,
+  .order-desktop-product-search .search-toolbar__action {
     background: transparent;
+  }
+  .order-desktop-search-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--spacer-24);
+  }
+  .order-desktop-search-actions > * {
+    position: relative;
+  }
+  .order-desktop-search-actions > * + *::before {
+    position: absolute;
+    top: 50%;
+    left: calc(0px - var(--spacer-12) - var(--stroke-hairline));
+    width: var(--stroke-1);
+    height: var(--size-24);
+    background: var(--bg_line_08);
+    transform: translateY(-50%);
+    content: "";
+    pointer-events: none;
   }
   .order-catalog-filter-anchor--search .search-toolbar__action.is-filtered,
   .order-catalog-filter-anchor--search .search-toolbar__action.is-filtered .search-toolbar__action-icon {
     color: var(--green_1_100);
   }
+}
+
+/* 草稿箱抽屉在modal+1，二次确认及其遮罩必须覆盖整个抽屉。 */
+.dialog.order-draft-delete-dialog,
+.dialog.order-return-draft-dialog {
+  z-index: calc(var(--z-modal) + 3);
 }
 
 /* Seg 分段控制器布局：视觉与状态由组件资源提供。 */
@@ -12610,22 +12713,25 @@ button.order-payment-method-card {
 
 @media (min-width: 768px) {
   .order-desktop__table {
+    --order-name-min-width: 180px;
+    --order-spec-min-width: 104px;
+    --order-price-min-width: 96px;
     --order-image-column: ;
     --order-note-column: minmax(112px, 1fr);
-    --order-fields-min-width: 828px;
+    --order-fields-min-width: 844px;
     container-type: inline-size;
     overflow: auto;
   }
   .order-desktop__table.is-product-note-hidden {
     --order-note-column: ;
-    --order-fields-min-width: 708px;
+    --order-fields-min-width: 724px;
   }
   .order-desktop__table.is-showing-images {
-    --order-image-column: var(--size-64);
-    --order-fields-min-width: 900px;
+    --order-image-column: calc(var(--size-64) + var(--spacer-8));
+    --order-fields-min-width: 924px;
   }
   .order-desktop__table.is-product-note-hidden.is-showing-images {
-    --order-fields-min-width: 780px;
+    --order-fields-min-width: 804px;
   }
   .order-desktop__table-title {
     left: 0;
@@ -12639,20 +12745,21 @@ button.order-payment-method-card {
   .order-desktop__grid .order-desktop__lines {
     height: auto;
     min-width: 0;
-    padding: 0 var(--spacer-12);
+    padding: 0 calc(var(--spacer-12) + var(--spacer-16)) 0 var(--spacer-12);
   }
   .order-desktop__table .order-desktop__grid .order-desktop__table-head,
   .order-desktop__table .order-desktop__grid .order-desktop-product-row,
   .order-desktop__table.is-showing-images .order-desktop__grid .order-desktop__table-head,
   .order-desktop__table.is-showing-images .order-desktop__grid .order-desktop-product-row {
-    grid-template-columns: minmax(180px, 2fr) var(--order-image-column) minmax(104px, 1.2fr) minmax(96px, 1fr) 112px minmax(120px, 1.2fr) var(--order-note-column) var(--size-32);
+    grid-template-columns: minmax(var(--order-name-min-width), 2fr) var(--order-image-column) minmax(var(--order-spec-min-width), 1.2fr) minmax(var(--order-price-min-width), 1fr) 112px minmax(120px, 1.2fr) var(--order-note-column) var(--size-32);
     gap: var(--spacer-8);
     min-width: 0;
   }
   .order-desktop__grid .order-desktop__table-head {
     top: var(--size-56);
+    align-items: center;
     margin: 0;
-    padding: var(--spacer-8) var(--spacer-12);
+    padding: var(--spacer-4) calc(var(--spacer-12) + var(--spacer-16)) var(--spacer-4) var(--spacer-12);
   }
   .order-desktop__table .order-desktop__grid .order-desktop__table-head > :nth-child(n),
   .order-desktop__table .order-desktop__grid .order-desktop-product-row > :nth-child(n) {
@@ -12728,9 +12835,11 @@ button.order-payment-method-card {
   .order-desktop__grid .order-desktop-product-row {
     --order-frozen-shadow-inset: var(--spacer-4);
   }
-  .order-desktop__grid .order-desktop__table-head,
+  .order-desktop__grid .order-desktop__table-head {
+    --order-frozen-shadow-inset: var(--spacer-4);
+  }
   .order-desktop__grid .order-desktop-product-row--multi-sku {
-    --order-frozen-shadow-inset: var(--spacer-8);
+    --order-frozen-shadow-inset: 0px;
   }
 
   /* 横向偏移后提示首列下方仍有字段；回到起点无阴影，不占列宽或拦截点击。 */
@@ -12744,6 +12853,45 @@ button.order-payment-method-card {
     background: linear-gradient(to right, var(--bg_shadow_08), transparent);
     content: "";
     pointer-events: none;
+  }
+}
+/* 768px竖屏：两侧各8px，带图的默认字段画布恰好适配752px订单区。 */
+@media (min-width: 768px) and (orientation: portrait) {
+  .order-desktop__table {
+    --order-name-min-width: 160px;
+    --order-spec-min-width: 88px;
+    --order-price-min-width: 80px;
+    --order-fields-min-width: 792px;
+  }
+  .order-desktop__table.is-product-note-hidden {
+    --order-fields-min-width: 672px;
+  }
+  .order-desktop__table.is-showing-images {
+    --order-fields-min-width: 872px;
+  }
+  .order-desktop__table.is-product-note-hidden.is-showing-images {
+    --order-fields-min-width: 752px;
+  }
+}
+
+/* 横屏客户／发货／搜索同宽；竖屏继续两张信息卡加独立搜索行。 */
+@media (min-width: 768px) and (orientation: landscape) {
+  .order-desktop__workspace--catalog-collapsed > .order-desktop__order {
+    padding-right: 0;
+  }
+  .order-desktop__catalog--collapsed .order-desktop-catalog-toggle--expand {
+    right: calc(0px - var(--spacer-8));
+  }
+  .order-desktop__workspace:not(.order-desktop__workspace--order-fullscreen) .order-desktop__context:not(.order-desktop__context--pure-return) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .order-desktop__workspace:not(.order-desktop__workspace--order-fullscreen) .order-desktop__context:not(.order-desktop__context--pure-return):has(> .order-desktop-product-search--collapsed) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .order-desktop__context > .order-desktop-delivery-card,
+  .order-desktop__context > .order-desktop-product-search--collapsed {
+    min-width: 0;
   }
 }
 /* FR-REFUND-09/10/11: return labels, history-sync host and configured inventory. */

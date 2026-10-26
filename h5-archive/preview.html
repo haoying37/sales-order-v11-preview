@@ -24,7 +24,7 @@
     #viewModes { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; z-index: 10; display: flex; align-items: center; gap: 8px; max-width: calc(100vw - 210px); padding: 5px 8px; border: 1px solid #d7dce2; border-radius: 9px; background: #fff; box-shadow: 0 2px 12px #0002; }
     #viewModes button { padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: #404955; cursor: pointer; white-space: nowrap; }
     #viewModes button[aria-pressed="true"] { background: #e5f8ef; color: #008b50; font-weight: 600; }
-    #deviceLabel { color: #626b78; font-size: 12px; white-space: nowrap; }
+    #deviceLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #626b78; font-size: 12px; white-space: nowrap; }
     body.has-scenes { display: grid; grid-template-columns: 224px minmax(0, 1fr); height: 100dvh; overflow: hidden; }
     #scenes { height: 100dvh; overflow-y: auto; overscroll-behavior: contain; padding: 20px 12px; border-right: 1px solid #e2e5e9; background: #fff; }
     #scenes h2 { font-size: 16px; margin: 0 8px 20px; }
@@ -38,8 +38,11 @@
       #scenes h2 { margin-bottom: 8px; }
       #scenes h3 { margin-top: 8px; }
       .has-scenes #page { height: 100%; min-height: 0; }
-      #viewModes { max-width: calc(100vw - 100px); }
+      #viewModes { max-width: calc(100vw - 24px); }
       #deviceLabel { display: none; }
+      body.device-options #switcher { top: max(64px, calc(env(safe-area-inset-top) + 52px)); }
+      body.tablet-preview #canvas { padding-top: 116px; }
+      body.device-options:not(.tablet-preview) #canvas { height: calc(100vh - 116px); height: calc(100dvh - 116px); margin-top: 116px; }
     }
     #dismiss { position: fixed; inset: 0; z-index: 5; }
     #switcher { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 12px; z-index: 10; max-width: calc(100vw - 24px); }
@@ -65,7 +68,8 @@
   </nav>
   <main id="canvas"><div id="deviceStage"><div id="deviceFrame"><div id="tabletStatusBar" aria-label="模拟系统状态栏：9点41分，信号与 Wi-Fi 已连接，电量100%"><span>9:41</span><span class="status-icons"><img src="../wego-design/assets/navbar/status-cellular.svg" alt=""><img src="../wego-design/assets/navbar/status-wifi.svg" alt=""><span>100%</span><img src="../wego-design/assets/navbar/status-battery.svg" alt=""></span></div><iframe id="page" title="H5 项目页面" allow="clipboard-write" hidden></iframe></div></div></main>
   <div id="viewModes" role="group" aria-label="预览方式" hidden>
-    <button id="tabletMode" type="button" aria-pressed="false">平板预览</button>
+    <button id="tabletMode" type="button" aria-pressed="false">平板横屏</button>
+    <button id="tabletPortraitMode" type="button" aria-pressed="false">平板竖屏</button>
     <button id="webMode" type="button" aria-pressed="false">网页版</button>
     <span id="deviceLabel"></span>
   </div>
@@ -81,7 +85,7 @@
       <div class="links"><a id="original" target="_blank" rel="noopener">打开原始页面</a></div>
     </div>
   </aside>
-  <script src="preview-data.js?v=public-20261023"></script>
+  <script src="preview-data.js?v=da65a2038019"></script>
   <script>
     (() => {
       const $ = id => document.getElementById(id);
@@ -97,22 +101,28 @@
       };
       function setPreviewMode(mode, updateUrl) {
         const tablet = tabletOf(currentProject);
-        const useTablet = Boolean(tablet && mode === 'tablet');
+        const usePortrait = Boolean(tablet && mode === 'tablet-portrait');
+        const useTablet = Boolean(tablet && (mode === 'tablet' || usePortrait));
         document.body.classList.toggle('device-options', Boolean(tablet));
         document.body.classList.toggle('tablet-preview', useTablet);
         $('viewModes').hidden = !tablet;
-        $('tabletMode').setAttribute('aria-pressed', String(useTablet));
+        $('tabletMode').setAttribute('aria-pressed', String(useTablet && !usePortrait));
+        $('tabletPortraitMode').setAttribute('aria-pressed', String(usePortrait));
         $('webMode').setAttribute('aria-pressed', String(!useTablet));
         if (tablet) {
-          document.documentElement.style.setProperty('--tablet-width', tablet.width + 'px');
-          document.documentElement.style.setProperty('--tablet-height', tablet.height + 'px');
-          document.documentElement.style.setProperty('--tablet-outer-width', (tablet.width + 28) + 'px');
-          document.documentElement.style.setProperty('--tablet-outer-height', (tablet.height + 28 + 24) + 'px');
-          $('deviceLabel').textContent = useTablet ? (tablet.label || '平板') + ' · ' + tablet.width + '×' + tablet.height + ' CSS px' : '浏览器自适应';
+          const longSide = Math.max(tablet.width, tablet.height);
+          const shortSide = Math.min(tablet.width, tablet.height);
+          const width = usePortrait ? shortSide : longSide;
+          const height = usePortrait ? longSide : shortSide;
+          document.documentElement.style.setProperty('--tablet-width', width + 'px');
+          document.documentElement.style.setProperty('--tablet-height', height + 'px');
+          document.documentElement.style.setProperty('--tablet-outer-width', (width + 28) + 'px');
+          document.documentElement.style.setProperty('--tablet-outer-height', (height + 28 + 24) + 'px');
+          $('deviceLabel').textContent = useTablet ? (tablet.label || '平板') + ' · ' + width + '×' + height + ' CSS px' : '浏览器自适应';
         }
         if (updateUrl) {
           const url = new URL(location.href);
-          url.searchParams.set('mode', useTablet ? 'tablet' : 'web');
+          url.searchParams.set('mode', usePortrait ? 'tablet-portrait' : useTablet ? 'tablet' : 'web');
           history.replaceState(null, '', url);
         }
       }
@@ -155,7 +165,7 @@
         $('toggle').textContent = project.version + ' · 切换版本';
         renderScenes(project, page);
         const requestedMode = new URL(location.href).searchParams.get('mode');
-        setPreviewMode(requestedMode === 'web' ? 'web' : requestedMode === 'tablet' ? 'tablet' : project.preview?.defaultMode, false);
+        setPreviewMode(['web', 'tablet', 'tablet-portrait'].includes(requestedMode) ? requestedMode : project.preview?.defaultMode, false);
         if (updateUrl) {
           const url = new URL(location.href);
           url.searchParams.set('page', page.path);
@@ -178,6 +188,7 @@
       }
       $('toggle').onclick = () => setPanelOpen($('panel').hidden);
       $('tabletMode').onclick = () => setPreviewMode('tablet', true);
+      $('tabletPortraitMode').onclick = () => setPreviewMode('tablet-portrait', true);
       $('webMode').onclick = () => setPreviewMode('web', true);
       $('dismiss').onpointerdown = () => setPanelOpen(false);
       document.addEventListener('keydown', event => {
