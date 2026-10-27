@@ -863,20 +863,19 @@
     return false;
   }
   function courierPrintResult() {
-    var task = state.paymentPostActions;
-    if (!task || !task.dispatch) return '';
-    var label = task.status === 'failed' ? '快递单打印失败' : task.status === 'success' ? '快递单打印成功' : '正在打印快递单…';
-    return '<div class="order-courier-result" data-courier-print-result data-status="' + (task.status || 'printing') + '" role="status"><strong>' + label + '</strong>' + (task.status === 'failed' ? '<span>' + escapeHtml(task.error) + '</span>' + button('重试', 'weak', 'sm', 'data-retry-courier-print') : '') + '<small>本地模拟打印结果</small></div>';
+    return successPrintFailureRow('express', state.completedOrder || completedOrderSnapshot());
   }
-  function startCourierPrint(refresh, retry) {
-    var task = state.paymentPostActions;
+  function startCourierPrint(refresh, retry, notify) {
+    var task = successPostActions();
+    var result = state.completedOrder;
     if (!task || !task.dispatch || task.status === 'printing' || (retry && task.status !== 'failed')) return;
-    task.status = 'printing'; task.error = ''; if (refresh) refresh();
+    task.status = 'printing'; task.error = '';
+    updateSuccessPrintStatus(result, 'express', 'loading', '', refresh, notify);
     window.setTimeout(function () {
-      if (state.paymentPostActions !== task) return;
-      var failed = courierParams().get(retry ? 'courierRetry' : 'courierPrint') === 'failed';
+      if (successPostActions() !== task) return;
+      var failed = ['fail', 'failed'].indexOf(courierParams().get(retry ? 'courierRetry' : 'courierPrint')) !== -1;
       task.status = failed ? 'failed' : 'success'; task.error = failed ? '模拟打印机连接中断' : '';
-      if (refresh) refresh();
+      updateSuccessPrintStatus(result, 'express', failed ? 'fail' : 'success', task.error, refresh, notify);
     }, 800);
   }
 
@@ -998,6 +997,9 @@
     addDraft: null,
     paymentDraft: null,
     paymentStatus: 'idle',
+    completedOrder: null,
+    resultFanProfileCustomer: null,
+    resumeEmptyOrder: false,
     refundCapabilities: initialRefundCapabilities(),
     refundSync: null,
     refundPrototype: null,
@@ -1998,12 +2000,13 @@
       }
       removeZeroReturnSpecs();
       state.prototypeRefundEvents.push('order-created');
+      var resultEvents = state.prototypeRefundEvents;
       finishOrder(ctx);
       if (hasReturns && !synchronized) {
-        state.prototypeRefundEvents.push('refund-after-order');
+        resultEvents.push('refund-after-order');
         window.setTimeout(function () {
           // 原型能力：记录演示结果；不代表真实后台日志或详情页处理。
-          if (state.paymentDraft === draft) state.prototypeRefundEvents.push(refundPrototypeConfig().refundResult === 'failed' ? 'refund-failed-log-only' : 'refund-completed');
+          if (state.paymentDraft === draft || (state.completedOrder && state.completedOrder.paymentDraft === draft)) resultEvents.push(refundPrototypeConfig().refundResult === 'failed' ? 'refund-failed-log-only' : 'refund-completed');
         }, 240);
       }
     };
@@ -7395,7 +7398,7 @@
   }
 
   function fanProfileModal() {
-    var customer = state.customer;
+    var customer = state.resultFanProfileCustomer || state.customer;
     if (!customer) return '';
     var wechatName = customer.wechatName || customer.name;
     var ipRegion = customer.ipRegion || '广东 深圳';
@@ -7408,8 +7411,8 @@
       +     '<header class="order-product-edit-modal__head"><strong id="order-fan-profile-title">粉丝资料</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
       +     '<div class="order-product-edit-modal__body order-fan-profile-modal__body">'
       +       '<section class="order-fan-profile-hero">'
-      +         '<span class="avatar avatar--56 avatar--image" data-component="avatar" data-component-slug="avatar" data-variant-name="Avatar_56_Default"><img src="' + customer.avatar + '" alt="' + escapeHtml(customer.name) + '"></span>'
-      +         '<div class="order-fan-profile-identity"><strong>' + escapeHtml(customer.name) + '-' + escapeHtml(customer.number) + '</strong><dl><div><dt>微信昵称：</dt><dd>' + escapeHtml(wechatName) + '</dd></div><div><dt>会员编号：</dt><dd>' + escapeHtml(customer.number) + '</dd></div><div><dt>IP：</dt><dd>' + escapeHtml(ipRegion) + '</dd></div></dl></div>'
+      +         (customer.avatar ? '<span class="avatar avatar--56 avatar--image" data-component="avatar" data-component-slug="avatar" data-variant-name="Avatar_56_Default"><img src="' + escapeHtml(customer.avatar) + '" alt="' + escapeHtml(customer.name) + '"></span>' : '<span class="avatar avatar--56 avatar--initial" data-component="avatar" data-variant-name="Avatar_56_Initial">' + escapeHtml(Array.from(customer.name || '')[0] || '') + '</span>')
+      +         '<div class="order-fan-profile-identity"><strong>' + escapeHtml(customer.name) + (customer.number ? '-' + escapeHtml(customer.number) : '') + '</strong><dl><div><dt>微信昵称：</dt><dd>' + escapeHtml(wechatName) + '</dd></div><div><dt>会员编号：</dt><dd>' + escapeHtml(customer.number) + '</dd></div><div><dt>IP：</dt><dd>' + escapeHtml(ipRegion) + '</dd></div></dl></div>'
       +         '<div class="order-fan-profile-contact" aria-label="联系粉丝"><button type="button" data-fan-profile-action="更多" aria-label="更多操作"><span aria-hidden="true">•••</span></button><button type="button" data-fan-profile-action="拨打电话" aria-label="拨打电话"><i class="wego-iconfont-s icon-dianhua" aria-hidden="true"></i></button><button type="button" data-fan-profile-action="发微信" aria-label="发微信"><i class="wego-iconfont-s icon-weixin" aria-hidden="true"></i></button></div>'
       +       '</section>'
       +       '<section class="order-fan-profile-group" aria-label="业务信息">'
@@ -7619,7 +7622,7 @@
   function mobileModal() {
     if (shouldHideCheckoutForRefundSync()) return '';
     if (!state.panel) return '';
-    if (state.panel === 'clipboard-address') return '';
+    if (state.panel === 'clipboard-address' || state.panel === 'fan-profile') return '';
     // Exception: 现有开单面板依赖场景内统一状态重绘，宿主 overlay 暂不支持该状态回灌；本轮沿用原承载层并补齐全屏与关闭行为。
     if (state.panel === 'customer') {
       return ''
@@ -8510,6 +8513,10 @@
   }
 
   function applyPrototypeReviewState() {
+    if (state.resumeEmptyOrder) {
+      state.resumeEmptyOrder = false;
+      return;
+    }
     // Prototype-only direct entry used by tour and review automation.
     var reviewState = '';
     try { reviewState = new URLSearchParams(window.location.search).get('state') || ''; } catch (error) {}
@@ -8817,8 +8824,7 @@
     var targetCents = Math.max(0, toCents(payable) - balanceCents);
     var allocatedCents = paymentAllocatedCents(draft);
     if (targetCents > 0 && !selected.length) {
-      draft.showShortageDialog = true;
-      renderActive();
+      ctx.toast('请选择收款方式');
       return;
     }
     var differenceCents = paymentDifferenceCents(draft, payable);
@@ -9649,6 +9655,7 @@
     }
     if (target.matches('[data-open-fan-profile]')) {
       if (!state.customer) return;
+      state.resultFanProfileCustomer = null;
       state.panel = 'fan-profile';
       renderActive();
       focusProductEditDialog();
@@ -9657,11 +9664,13 @@
     if (target.matches('[data-fan-profile-action]')) {
       var fanAction = target.dataset.fanProfileAction;
       if (fanAction === '开单') {
+        var fromResult = Boolean(state.resultFanProfileCustomer);
+        state.resultFanProfileCustomer = null;
         state.panel = null;
         renderActive();
         var fanProfileTrigger = activeContext.root.querySelector('[data-open-fan-profile]');
         if (fanProfileTrigger) fanProfileTrigger.focus({ preventScroll: true });
-        ctx.toast('已返回当前客户开单');
+        ctx.toast(fromResult ? '已返回空白开单' : '已返回当前客户开单');
         return;
       }
       ctx.toast(fanAction + '入口已保留，本期展示资料预览');
@@ -10289,6 +10298,7 @@
       if (closingProductEdit && !productEditReturnPanel) restoreProductEditFocus(closingProductId);
       if (closingProductCreate) focusCatalogCreateTrigger();
       if (closingFanProfile) {
+        state.resultFanProfileCustomer = null;
         var restoredFanProfileTrigger = activeContext.root.querySelector('[data-open-fan-profile]');
         if (restoredFanProfileTrigger) restoredFanProfileTrigger.focus({ preventScroll: true });
       }
@@ -12627,6 +12637,7 @@
         return;
       }
       if (event.key === 'Escape' && state.panel === 'fan-profile') {
+        state.resultFanProfileCustomer = null;
         state.panel = null;
         renderActive();
         var escapedFanProfileTrigger = activeContext.root.querySelector('[data-open-fan-profile]');
@@ -12670,30 +12681,220 @@
     });
   }
 
-  function successTemplate() {
-    var t = totals();
-    var isRefund = t.payable < 0;
-    var isUnpaid = state.paymentSummary === '未收款';
-    var isDebt = state.paymentSummary === '记欠款';
-    var isPureReturn = Boolean(state.paymentDraft && state.paymentDraft.orderBusinessStatus === 'returned');
-    var resultTitle = isRefund ? (isPureReturn ? '退货单已生成，退款已处理' : '退款已处理，订单已生成') : (isPureReturn ? '退货单已生成' : (isUnpaid ? '订单已生成，待收款' : (isDebt ? '订单已生成，已记欠款' : '收款成功，订单已生成')));
-    var paymentState = isRefund ? '已处理' : (isUnpaid ? '未收款' : (isDebt ? '已记欠款' : '已收款'));
-    var statusLabel = isRefund ? '退款状态' : '收款状态';
-    return ''
-      + '<div class="modal__panel">'
-      +   '<main class="order-success-v2__body">'
-      +     '<div class="order-success-v2__icon" aria-hidden="true">✓</div>'
-      +     '<h1 id="order-success-title">' + resultTitle + '</h1>'
-      +     '<p>' + escapeHtml(state.paymentSummary || '已收款') + ' · ' + moneyMarkup(t.payable) + '</p>'
-      +     '<dl><div><dt>订单号</dt><dd>' + escapeHtml(state.orderNo) + '</dd></div><div><dt>客户</dt><dd>' + escapeHtml(state.customer ? state.customer.name : '散客') + '</dd></div><div><dt>仓库</dt><dd>' + escapeHtml(state.warehouse.name) + '</dd></div><div><dt>商品</dt><dd>' + t.styles + '款 ' + t.pieces + '件</dd></div>' + (isPureReturn ? '<div><dt>订单状态</dt><dd>已退款</dd></div>' : '') + '<div><dt>' + statusLabel + '</dt><dd>' + paymentState + '</dd></div></dl>'
-      +     (state.paymentPostActions && (state.paymentPostActions.print || state.paymentPostActions.dispatch) ? '<div class="order-success-v2__post-actions">' + (state.paymentPostActions.print ? '<span><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i>小票打印任务已创建</span>' : '') + courierPrintResult() + '<small>打印结果不影响已创建的订单。</small></div>' : '')
-      +     '<div class="order-success-v2__actions">' + button('继续开单', 'strong', 'lg', 'data-new-order') + button('查看订单', 'weak', 'lg', 'data-view-order') + '</div>'
-      +     '<small>配货、发货等后续流程不在本期原型范围内</small>'
-      +   '</main>'
-      + '</div>';
+  function successPostActions() {
+    return state.completedOrder ? state.completedOrder.postActions : state.paymentPostActions;
   }
 
-  function resetOrder() {
+  // Prototype-only response adapter. Production must use seller/orderInfo
+  // responses; these defaults are sample data, not backend rules.
+  function mockSuccessResponse(snapshot) {
+    var params = new URLSearchParams(window.location.search);
+    var review = params.get('state') === 'order-success';
+    var customer = state.customer ? {
+      name: state.customer.name,
+      icon: state.customer.avatar || '',
+      customerAmountInfo: state.customer.balance == null ? {} : { balance: state.customer.balance }
+    } : null;
+    var response = {
+      orderInfo: {
+        payAmount: snapshot.totals.payable,
+        orderStatus: snapshot.paymentDraft && snapshot.paymentDraft.kind === 'unpaid' ? 0 : 1,
+        expressType: state.delivery === 'pickup' ? 2 : 1
+      },
+      customer: customer,
+      preSaleOrder: { canAliPay: true, canWeChatPay: true, hasSharePaymentLinkAbility: true }
+    };
+    if (!review) return response;
+    ['payAmount', 'orderStatus', 'expressType'].forEach(function (field) {
+      var key = 'result' + field.charAt(0).toUpperCase() + field.slice(1);
+      if (params.has(key) && Number.isFinite(Number(params.get(key)))) response.orderInfo[field] = Number(params.get(key));
+    });
+    [['resultAliPay', 'canAliPay'], ['resultWeChatPay', 'canWeChatPay'], ['resultLinkAbility', 'hasSharePaymentLinkAbility']].forEach(function (pair) {
+      if (params.has(pair[0])) response.preSaleOrder[pair[1]] = params.get(pair[0]) !== '0';
+    });
+    if (params.has('resultCustomerName')) {
+      response.customer = response.customer || { icon: '', customerAmountInfo: {} };
+      response.customer.name = params.get('resultCustomerName');
+    }
+    if (response.customer) {
+      if (params.has('resultCustomerIcon')) response.customer.icon = params.get('resultCustomerIcon');
+      if (params.has('resultBalance')) response.customer.customerAmountInfo = params.get('resultBalance') === 'missing' ? {} : { balance: params.get('resultBalance') };
+    }
+    if (params.get('resultCustomer') === 'none') response.customer = null;
+    return response;
+  }
+
+  function completedOrderSnapshot() {
+    var result = {
+      totals: totals(), orderNo: state.orderNo,
+      customerProfile: state.customer ? Object.assign({}, state.customer) : null,
+      customerName: state.customer ? state.customer.name : '散客', warehouseName: state.warehouse.name,
+      paymentSummary: state.paymentSummary, paymentStatus: state.paymentStatus,
+      isPureReturn: Boolean(state.paymentDraft && state.paymentDraft.orderBusinessStatus === 'returned'),
+      paymentDraft: state.paymentDraft,
+      postActions: Object.assign({ print: false, dispatch: false, status: 'none', error: '' }, state.paymentPostActions || {}),
+      refundEvents: state.prototypeRefundEvents,
+      linkDialogOpen: false, fanProfileOpen: false, receiptPrinting: false
+    };
+    result.response = mockSuccessResponse(result);
+    var task = result.postActions;
+    result.printSmallBillStatus = { status: task.print ? 'loading' : 'none', message: '' };
+    result.printExpressStatus = { status: task.dispatch ? (task.status === 'failed' ? 'fail' : task.status === 'success' ? 'success' : 'loading') : 'none', message: task.error || '' };
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('state') === 'order-success') {
+      [['resultReceiptPrint', 'printSmallBillStatus', 'print'], ['resultExpressPrint', 'printExpressStatus', 'dispatch']].forEach(function (entry) {
+        var status = params.get(entry[0]);
+        if (['none', 'loading', 'fail', 'success'].indexOf(status) < 0) return;
+        result[entry[1]] = { status: status, message: params.get(entry[0] + 'Message') || (status === 'fail' ? '模拟打印机连接中断' : '') };
+        task[entry[2]] = status !== 'none';
+        if (entry[2] === 'dispatch') {
+          task.status = status === 'fail' ? 'failed' : status === 'success' ? 'success' : 'pending';
+          task.error = result[entry[1]].message;
+        }
+      });
+    }
+    return result;
+  }
+
+  function successActionAvailability(result) {
+    var response = result.response || {}, order = response.orderInfo || {}, abilities = response.preSaleOrder || {};
+    return {
+      collect: order.orderStatus === 0 && Boolean(abilities.canAliPay || abilities.canWeChatPay),
+      deliver: order.orderStatus === 1,
+      stock: order.orderStatus === 1,
+      customer: Boolean(response.customer && response.customer.name)
+    };
+  }
+
+  function successCustomerCard(result) {
+    var customer = (result.response || {}).customer;
+    if (!customer || !customer.name) return '';
+    var name = String(customer.name), avatar = customer.icon
+      ? '<span class="avatar avatar--40 avatar--image" data-component="avatar" data-variant-name="Avatar_40_Default"><img src="' + escapeHtml(customer.icon) + '" alt=""></span>'
+      : '<span class="avatar avatar--40 avatar--initial" data-component="avatar" data-variant-name="Avatar_40_Initial" aria-hidden="true">' + escapeHtml(Array.from(name)[0]) + '</span>';
+    var raw = customer.customerAmountInfo && customer.customerAmountInfo.balance;
+    var hasBalance = raw != null && raw !== '' && Number.isFinite(Number(raw));
+    var balance = hasBalance ? Number(raw) : 0;
+    return '<button type="button" class="order-success-customer" data-result-customer aria-label="打开' + escapeHtml(name) + '的客户资料">'
+      + avatar + '<span class="order-success-customer__name" title="' + escapeHtml(name) + '">' + escapeHtml(name) + '</span>'
+      + (hasBalance ? '<span class="order-success-customer__balance order-success-customer__balance--' + (balance < 0 ? 'negative' : balance === 0 ? 'zero' : 'positive') + '">余额：' + moneyMarkup(balance) + (balance < 0 ? '<i class="wego-iconfont-s icon-tanhao-mian" aria-label="欠款"></i>' : '') + '</span>' : '')
+      + '<i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>';
+  }
+
+  function successPrintFailureRow(kind, result) {
+    var status = kind === 'receipt' ? result.printSmallBillStatus : result.printExpressStatus;
+    if (!status || status.status !== 'fail') return '';
+    var title = kind === 'receipt' ? '小票打印失败' : '快递单打印失败';
+    return '<div class="order-success-print-row" ' + (kind === 'receipt' ? 'data-receipt-print-result' : 'data-courier-print-result') + ' data-status="fail">'
+      + '<i class="wego-iconfont-s icon-tanhao-mian" aria-hidden="true"></i><div class="order-success-print-row__content"><strong>' + title + '</strong>'
+      + (status.message ? '<span class="order-success-print-row__message">' + escapeHtml(status.message) + '</span>' : '') + '</div>'
+      + button('重试', 'weak', 'sm', kind === 'receipt' ? 'data-retry-receipt-print' : 'data-retry-courier-print') + '</div>';
+  }
+
+  function updateSuccessPrintStatus(result, kind, status, message, refresh, notify) {
+    if (!result || state.completedOrder !== result) return;
+    var key = kind === 'receipt' ? 'printSmallBillStatus' : 'printExpressStatus';
+    var previous = result[key] && result[key].status;
+    result[key] = { status: status, message: message || '' };
+    if (refresh) refresh();
+    if (previous !== 'success' && status === 'success' && notify) notify(kind === 'receipt' ? '小票打印成功' : '快递单打印成功');
+  }
+
+  function startReceiptResultPrint(refresh, notify, retry) {
+    var result = state.completedOrder;
+    if (!result || result.receiptPrinting || (retry ? result.printSmallBillStatus.status !== 'fail' : result.printSmallBillStatus.status !== 'loading')) return;
+    result.receiptPrinting = true;
+    updateSuccessPrintStatus(result, 'receipt', 'loading', '', refresh, notify);
+    window.setTimeout(function () {
+      if (state.completedOrder !== result) return;
+      result.receiptPrinting = false;
+      var params = new URLSearchParams(window.location.search);
+      var failed = ['fail', 'failed'].indexOf(params.get(retry ? 'receiptRetry' : 'receiptPrint')) >= 0;
+      updateSuccessPrintStatus(result, 'receipt', failed ? 'fail' : 'success', failed ? '模拟小票打印机连接中断' : '', refresh, notify);
+    }, 800);
+  }
+
+  function successLinkDialog(result) {
+    if (!result.linkDialogOpen) return '';
+    return '<div class="dialog dialog--title order-success-link-dialog" data-component="dialog" data-variant-name="Dialog_Title_2" data-state="open" role="dialog" aria-modal="true" aria-labelledby="result-link-title">'
+      + '<div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="result-link-title">无法打开链接收款</h3></div><div class="dialog__content">当前相册的链接支付还未开通，联系官方客服解决</div></div>'
+      + '<div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual"><button type="button" class="dialog__btn dialog__btn--dismiss" data-result-link-dismiss>我知道了</button><span class="dialog__divider" aria-hidden="true"></span><button type="button" class="dialog__btn dialog__btn--confirm" data-result-link-contact>联系客服</button></div></div></div></div>';
+  }
+
+  function successTemplate() {
+    var result = state.completedOrder || completedOrderSnapshot();
+    var order = (result.response || {}).orderInfo || {}, actions = successActionAvailability(result);
+    var amount = order.payAmount;
+    var hasAmount = amount != null && amount !== '' && Number.isFinite(Number(amount));
+    var printRows = successPrintFailureRow('receipt', result) + successPrintFailureRow('express', result);
+    return '<div class="modal__panel" data-result-order-id="' + escapeHtml(result.orderNo) + '"' + (result.linkDialogOpen || result.fanProfileOpen ? ' inert aria-hidden="true"' : '') + '>'
+      + '<button type="button" class="btn btn--weak btn--sm btn--icon-only order-success-v2__close" data-component="button" data-close-order-success aria-label="关闭开单结果"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button>'
+      + '<main class="order-success-v2__body"><header class="order-success-v2__head"><h1 id="order-success-title"><i class="wego-iconfont-s icon-yuangou-mian" aria-hidden="true"></i>开单成功</h1>'
+      + (hasAmount ? '<div class="order-success-v2__amount" data-result-pay-amount>' + moneyMarkup(Number(amount)) + '</div>' : '') + '</header>'
+      + successCustomerCard(result)
+      + (printRows ? '<section class="order-success-print" aria-label="打印异常">' + printRows + '</section>' : '')
+      + '<div class="order-success-v2__actions">'
+      + button('分享给客户', 'strong', 'lg', 'data-result-share')
+      + (actions.collect ? button('去收款', 'medium', 'lg', 'data-result-collect') : '')
+      + (actions.deliver ? button(order.expressType === 2 ? '去核销' : '去发货', order.expressType === 2 ? 'medium' : 'weak', 'lg', 'data-result-deliver') : '')
+      + '<div class="order-success-v2__links"><button type="button" class="link" data-component="link" data-variant-name="Link_14" data-new-order>继续开单</button>'
+      + (actions.stock ? '<span aria-hidden="true"></span><button type="button" class="link" data-component="link" data-variant-name="Link_14" data-result-stock>商品备货</button>' : '') + '</div></div></main>'
+      + '</div>' + successLinkDialog(result) + (result.fanProfileOpen ? fanProfileModal() : '');
+  }
+
+  function handleSuccessAction(target, ctx, refresh, close) {
+    var result = state.completedOrder;
+    if (!result) return;
+    var actions = successActionAvailability(result);
+    if (result.fanProfileOpen) {
+      var profileAction = target.closest('[data-fan-profile-action]');
+      if (target.closest('[data-close-panel]') || (profileAction && profileAction.dataset.fanProfileAction === '开单')) {
+        result.fanProfileOpen = false;
+        state.resultFanProfileCustomer = null; state.panel = null;
+        if (profileAction) { close(); return; }
+        refresh();
+        var customerTrigger = ctx.root.querySelector('[data-result-customer]');
+        if (customerTrigger) customerTrigger.focus({ preventScroll: true });
+      } else if (profileAction) ctx.toast(profileAction.dataset.fanProfileAction + '入口已保留，本期展示资料预览');
+      return;
+    }
+    if (target.closest('[data-result-link-dismiss], [data-result-link-contact]')) {
+      var contact = Boolean(target.closest('[data-result-link-contact]'));
+      result.linkDialogOpen = false; refresh();
+      var collect = ctx.root.querySelector('[data-result-collect]');
+      if (collect) collect.focus({ preventScroll: true });
+      if (contact) ctx.toast('将进入官方客服（原型跳转反馈）');
+      return;
+    }
+    if (result.linkDialogOpen) return;
+    if (target.closest('[data-new-order], [data-close-order-success]')) { close(); return; }
+    if (target.closest('[data-retry-courier-print]')) { startCourierPrint(refresh, true, ctx.toast); return; }
+    if (target.closest('[data-retry-receipt-print]')) { startReceiptResultPrint(refresh, ctx.toast, true); return; }
+    if (target.closest('[data-result-collect]') && actions.collect) {
+      if (!(result.response.preSaleOrder || {}).hasSharePaymentLinkAbility) {
+        result.linkDialogOpen = true; refresh();
+        var dismiss = ctx.root.querySelector('[data-result-link-dismiss]');
+        if (dismiss) dismiss.focus({ preventScroll: true });
+      } else ctx.toast('将进入收款分享流程（原型跳转反馈）');
+      return;
+    }
+    if (target.closest('[data-result-share]')) ctx.toast('外跳至销售单详情页并自动拉起分享小票');
+    else if (target.closest('[data-result-deliver]') && actions.deliver) ctx.toast(result.response.orderInfo.expressType === 2 ? '将进入订单核销（原型跳转反馈）' : '外跳至发货页');
+    else if (target.closest('[data-result-stock]') && actions.stock) ctx.toast('外跳至备货单列表');
+    else if (target.closest('[data-result-customer]') && actions.customer) {
+      var customer = result.response.customer;
+      state.resultFanProfileCustomer = Object.assign({}, result.customerProfile || {}, {
+        name: customer.name, avatar: customer.icon || '',
+        balance: customer.customerAmountInfo && customer.customerAmountInfo.balance != null ? Number(customer.customerAmountInfo.balance) : 0
+      });
+      state.panel = 'fan-profile'; result.fanProfileOpen = true;
+      refresh();
+      var profileClose = ctx.root.querySelector('.order-fan-profile-modal [data-close-panel]');
+      if (profileClose) profileClose.focus({ preventScroll: true });
+    }
+  }
+
+  function resetOrder(keepCompletedResult) {
     clearFormatGuideTimers();
     state.addDraft = null;
     clearTimeout(state.saveTimer);
@@ -12746,7 +12947,11 @@
     state.promotionThreshold = 0;
     state.promotionDiscount = 0;
     state.orderNo = '';
+    state.paymentSummary = '';
     state.paymentStatus = 'idle';
+    if (!keepCompletedResult) state.completedOrder = null;
+    state.resumeEmptyOrder = false;
+    state.resultFanProfileCustomer = null;
     state.paymentDraft = null;
     state.paymentScrollSpacer = 0;
     state.paymentPostActions = null;
@@ -12772,41 +12977,98 @@
     routeId: 'workspace-order-success',
     title: '开单完成',
     presentation: { type: 'full-screen-modal', transition: 'slide-up-enter, slide-down-exit', coversTabBar: true },
-    template: '<div class="modal modal--frame order-success-v2 order-success-v2-mount" data-state="open" role="dialog" aria-modal="true" aria-labelledby="order-success-title" data-surface-id="workspace-order-success" data-route-id="workspace-order-success" data-layout-mode="composed"></div>',
+    template: '<div class="order-success-background" inert aria-hidden="true"></div><div class="modal modal--frame order-success-v2 order-success-v2-mount" data-state="open" role="dialog" aria-modal="true" aria-labelledby="order-success-title" data-component="modal" data-surface-id="workspace-order-success" data-route-id="workspace-order-success" data-layout-mode="composed"></div>',
     init: function (ctx) {
+      if (!state.completedOrder) {
+        state.completedOrder = completedOrderSnapshot();
+        resetOrder(true);
+      }
+      var background = ctx.root.querySelector('.order-success-background');
+      function refreshBackground() {
+        if (!background) return;
+        var scrollPositions = background.innerHTML ? captureRenderScrollPositions(background) : [];
+        background.innerHTML = '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + '</div>';
+        normalizeGongfengComponentContracts(background);
+        restoreRenderScrollPositions(background, scrollPositions);
+      }
+      refreshBackground();
+      window.addEventListener('resize', refreshBackground);
       var successRoot = ctx.root.querySelector('.order-success-v2-mount') || ctx.root;
+      var isClosing = false, successAlive = true;
+      var result = state.completedOrder;
       var autoCloseTimer = 0;
-      var isClosing = false;
 
       function closeSuccess() {
-        if (isClosing) return;
-        isClosing = true;
-        if (autoCloseTimer) window.clearTimeout(autoCloseTimer);
-        resetOrder();
+        if (isClosing || state.completedOrder !== result) return;
+        isClosing = true; successAlive = false;
+        window.clearTimeout(autoCloseTimer);
+        var profileBody = successRoot.querySelector('.order-fan-profile-modal__body');
+        var profileScroll = profileBody ? profileBody.scrollTop : 0;
+        var profileAction = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.fanProfileAction;
+        var keepProfile = result.fanProfileOpen && Boolean(state.resultFanProfileCustomer);
+        state.completedOrder = null;
+        state.resumeEmptyOrder = true;
         ctx.back();
-        setTimeout(renderActive, 0);
+        setTimeout(function () {
+          renderActive();
+          if (!keepProfile) return;
+          var body = ctx.root.querySelector('.order-fan-profile-modal__body');
+          if (body) body.scrollTop = profileScroll;
+          var action = profileAction && Array.from(ctx.root.querySelectorAll('[data-fan-profile-action]')).find(function (node) { return node.dataset.fanProfileAction === profileAction; });
+          var close = action || ctx.root.querySelector('.order-fan-profile-modal [data-close-panel]');
+          if (close) close.focus({ preventScroll: true });
+        }, 0);
       }
 
-      var successAlive = true;
       function refreshSuccess() {
         if (!successAlive) return;
         var scrollTop = successRoot.querySelector('.order-success-v2__body')?.scrollTop || 0;
+        var profileScroll = successRoot.querySelector('.order-fan-profile-modal__body')?.scrollTop || 0;
+        var profileAction = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.fanProfileAction;
+        var activeAction = ['data-close-order-success', 'data-new-order', 'data-result-share', 'data-result-collect', 'data-result-deliver', 'data-result-stock', 'data-result-customer', 'data-result-link-dismiss', 'data-result-link-contact', 'data-retry-receipt-print', 'data-retry-courier-print'].find(function (attribute) {
+          return document.activeElement && successRoot.contains && successRoot.contains(document.activeElement) && document.activeElement.hasAttribute(attribute);
+        });
         successRoot.innerHTML = successTemplate();
         normalizeGongfengComponentContracts(successRoot);
         var body = successRoot.querySelector('.order-success-v2__body');
         if (body) body.scrollTop = scrollTop;
+        var activeButton = activeAction && (successRoot.querySelector('[' + activeAction + ']') || successRoot.querySelector('[data-close-order-success]'));
+        if (result.fanProfileOpen) {
+          var profileBody = successRoot.querySelector('.order-fan-profile-modal__body');
+          if (profileBody) profileBody.scrollTop = profileScroll;
+          activeButton = (profileAction && Array.from(successRoot.querySelectorAll('[data-fan-profile-action]')).find(function (node) { return node.dataset.fanProfileAction === profileAction; })) || successRoot.querySelector('.order-fan-profile-modal [data-close-panel]');
+        }
+        if (activeButton) activeButton.focus({ preventScroll: true });
       }
       refreshSuccess();
+      var closeButton = successRoot.querySelector('[data-close-order-success]');
+      if (closeButton) closeButton.focus({ preventScroll: true });
       successRoot.addEventListener('click', function (event) {
-        if (event.target.closest('[data-new-order]')) closeSuccess();
-        else if (event.target.closest('[data-view-order]')) ctx.toast('订单详情入口已保留，本期不展开');
-        else if (event.target.closest('[data-retry-courier-print]')) startCourierPrint(refreshSuccess, true);
+        handleSuccessAction(event.target, ctx, refreshSuccess, closeSuccess);
       });
-      if (state.paymentPostActions && state.paymentPostActions.dispatch) startCourierPrint(refreshSuccess, false);
-      else autoCloseTimer = window.setTimeout(closeSuccess, 3000);
+      successRoot.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape' && result.fanProfileOpen) {
+          event.preventDefault(); result.fanProfileOpen = false;
+          state.resultFanProfileCustomer = null; state.panel = null; refreshSuccess();
+          var customer = successRoot.querySelector('[data-result-customer]');
+          if (customer) customer.focus({ preventScroll: true });
+          return;
+        }
+        if (event.key !== 'Tab') return;
+        var controls = Array.from(successRoot.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter(function (control) { return control.getClientRects().length > 0 && !control.closest('[inert]'); });
+        if (!controls.length) return;
+        var first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus({ preventScroll: true }); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus({ preventScroll: true }); }
+      });
+      // One deadline per result. Refreshes, toasts and customer profiles never restart it.
+      autoCloseTimer = window.setTimeout(closeSuccess, 2000);
+      if (result.printExpressStatus.status === 'loading') startCourierPrint(refreshSuccess, false, ctx.toast);
+      if (result.printSmallBillStatus.status === 'loading') startReceiptResultPrint(refreshSuccess, ctx.toast, false);
       ctx.onDestroy(function () {
         successAlive = false;
-        if (autoCloseTimer) window.clearTimeout(autoCloseTimer);
+        window.clearTimeout(autoCloseTimer);
+        window.removeEventListener('resize', refreshBackground);
       });
     }
   });

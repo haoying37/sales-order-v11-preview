@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="../assets/design-system/wego-design/components.css">
   <link rel="stylesheet" href="../assets/design-system/extensions/segment-control/segment-control.css">
   <link rel="stylesheet" href="../assets/design-system/extensions/sku-rack/sku-rack.css">
-  <link rel="stylesheet" href="../source/scene.css?v=tablet-layout-36ea0ca-20261026">
+  <link rel="stylesheet" href="../source/scene.css?v=result-autoclose-20261027">
   <style>
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg_100); }
     body { color: var(--text_100); font-family: var(--Font14-font-family); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
@@ -38,6 +38,15 @@
       function toast(message) {
         window.clearTimeout(toastTimer);
         toastText.textContent = message;
+        var successIcon = toastHost.querySelector('[data-toast-success-icon]');
+        if (successIcon) successIcon.remove();
+        if (/^(小票|快递单)打印成功$/.test(message)) {
+          successIcon = document.createElement('i');
+          successIcon.className = 'toast__icon wego-iconfont-s icon-goutoast';
+          successIcon.setAttribute('data-toast-success-icon', '');
+          successIcon.setAttribute('aria-hidden', 'true');
+          toastHost.insertBefore(successIcon, toastText);
+        }
         toastHost.classList.add('is-visible');
         toastTimer = window.setTimeout(function () { toastHost.classList.remove('is-visible'); }, 4000);
       }
@@ -65,12 +74,16 @@
       }
 
       window.WegoApp = { registerScene: function (scene) { scenes[scene.routeId] = scene; } };
-      window.__mountSalesOrder = function () { mountScene('workspace-order-create', false); };
+      window.__mountSalesOrder = function () {
+        mountScene('workspace-order-create', false);
+        // Explicit isolated result fixture for reviewing response-driven states.
+        if (new URLSearchParams(location.search).get('state') === 'order-success') mountScene('workspace-order-success', true);
+      };
     })();
   </script>
   <script src="../assets/design-system/extensions/segment-control/segment-control.js"></script>
   <script src="../source/recharge-menu.js?v=20261019"></script>
-  <script src="../source/scene.js?v=tablet-layout-36ea0ca-20261026"></script>
+  <script src="../source/scene.js?v=result-autoclose-20261027"></script>
   <script>window.__mountSalesOrder();</script>
 </body>
 </html>
