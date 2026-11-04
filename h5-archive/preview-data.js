@@ -61,6 +61,13 @@ window.wegoPreviewProjects = [
         "path": "projects/business-cloud/sales-order/v1.1.0/pages/clipboard-recipient-preview.html"
       },
       {
+        "name": "customer-history-address-preview",
+        "title": "发现客户历史收货信息弹窗",
+        "view": "开单入口演示",
+        "scenario": "发现客户历史收货信息弹窗",
+        "path": "projects/business-cloud/sales-order/v1.1.0/pages/customer-history-address-preview.html"
+      },
+      {
         "name": "add-sku-delisted-preview",
         "title": "部分规格已下架",
         "view": "添加商品演示",

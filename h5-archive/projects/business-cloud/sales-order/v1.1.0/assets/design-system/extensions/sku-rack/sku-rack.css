@@ -1,4 +1,4 @@
-/* Locked SkuRack Preview styles from 38edefca1750525b548f98c54c243df25408232d; host adaptation stays in scene.css. */
+/* SkuRack Preview styles from main@f262c3cc3b60c2e68831e4594b9b5ea7eae0dcaf; host adaptation stays in scene.css. */
 .sku_rack-preview { display: grid; gap: var(--spacer-20); }
 .sku_rack-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacer-8); padding: var(--spacer-12); border: 1px solid var(--bg_line_08); border-radius: var(--radius-12); background: var(--bg_white_100); }
 .sku_rack-toolbar__button { height: 32px; padding: 0 var(--spacer-12); border: 1px solid var(--bg_line_08); border-radius: var(--radius-6); background: var(--bg_white_100); color: var(--text_80); cursor: pointer; font-size: var(--Font14-font-size); }

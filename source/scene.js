@@ -54,12 +54,12 @@
       skus: {
         '白色/S': { img: './lib/assets/image/clothing/clothing_2/clothing_2_1.jpg.jpg', price: 89, finallyPrice: 79, maxPrice: 99, stock: 2 },
         '白色/M': { price: 89, finallyPrice: 79, maxPrice: 99, stock: 23 },
-        '白色/L': { img: './lib/assets/image/clothing/clothing_9/1663740558495_35610.jpg', price: 99, finallyPrice: 0, maxPrice: 109, stock: 30 },
-        '白色/XL': { price: 99, finallyPrice: 0, maxPrice: 109, stock: 37 },
+        '白色/L': { img: './lib/assets/image/clothing/clothing_9/1663740558495_35610.jpg', price: 99, finallyPrice: null, maxPrice: 109, stock: 30 },
+        '白色/XL': { price: 99, finallyPrice: null, maxPrice: 109, stock: 37 },
         '黑色/S': { img: './lib/assets/image/clothing/clothing_11/1663741015636_38129.jpg', price: 89, finallyPrice: 79, maxPrice: 99, stock: 16 },
         '黑色/M': { price: 89, finallyPrice: 79, maxPrice: 99, stock: 24 },
-        '黑色/L': { price: 99, finallyPrice: 0, maxPrice: 109, stock: 31 },
-        '黑色/XL': { price: 99, finallyPrice: 0, maxPrice: 109, stock: 38 }
+        '黑色/L': { price: 99, finallyPrice: null, maxPrice: 109, stock: 31 },
+        '黑色/XL': { price: 99, finallyPrice: null, maxPrice: 109, stock: 38 }
       }
     },
     p2: {
@@ -1046,7 +1046,16 @@
 
   // Prototype-only review entry for states that otherwise require a host navigation history.
   try {
-    if (new URLSearchParams(window.location.search).get('state') === 'return-draft-dialog') {
+    var reviewState = new URLSearchParams(window.location.search).get('state');
+    // Prototype-only entries for the existing merchant pickup-contact requirement.
+    if (reviewState === 'pickup-contact-required' || reviewState === 'pickup-contact-optional') {
+      state.checkoutPolicy.requirePickupContact = reviewState === 'pickup-contact-required';
+      state.delivery = 'pickup';
+      state.deliveryTouchedThisOrder = true;
+      state.pickupPointId = PICKUP_POINTS[0] ? PICKUP_POINTS[0].id : null;
+      state.pickupContact = null;
+    }
+    if (reviewState === 'return-draft-dialog') {
       state.customer = CUSTOMERS[0];
       state.returnDraftConfirmOpen = true;
     }
@@ -1174,7 +1183,7 @@
 
   function skuRowDetail(product, spec) {
     var config = skuRowConfig(product);
-    var stored = config.skus && config.skus[spec] || {};
+    var stored = product.skuDetails && product.skuDetails[spec] || config.skus && config.skus[spec] || {};
     var hasStoredStock = Object.prototype.hasOwnProperty.call(stored, 'stock');
     var productStock = product.inventory != null ? product.inventory : product.stock;
     return {
@@ -1193,7 +1202,7 @@
   }
 
   function skuRowDisplayPrice(sku) {
-    return sku.finallyPrice ? sku.finallyPrice : sku.price;
+    return sku.finallyPrice != null ? sku.finallyPrice : sku.price;
   }
 
   function skuRowFinalPrices(product) {
@@ -1210,7 +1219,7 @@
     var allSkus = skuRowDetails(product);
     var showSkuImage = allSkus.some(function (item) { return Boolean(item.img); });
     var showSkuPrice = skuRowFinalPrices(product).length > 1;
-    var showOriginalPrice = Boolean(sku.finallyPrice) && sku.finallyPrice !== sku.price;
+    var showOriginalPrice = sku.finallyPrice != null && sku.finallyPrice !== sku.price;
     var showMaxPrice = showSkuPrice
       && !showOriginalPrice
       && Boolean(config.inactiveLinePrice)
@@ -1315,7 +1324,7 @@
         return sum + Number(draft.pendingSizeQty[size] || 0);
       }, 0);
     }
-    return Object.keys(draft.skuQty).reduce(function (sum, key) { return sum + Number(draft.skuQty[key] || 0); }, 0);
+    return draft.product.specs.reduce(function (sum, key) { return sum + Number(draft.skuQty[key] || 0); }, 0);
   }
 
   // 每个 SKU 独立录入；批量操作不改变其他 SKU 的数量或已确认超卖状态。
@@ -1532,19 +1541,140 @@
     return Math.max(0, Math.round(customerPrice(product) * 0.9));
   }
 
-  // Current price owns its purchase configuration; another price's minimum never leaks in.
-  // Numeric types follow the H5 detail response. Missing records retain existing prototype prices.
+  // Source price types are independent from the UI aliases and from the final deal price.
+  var PRICE_TYPE_MODES = { '1': 'cost', '2': 'retail', '3': 'wholesale', '4': 'pack', '5': 'consignment', '86': 'member', '-2': 'title-member', '-1': 'title' };
+  var PRICE_TYPE_PRIORITY = [86, 2, 3, 4, 5, 1, -2, -1];
+
+  function priceTypeForMode(mode) {
+    return Number(Object.keys(PRICE_TYPE_MODES).find(function (type) { return PRICE_TYPE_MODES[type] === mode; }) || 2);
+  }
+
+  function productPriceRecords(product) {
+    if (Array.isArray(product.priceArr)) return product.priceArr;
+    if (Array.isArray(product.prices)) return product.prices;
+    // Adapter for the archived local fixtures; explicit business response data always wins.
+    var records = [{ priceType: 2, price: customerPrice(product) }, { priceType: 1, price: productCostPrice(product) }];
+    if (product.wholeSaleInfo) records.push(Object.assign({ priceType: 3, price: customerPrice(product) }, product.wholeSaleInfo));
+    if (state.customer && Number(state.memberDiscount) < 100) records.push({ priceType: 86, price: memberPrice(product.listPrice), vipOriginalPrice: product.listPrice });
+    return records;
+  }
+
+  function availablePriceTypes(product) {
+    var types = productPriceRecords(product).map(function (record) { return Number(record.priceType); });
+    Object.keys(product.skuPriceMap || {}).forEach(function (id) {
+      Object.keys(product.skuPriceMap[id] || {}).forEach(function (type) { if (Number(type) !== 87) types.push(Number(type)); });
+    });
+    if (product.itemNameVipCardPrice != null) types.push(-2);
+    if (product.itemNamePrice != null) types.push(-1);
+    return PRICE_TYPE_PRIORITY.filter(function (type) { return types.indexOf(type) >= 0 && product.specs.some(function (spec) { return addSkuPricing(product, spec, type, []).valid; }); });
+  }
+
+  function productSkuId(product, spec) {
+    if (product.skuIds && product.skuIds[spec] != null) return product.skuIds[spec];
+    var row = (product.allSkus || []).find(function (sku) { return sku.spec === spec; });
+    return row && row.id != null ? row.id : spec;
+  }
+
+  function normalizeSkuPriceChanges(product, changes) {
+    return (changes || []).map(function (record) {
+      return record.spec && product.specs.indexOf(record.spec) >= 0 ? Object.assign({}, record, { id: productSkuId(product, record.spec) }) : Object.assign({}, record);
+    });
+  }
+
+  function savedItemPriceChanges(item, product) {
+    var changes = normalizeSkuPriceChanges(product, item && item.changePriceSkus);
+    if (!item) return changes;
+    var type = Number(item.usePriceType || priceTypeForMode(item.priceMode));
+    Object.keys(item.skuPriceDetails || {}).forEach(function (spec) {
+      if (product.specs.indexOf(spec) < 0) return;
+      var detail = item.skuPriceDetails[spec], native = addSkuPricing(product, spec, type, []);
+      if (detail.finallyPrice == null || !native.valid) return;
+      if (Number(detail.finallyPrice) === native.finallyPrice && !changes.some(function (record) { return String(record.id) === String(native.id) && Number(record.priceType) === type; })) return;
+      changes = changes.filter(function (record) { return !(String(record.id) === String(native.id) && Number(record.priceType) === type); });
+      changes.push({ id: native.id, spec: spec, priceType: type, originalPrice: native.originalPrice, finallyPrice: Number(detail.finallyPrice),
+        preferentialType: detail.discountType || 'fixed', preferentialValue: detail.discountValue });
+    });
+    return changes;
+  }
+
+  function defaultAddPriceType(product, item) {
+    var types = availablePriceTypes(product);
+    var currentType = item && (Object.prototype.hasOwnProperty.call(item, 'usePriceType') ? item.usePriceType : (item.priceMode && priceTypeForMode(item.priceMode)));
+    var type = Number(currentType || product.lastTimeUsePriceType || 0);
+    return types.indexOf(type) >= 0 ? type : (types[0] || 0);
+  }
+
   function addPriceConfiguration(product, mode) {
-    var types = { cost: 1, retail: 2, wholesale: 3, member: 86 };
-    if (!Object.prototype.hasOwnProperty.call(types, mode)) return null;
-    var record = (product.prices || []).find(function (price) { return price.priceType === types[mode]; });
-    return record || (mode === 'wholesale' && product.wholeSaleInfo ? product.wholeSaleInfo : null);
+    if (mode === 'discount') return null;
+    var type = priceTypeForMode(mode);
+    return productPriceRecords(product).find(function (price) { return Number(price.priceType) === type; }) || null;
   }
 
   function addSelectedPrice(product, mode) {
     var config = addPriceConfiguration(product, mode);
-    if (config && Number.isFinite(Number(config.price)) && config.price != null) return Number(config.price);
+    if (config && config.price != null && Number.isFinite(Number(config.price))) return Number(config.price);
+    if (mode === 'title-member') return Number(product.itemNameVipCardPrice);
+    if (mode === 'title') return Number(product.itemNamePrice);
     return mode === 'cost' ? productCostPrice(product) : mode === 'member' ? memberPrice(product.listPrice) : customerPrice(product);
+  }
+
+  function addSkuPricing(product, spec, type, changes) {
+    type = Number(type);
+    var row = skuRowDetail(product, spec);
+    var id = productSkuId(product, spec);
+    var map = product.skuPriceMap;
+    var hasMapPrice = Object.keys(map || {}).some(function (key) { return Object.prototype.hasOwnProperty.call(map[key] || {}, type); });
+    var record = productPriceRecords(product).find(function (price) { return Number(price.priceType) === type; });
+    var price = null, original = null;
+    if (hasMapPrice) {
+      var skuMap = map[id] || {};
+      price = skuMap[type] == null || String(skuMap[type]).trim() === '' ? null : Number(skuMap[type]);
+      original = (type === 86 || type === -2) && skuMap[87] != null ? Number(skuMap[87]) : price;
+    } else if (record) {
+      price = record.price == null || String(record.price).trim() === '' ? null : Number(record.price);
+      original = (type === 86 || type === -2) && record.vipOriginalPrice != null ? Number(record.vipOriginalPrice) : price;
+      if (!Array.isArray(product.priceArr) && !Array.isArray(product.prices)) {
+        if (type === 2) { original = Number(row.price); price = skuRowDisplayPrice(row); }
+        if (type === 86) { original = Number(row.price); price = memberPrice(row.price); }
+      }
+    } else if (type === -2 && product.itemNameVipCardPrice != null) {
+      price = Number(product.itemNameVipCardPrice); original = Number(product.itemNamePrice == null ? price : product.itemNamePrice);
+    } else if (type === -1 && product.itemNamePrice != null) price = original = Number(product.itemNamePrice);
+    var override = (changes || []).find(function (change) { return String(change.id) === String(id) && Number(change.priceType) === type; });
+    return { id: id, spec: spec, priceType: type, originalPrice: original,
+      finallyPrice: override ? Number(override.finallyPrice) : price,
+      valid: original != null && Number.isFinite(original) && original > 0 && price != null && Number.isFinite(price) };
+  }
+
+  function addDraftPriceType(draft) {
+    return Number(draft.usePriceType || priceTypeForMode(draft.priceMode));
+  }
+
+  function setAddPriceType(draft, type) {
+    draft.usePriceType = Number(type);
+    draft.priceMode = PRICE_TYPE_MODES[type] || 'retail';
+    draft.unitPrice = addSelectedPrice(draft.catalogProduct || draft.product, draft.priceMode);
+    draft.skuPriceOverrides = {};
+    var product = draft.catalogProduct || draft.product;
+    draft.changePriceSkus = normalizeSkuPriceChanges(product, draft.changePriceSkus);
+    var validSpecs = product.specs.filter(function (spec) { return addSkuPricing(product, spec, type, draft.changePriceSkus).valid; });
+    draft.product = Object.assign({}, product, { specs: validSpecs });
+    validSpecs.forEach(function (spec) {
+      var resolved = addSkuPricing(product, spec, type, draft.changePriceSkus);
+      var changed = (draft.changePriceSkus || []).some(function (record) { return String(record.id) === String(resolved.id) && Number(record.priceType) === Number(type); });
+      if (changed) draft.skuPriceOverrides[spec] = resolved.finallyPrice;
+    });
+    if (draft.selectedColor && !validSpecs.some(function (spec) { return splitSpec(spec).color === draft.selectedColor; })) {
+      draft.selectedColor = validSpecs.length ? splitSpec(validSpecs[0]).color : '';
+    }
+  }
+
+  function setAddSkuPriceChange(draft, spec, after, mode, value) {
+    var resolved = addSkuPricing(draft.catalogProduct || draft.product, spec, addDraftPriceType(draft), draft.changePriceSkus);
+    draft.changePriceSkus = (draft.changePriceSkus || []).filter(function (record) { return !(String(record.id) === String(resolved.id) && Number(record.priceType) === resolved.priceType); });
+    draft.changePriceSkus.push({ id: resolved.id, spec: spec, priceType: resolved.priceType, originalPrice: resolved.originalPrice,
+      finallyPrice: after, preferentialType: mode, preferentialValue: value });
+    draft.skuPriceOverrides[spec] = after;
   }
 
   function addWholesaleRuleTag(draft) {
@@ -1608,19 +1738,20 @@
   }
 
   function addDraftSkuBasePrice(draft, spec) {
-    if (draft.priceMode === 'member' && spec) return memberPrice(skuRowDetail(draft.product, spec).price);
-    if (!draft.useSkuPrices || draft.priceMode !== 'retail' || !spec) return addDraftUnitPrice(draft);
-    return skuRowDisplayPrice(skuRowDetail(draft.product, spec));
+    if (!spec) return addDraftUnitPrice(draft);
+    return addSkuPricing(draft.catalogProduct || draft.product, spec, addDraftPriceType(draft), []).originalPrice;
   }
 
   function addDraftSkuPrice(draft, spec) {
     var overridden = draft.skuPriceOverrides && draft.skuPriceOverrides[spec];
-    return overridden == null ? addDraftSkuBasePrice(draft, spec) : Number(overridden);
+    if (overridden != null) return Number(overridden);
+    if (!spec || draft.priceMode === 'discount') return addDraftUnitPrice(draft);
+    return addSkuPricing(draft.catalogProduct || draft.product, spec, addDraftPriceType(draft), draft.changePriceSkus).finallyPrice;
   }
 
   function addDraftAmount(draft) {
     if (draft.mode !== 'batch' && !draft.selectedColor) return addDraftTotal(draft) * addDraftUnitPrice(draft);
-    return Math.round(Object.keys(draft.skuQty).reduce(function (sum, spec) {
+    return Math.round(draft.product.specs.reduce(function (sum, spec) {
       return sum + Number(draft.skuQty[spec] || 0) * addDraftSkuPrice(draft, spec);
     }, 0) * 100) / 100;
   }
@@ -2030,7 +2161,20 @@
   }
 
   function orderDeliveryStatus() {
+    if (pickupCompleted(state.paymentDraft)) return 'picked-up';
     return isPureReturnOrder() ? 'returned' : 'sales-' + (state.delivery || 'none');
+  }
+
+  function usesPickupCompletion() {
+    return !isPureReturnOrder() && totals().payable >= 0 && (state.delivery === 'pickup' || state.delivery === 'none');
+  }
+
+  function canCompletePickup(draft) {
+    return usesPickupCompletion() && Boolean(draft && (draft.kind === 'private' || draft.kind === 'debt'));
+  }
+
+  function pickupCompleted(draft) {
+    return canCompletePickup(draft) && Boolean(draft.pickedUp);
   }
 
   function orderAllTemporary() {
@@ -2052,8 +2196,12 @@
     return '<span class="tag tag--business-stroke tag--business-16 order-return-tag" data-component="tag" data-variant-name="Tag_Business_RedStroke_16"' + (Number(qty) < 0 ? '' : ' hidden') + '><span class="tag__label">退</span></span>';
   }
 
-  function orderSpecLabel(spec, qty) {
-    return '<span class="order-spec-label" data-order-spec-label="' + encodeURIComponent(spec) + '"><span class="order-spec-label__text" title="' + escapeHtml(spec) + '">' + escapeHtml(spec) + '</span>' + returnTag(qty) + '</span>';
+  function orderSpecLabel(spec, qty, itemIndex) {
+    var item = state.products[itemIndex];
+    var text = item && !isOrderSkuInvalid(item, spec)
+      ? '<button type="button" class="link" data-component="link" data-variant-name="Link_14" data-edit-order-product="' + itemIndex + '" data-edit-product-spec="' + encodeURIComponent(spec) + '" aria-label="编辑' + escapeHtml(item.name + ' ' + spec) + '数量">' + escapeHtml(spec) + '</button>'
+      : '<span class="order-spec-label__text" title="' + escapeHtml(spec) + '">' + escapeHtml(spec) + '</span>';
+    return '<span class="order-spec-label" data-order-spec-label="' + encodeURIComponent(spec) + '">' + text + returnTag(qty) + '</span>';
   }
 
   function orderPriceEntries() {
@@ -2076,7 +2224,7 @@
       requiresRecipient: state.delivery === 'express' || state.delivery === 'freight',
       showFreight: true,
       supportsSenderInfo: state.delivery === 'express' || state.delivery === 'freight',
-      name: ({ express: '快递', freight: '快运', pickup: '自提', none: '现场取货' })[state.delivery] || ''
+      name: ({ express: '快递', freight: '快运', pickup: '自提', none: '其他' })[state.delivery] || ''
     };
   }
 
@@ -2289,6 +2437,63 @@
     };
   }
 
+  function normalizedReceiver(address) {
+    address = address || {};
+    return { name: address.name || '', phone: address.phone || address.tel || '', province: address.province || '', city: address.city || '',
+      district: address.district || '', areaRegion: address.areaRegion || '', detail: address.detail || address.address || '', secretPhone: address.secretPhone || '' };
+  }
+
+  function applyCustomerAddressPackage(candidate) {
+    state.address = Object.assign({}, candidate.address);
+    state.senderInfo = candidate.senderInfo ? Object.assign({}, candidate.senderInfo) : null;
+    state.senderMode = candidate.senderInfo && candidate.senderMode === 'proxy' ? 'proxy' : 'default';
+    state.pendingCustomerAddress = null;
+    state.deliveryDraft = null;
+    refreshDeliveryRestrictions();
+  }
+
+  function applyCustomerDeliveryHistory(customer, previousCustomerId) {
+    state.pendingCustomerAddress = null;
+    if (!customer) return;
+    if (customer.lastDelivery) state.delivery = customer.lastDelivery;
+    if (customer.lastPickupPointId) state.pickupPointId = customer.lastPickupPointId;
+    if (previousCustomerId !== customer.id) {
+      var contact = customer.lastPickupContact || customer.selfPickupReceiveInfoVO || {};
+      state.pickupContact = { name: contact.name || contact.receiveName || '', phone: contact.phone || contact.receivePhone || '' };
+    }
+    state.deliveryDraft = null;
+    refreshDeliveryRestrictions();
+    var address = normalizedReceiver(customer.lastAddress);
+    if (!address.name && !address.phone) return;
+    var sender = customer.lastSenderInfo;
+    if (!sender || (!sender.name && !sender.phone && !sender.tel)) sender = null;
+    var candidate = { address: address, senderInfo: sender ? { name: sender.name || '', phone: sender.phone || sender.tel || '' } : null,
+      senderMode: customer.lastSenderMode || 'default' };
+    var hasCurrent = Boolean(state.address || state.senderMode === 'proxy' && state.senderInfo && (state.senderInfo.name || state.senderInfo.phone));
+    var different = JSON.stringify(normalizedReceiver(state.address)) !== JSON.stringify(address);
+    if (!hasCurrent) applyCustomerAddressPackage(candidate);
+    else if (different) {
+      if (state.delivery === 'express' || state.delivery === 'freight') state.pendingCustomerAddress = candidate;
+      else applyCustomerAddressPackage(candidate);
+    }
+  }
+
+  function finishCustomerAddressChoice(useHistory, ctx) {
+    if (!state.pendingCustomerAddress) return;
+    if (useHistory) { applyCustomerAddressPackage(state.pendingCustomerAddress); markDirty(ctx); }
+    else { state.pendingCustomerAddress = null; renderActive(); }
+    if (activeContext && activeContext.root) {
+      var trigger = Array.prototype.find.call(activeContext.root.querySelectorAll('[data-open-panel="customer"]'), function (node) { return node.getClientRects().length; });
+      if (trigger) trigger.focus({ preventScroll: true });
+    }
+  }
+
+  function customerAddressConfirmDialog() {
+    var pending = state.pendingCustomerAddress;
+    if (!pending) return '';
+    return '<div class="dialog dialog--title order-refund-balance-guide" data-component="dialog" data-variant-name="Dialog_Title_2" data-state="open" role="dialog" aria-modal="true" aria-labelledby="customer-history-address-title" data-customer-address-dialog><div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="customer-history-address-title">发现客户历史收货信息<span class="order-customer-history-recipient">“' + escapeHtml(pending.address.name + ' ' + pending.address.phone) + '”</span>，是否使用？</h3></div></div><div class="dialog__actions"><div class="dialog__buttons dialog__buttons--dual"><button type="button" class="dialog__btn dialog__btn--dismiss" data-customer-address-cancel>取消</button><span class="dialog__divider"></span><button type="button" class="dialog__btn dialog__btn--confirm" data-customer-address-confirm>使用</button></div></div></div></div>';
+  }
+
   function rememberCurrentDeliveryPreference() {
     if (!state.customer) {
       state.guestDeliveryPreference = {
@@ -2411,11 +2616,12 @@
     '.order-v2-mobile__scroll',
     '.order-desktop__table',
     '.order-desktop__catalog-scroll',
+    '.order-catalog-products__body',
     '.order-add-scroll',
     '.order-sku-rack .sku_rack__table-wrap',
     '.order-batch-matrix-wrap',
     '.order-add-wholesale-rules',
-    '.order-catalog-category-tabs',
+    '.order-catalog-category-tabs', '.order-desktop-search-results__list',
     '.order-desktop-modal--checkout .order-desktop-modal__body',
     '.order-v2-modal .order-v2-modal__body',
     '.order-refund-sync-dialog__body', '.order-refund-sync-problems', '.order-reference-payment__sheet',
@@ -2463,7 +2669,7 @@
     if (activeContext && activeContext.root && activeContext.root.isConnected) {
       var renderScrollPositions = captureRenderScrollPositions(activeContext.root);
       // Pad 选品会暂时收起商品库；容器卸载期间仍保留浏览位置，重新展开时恢复。
-      var catalogScrollSelectors = ['.order-desktop__catalog-scroll', '.order-catalog-category-tabs'];
+      var catalogScrollSelectors = ['.order-desktop__catalog-scroll', '.order-catalog-products__body', '.order-catalog-category-tabs'];
       state.catalogScrollPositions = state.catalogScrollPositions || {};
       renderScrollPositions.forEach(function (snapshot) {
         if (catalogScrollSelectors.indexOf(snapshot.selector) !== -1) state.catalogScrollPositions[snapshot.selector] = snapshot;
@@ -2901,7 +3107,7 @@
 
   function deliverySummaryText() {
     if (isPureReturnOrder()) return '其他 · 纯退货无需收货信息';
-    var label = ({ express: '快递', freight: '快运', pickup: '自提', none: '现场取货' })[state.delivery] || '发货方式 无';
+    var label = ({ express: '快递', freight: '快运', pickup: '自提', none: '其他' })[state.delivery] || '发货方式 无';
     if ((state.delivery === 'express' || state.delivery === 'freight') && state.address) {
       return label + ' · ' + state.address.name + ' ' + state.address.phone + ' · ' + state.address.detail;
     }
@@ -2910,15 +3116,15 @@
       var pickupContact = pickupContactValues(state.pickupContact);
       var contactText = pickupContact.name && pickupContact.phone
         ? pickupContact.name + ' ' + pickupContact.phone
-        : '请填写提货人信息';
-      return '自提 · ' + (pickupPoint ? pickupPoint.name + ' · ' + pickupPoint.address + ' · ' : '') + contactText;
+        : ((state.checkoutPolicy || {}).requirePickupContact !== false ? '暂无提货人信息' : [pickupContact.name, pickupContact.phone].filter(Boolean).join(' '));
+      return ['自提', pickupPoint && pickupPoint.name, pickupPoint && pickupPoint.address, contactText].filter(Boolean).join(' · ');
     }
     return label;
   }
 
   function deliverySummaryParts() {
     if (isPureReturnOrder()) return { label: '其他', primary: '纯退货，无需收货信息', secondary: '' };
-    var label = ({ express: '快递', freight: '快运', pickup: '自提', none: '现场取货' })[state.delivery] || '发货方式';
+    var label = ({ express: '快递', freight: '快运', pickup: '自提', none: '其他' })[state.delivery] || '发货方式';
     var requiresRealName = orderRequiresRealName() && (state.delivery === 'express' || state.delivery === 'freight');
     var realNameText = requiresRealName
       ? (realNameComplete(state.realNameInfo)
@@ -2937,13 +3143,13 @@
       var pickupContact = pickupContactValues(state.pickupContact);
       var contactText = pickupContact.name && pickupContact.phone
         ? pickupContact.name + ' ' + pickupContact.phone
-        : '暂无提货人信息';
+        : ((state.checkoutPolicy || {}).requirePickupContact !== false ? '暂无提货人信息' : [pickupContact.name, pickupContact.phone].filter(Boolean).join(' '));
       return pickupPoint
         ? { label: '自提', primary: pickupPoint.name, secondary: '', meta: contactText, missingPickupContact: !pickupContact.name || !pickupContact.phone }
         : { label: '自提', primary: contactText, secondary: '' };
     }
     if (state.delivery === 'none') {
-      return { label: '现场取货', primary: '', secondary: '' };
+      return { label: '其他', primary: '', secondary: '' };
     }
     return { label: '发货方式', primary: '无', secondary: '' };
   }
@@ -2957,17 +3163,6 @@
         +   '<button type="button" data-open-panel="delivery"><small>发货方式 ' + (state.delivery === 'express' ? '快递' : '快运') + '</small><strong>收货信息 无</strong></button>'
         +   '<input type="text" aria-label="粘贴收件信息" placeholder="粘贴收件信息" data-inline-address-paste>'
         +   '<button type="button" class="btn btn--medium btn--sm" data-component-slug="button" data-inline-recognize-address>识别</button>'
-        + '</div>';
-    }
-    var mobilePickupContact = pickupContactValues(state.pickupContact);
-    if (state.delivery === 'pickup' && (!mobilePickupContact.name || !mobilePickupContact.phone)) {
-      var mobilePickupPoint = currentPickupPoint();
-      return ''
-        + '<div class="cell cell--single cell--bg-white order-mobile-delivery-inline order-mobile-delivery-inline--pickup">'
-        +   '<button type="button" data-open-panel="delivery"><small>自提' + (mobilePickupPoint ? ' · ' + escapeHtml(mobilePickupPoint.name) : '') + '</small></button>'
-        +   '<strong class="order-inline-pickup-label">填写提货人信息</strong>'
-        +   '<input type="text" aria-label="粘贴提货人信息" placeholder="粘贴姓名和手机号" data-inline-pickup-paste>'
-        +   '<button type="button" class="btn btn--medium btn--sm" data-component-slug="button" data-inline-recognize-pickup>识别</button>'
         + '</div>';
     }
     return ''
@@ -3042,7 +3237,7 @@
       +     '<div class="order-line-title"><strong>' + escapeHtml(item.name) + '</strong><span>' + escapeHtml(item.code) + '</span></div>'
       + wholesaleRuleTags(item)
       +     (item.isUndeliverable ? '<span class="order-delivery-restriction-inline">此商品不支持配送</span>' : '')
-      +     '<small>' + escapeHtml(lineMeta(item)) + '</small>'
+      +     '<small>' + (isSkuMode(item.mode) ? itemSpecRows(item).map(function (row) { return orderSpecLabel(row.spec, row.qty, index) + '×' + row.qty; }).join('，') : escapeHtml(lineMeta(item))) + '</small>'
       +     (featureEnabled('productNoteColumn') && item.note ? '<em>备注：' + escapeHtml(item.note) + '</em>' : '')
       +     '<div class="order-line-price">' + (item.skuPrices ? '<span>按SKU计价</span>' : '<button type="button" class="link link--14" data-component-slug="link" data-edit-price="' + index + '">' + moneyMarkup(item.price) + '</button>') + '<span>× ' + item.qty + '</span><b>' + moneyMarkup(itemAmount(item)) + '</b></div>'
       +   '</div>'
@@ -3064,7 +3259,7 @@
       + wholesaleRuleTags(item)
       + (item.isUndeliverable ? '<span class="order-delivery-restriction-inline">此商品不支持配送</span>' : '')
       + '<div class="order-mobile-invalid-skus">' + itemSpecRows(item).map(function (row) {
-        return '<div class="order-mobile-invalid-sku' + (isOrderSkuInvalid(item, row.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, index, row.spec) + '><span>' + escapeHtml(row.spec) + '</span><span class="order-mobile-invalid-sku__price">' + moneyMarkup(itemSkuPrice(item, row.spec)) + '</span>' + desktopQuantityCounter(index, row.qty, row.spec, row.stock == null ? '' : '库存' + row.stock) + '</div>';
+        return '<div class="order-mobile-invalid-sku' + (isOrderSkuInvalid(item, row.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, index, row.spec) + '>' + orderSpecLabel(row.spec, row.qty, index) + '<span class="order-mobile-invalid-sku__price">' + moneyMarkup(itemSkuPrice(item, row.spec)) + '</span>' + desktopQuantityCounter(index, row.qty, row.spec, row.stock == null ? '' : '库存' + row.stock) + '</div>';
       }).join('') + '</div></div>'
       + '<div class="order-line-actions"><button type="button" class="link link--12 text-danger" data-delete-row="' + index + '">删除</button></div></article>';
   }
@@ -3247,7 +3442,7 @@
     if (grouped) {
       var groupedSkuCountClass = specs.length > 1 ? ' order-desktop-product-row--multi-sku' : ' order-desktop-product-row--single-sku';
       var groupedSpecs = specs.map(function (entry) {
-        return '<span class="order-desktop-grouped-sku-line' + (isOrderSkuInvalid(item, entry.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, itemIndex, entry.spec) + ' title="' + escapeHtml(entry.spec) + '">' + orderSpecLabel(entry.spec, entry.qty) + '</span>';
+        return '<span class="order-desktop-grouped-sku-line' + (isOrderSkuInvalid(item, entry.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, itemIndex, entry.spec) + ' title="' + escapeHtml(entry.spec) + '">' + orderSpecLabel(entry.spec, entry.qty, itemIndex) + '</span>';
       }).join('');
       var groupedPrices = specs.map(function (entry) {
         return '<span class="order-desktop-grouped-sku-line' + (isOrderSkuInvalid(item, entry.spec) ? ' is-invalid' : '') + '"' + invalidSkuActionAttrs(item, itemIndex, entry.spec) + '>' + desktopSkuUnitPrice(item, itemIndex, entry.spec) + '</span>';
@@ -3277,7 +3472,7 @@
       + '<article class="order-desktop-product-row' + availabilityClass + (isRowSelected(itemIndex, row.spec) ? ' is-selected' : '') + '" data-item-index="' + itemIndex + '" data-row-select="' + itemIndex + '" data-row-spec="' + encodeURIComponent(row.spec) + '"' + invalidSkuActionAttrs(item, itemIndex, row.spec) + '>'
       +   desktopProductName(item)
       +   clickableImage(item, 'order-desktop-product-image', 'data-preview-image="' + itemIndex + '"')
-      +   '<span class="order-desktop-product-spec" title="' + escapeHtml(specText) + '">' + orderSpecLabel(specText, qty) + '</span>'
+      +   '<span class="order-desktop-product-spec" title="' + escapeHtml(specText) + '">' + orderSpecLabel(specText, qty, itemIndex) + '</span>'
       +   desktopSkuUnitPrice(item, itemIndex, specKey)
       +   '<div class="order-desktop-product-qty">' + desktopQuantityCounter(itemIndex, qty, specKey, hint) + '</div>'
       +   '<strong class="order-desktop-product-total"><span class="order-desktop-product-total__value' + (itemSkuPrice(item, specKey) * qty < 0 ? ' is-negative' : '') + '" data-product-total-value>' + moneyMarkup(itemSkuPrice(item, specKey) * qty) + '</span></strong>'
@@ -3483,7 +3678,7 @@
       +   '<div class="order-sku-price-modal__panel">'
       +     '<header class="order-sku-price-modal__head"><strong id="freight-edit-title">设置运费</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-freight-edit-cancel aria-label="关闭设置运费"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
       +     '<div class="order-sku-price-modal__body">'
-      +       '<label class="order-sku-price-field"><span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" id="freight-edit-value" type="text" inputmode="decimal" value="' + escapeHtml(String(state.freight || '')) + '" placeholder="请输入运费金额" aria-label="运费金额" data-freight-edit-value><span class="number-input__suffix">元</span></span></label>'
+      +       '<label class="order-sku-price-field"><span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" id="freight-edit-value" type="text" inputmode="decimal" value="' + escapeHtml(state.freightEditInput == null ? String(state.freight || '') : state.freightEditInput) + '" placeholder="请输入运费金额" aria-label="运费金额" data-freight-edit-value><span class="number-input__suffix">元</span></span></label>'
       +     '</div>'
       +     '<footer class="order-sku-price-modal__footer">'
       +       button('取消', 'weak', 'md', 'data-freight-edit-cancel')
@@ -3510,6 +3705,13 @@
       + '</div>';
   }
 
+  function catalogTransactionPrices(product) {
+    var item = state.products.slice().reverse().find(function (entry) { return entry.code === product.code && !isOrderProductInvalid(entry); });
+    if (!item) return [customerPrice(product)];
+    var specs = Object.keys(item.skuPriceDetails || item.skuPrices || {});
+    return specs.length ? specs.map(function (spec) { return itemSkuPrice(item, spec); }) : [Number(item.price)];
+  }
+
   function catalogList(manualDesktop, sourceRows) {
     var editable = arguments.length > 2 ? Boolean(arguments[2]) : false;
     var keyword = manualDesktop ? '' : state.catalogKeyword.trim();
@@ -3521,14 +3723,16 @@
     });
     if (!rows.length) return '<div class="order-catalog-empty">没有匹配商品</div>';
     return rows.map(function (item) {
-      var catalogNegative = money(customerPrice(item)).charAt(0) === '-';
-      var catalogPrice = (Math.abs(Math.round(customerPrice(item) * 100)) / 100).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+      var transactionPrices = catalogTransactionPrices(item);
+      var displayedPrice = Math.max.apply(Math, transactionPrices);
+      var catalogNegative = money(displayedPrice).charAt(0) === '-';
+      var catalogPrice = (Math.abs(Math.round(displayedPrice * 100)) / 100).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
       var catalogInventory = item.inventory != null
         ? Number(item.inventory)
         : (item.stock != null
           ? Number(item.stock)
           : item.specs.reduce(function (total, spec) { return total + specStock(item, spec); }, 0));
-      var priceMarkup = '<b' + (catalogNegative ? ' class="order-money--negative"' : '') + '><span class="order-catalog-item__currency">' + (catalogNegative ? '-' : '') + '¥</span><span class="order-catalog-item__amount">' + escapeHtml(catalogPrice) + '</span></b>';
+      var priceMarkup = '<b class="order-catalog-item__price-maximum"' + (catalogNegative ? ' data-negative="true"' : '') + '><span class="order-catalog-item__currency">' + (catalogNegative ? '-' : '') + '¥</span><span class="order-catalog-item__amount">' + escapeHtml(catalogPrice) + '</span></b><b class="order-catalog-item__price-range">' + priceRangeMarkup(transactionPrices) + '</b>';
       var content = ''
         +   '<span class="order-catalog-item__media">' + image(item, 'order-catalog-item__image') + '<span class="order-catalog-item__code"><span class="order-catalog-item__code-copy"><span class="order-catalog-item__sku">' + escapeHtml(item.code) + '</span><span class="order-catalog-item__name">' + escapeHtml(item.name) + '</span></span></span><i class="wego-iconfont-s icon-jia16 order-catalog-item__add" aria-hidden="true"></i></span>'
         +   '<span class="order-catalog-item__list-detail"><strong class="order-catalog-item__list-code">' + escapeHtml(item.code) + '</strong><span class="order-catalog-item__list-name">' + escapeHtml(item.name) + '</span></span>'
@@ -3576,11 +3780,11 @@
       + '</button>';
   }
 
-  function catalogHiddenControls() {
+  function catalogHiddenControls(withSeparator) {
     if (!state.catalogHiddenBarVisible) return '';
     return ''
       + '<div class="order-catalog-hidden-tools' + (state.catalogHiddenBarClosing ? ' is-closing' : '') + '" data-scene-extension="catalog-hidden-controls">'
-      +   '<div class="order-catalog-hidden-separator" aria-hidden="true"></div>'
+      +   (withSeparator === false ? '' : '<div class="order-catalog-hidden-separator" aria-hidden="true"></div>')
       +   '<section class="order-catalog-hidden-bar" aria-label="隐藏商品设置">'
       +     '<div class="order-catalog-hidden-options"><span class="order-catalog-hidden-label">隐藏：</span>'
       +       catalogHiddenCheckbox('noPrice', '无价格商品')
@@ -3831,11 +4035,7 @@
       state.imageSearch.stripScrollResetPending = true;
       state.desktopProductKeyword = '';
       state.desktopCatalogSearchActive = false;
-      state.desktopSearchResultsOpen = false;
-      if (effectiveCatalogCollapsed()) {
-        state.catalogCollapsed = false;
-        state.tabletCatalogAutoCollapsed = false;
-      }
+      syncDesktopSearchPresentation();
       renderActive();
       runImageSearch(entries[0]);
       preloadImageSearchResults(sessionId);
@@ -3877,7 +4077,7 @@
       state.imageSearch.tipSeen = true;
       try { window.localStorage.setItem(IMAGE_SEARCH_SWITCH_TIP_KEY, '1'); } catch (error) {}
     }
-    var catalogScroller = activeContext && activeContext.root ? activeContext.root.querySelector('.order-desktop__catalog-scroll') : null;
+    var catalogScroller = activeContext && activeContext.root ? activeContext.root.querySelector('.order-desktop-search-results__list, .order-catalog-products__body') : null;
     if (catalogScroller) catalogScroller.scrollTop = 0;
     runImageSearch(item, { force: force });
   }
@@ -3900,7 +4100,7 @@
     return '<div class="order-image-search-strip-wrap"><div class="order-image-search-strip" aria-label="图搜文件">' + state.imageSearch.images.map(function (item) {
       var active = item.id === state.imageSearch.activeId;
       return '<button type="button" class="order-image-search-thumb' + (active ? ' is-active' : '') + '" data-image-search-item="' + item.id + '" aria-pressed="' + active + '" aria-label="' + escapeHtml((active ? '当前图片：' : '切换到：') + item.name) + '">'
-        + '<span class="wg-image wg-image--rounded-md wg-image--clickable" data-component="image" data-variant-name="fit=cover,size=custom-rect,radius=rounded-md,state=loaded,interaction=clickable"><img class="wg-image__src is-loaded" src="' + escapeHtml(item.url) + '" alt=""><span class="wg-image__overlay"></span></span>'
+        + '<span class="wg-image wg-image--rounded-sm wg-image--clickable" data-component="image" data-variant-name="fit=cover,size=custom-rect,radius=rounded-sm,state=loaded,interaction=clickable"><img class="wg-image__src is-loaded" src="' + escapeHtml(item.url) + '" alt=""><span class="wg-image__overlay"></span></span>'
         + (item.sourceType === 'video-cover' ? '<span class="order-image-search-thumb__video"><i class="wego-iconfont-s icon-bofang-mian" aria-hidden="true"></i></span>' : '')
         + (active ? '<span class="order-image-search-thumb__check"><i class="wego-iconfont-s icon-gou16" aria-hidden="true"></i></span>' : '')
         + '</button>';
@@ -3938,15 +4138,28 @@
     return '<div class="order-image-search-drop" role="status" aria-live="polite"><div class="order-image-search-drop__panel"><i class="wego-iconfont-s icon-tupian" aria-hidden="true"></i><strong>松开即可图搜</strong><span>（支持多图搜索）</span></div></div>';
   }
 
+  function syncDesktopSearchPresentation() {
+    var collapsed = effectiveCatalogCollapsed();
+    state.desktopSearchResultsOpen = collapsed && Boolean(state.desktopProductKeyword.trim() || imageSearchHasImages());
+    state.desktopCatalogSearchActive = !collapsed && Boolean(state.desktopProductKeyword.trim());
+  }
+
   function desktopSearchResultDropdown() {
-    var matches = desktopProductMatches(state.desktopProductKeyword);
-    if (!state.desktopSearchResultsOpen || matches.length < 2) return '';
-    return ''
-      + '<div class="order-desktop-search-results card card--surface" role="listbox" aria-label="搜索商品结果">'
-      +   '<div class="order-desktop-search-results__list order-desktop__catalog-list order-desktop__catalog-list--list">'
-      +     catalogList(true, matches, false)
-      +   '</div>'
-      + '</div>';
+    var imageMode = imageSearchHasImages();
+    if (!state.desktopSearchResultsOpen || (!imageMode && !state.desktopProductKeyword.trim())) return '';
+    var matches = imageMode ? imageSearchResults() : desktopProductMatches(state.desktopProductKeyword);
+    var content = '';
+    if (imageMode && (state.imageSearch.uploadStatus === 'loading' || state.imageSearch.searchStatus === 'loading' || state.imageSearch.searchStatus === 'idle')) content = imageSearchLoadingResult();
+    else if (imageMode && state.imageSearch.searchStatus === 'error') content = imageSearchFailureResult();
+    else content = matches.length ? catalogList(true, matches, false) + catalogResultsEnd() : catalogEmptyResult();
+    return '<div class="order-desktop-search-results card card--surface" role="listbox" aria-label="搜索商品结果">'
+      + (imageMode ? imageSearchStrip() : '')
+      + catalogHiddenControls(imageMode && state.imageSearch.images.length > 1)
+      + '<div class="order-desktop-search-results__list order-desktop__catalog-list order-desktop__catalog-list--list">' + content + '</div></div>';
+  }
+
+  function catalogResultsEnd() {
+    return '<div class="order-catalog-results-end"><div class="footer footer--no-more" data-component="footer" data-variant-name="Footer" data-footer-type="NO_MORE" role="status"><span class="footer__line" aria-hidden="true"></span><span class="footer__text">没有更多了</span><span class="footer__line" aria-hidden="true"></span></div></div>';
   }
 
   function resetDesktopProductSearch() {
@@ -3959,7 +4172,7 @@
     var normalized = String(keyword || '').trim();
     var matches = desktopProductMatches(normalized);
     if (!normalized) return false;
-    if (matches.length >= 2) {
+    if (matches.length !== 1) {
       state.desktopSearchResultsOpen = effectiveCatalogCollapsed();
       state.desktopCatalogSearchActive = !effectiveCatalogCollapsed();
       renderActive();
@@ -4022,13 +4235,11 @@
       +   '<div class="order-desktop-product-search__row">'
       +     '<div class="searchbox searchbox--sm searchbox--gray order-desktop-context-search' + (imageSearchActive ? ' is-image-result' : '') + '" data-component="search" data-component-slug="search" data-variant-name="Searchbox_mini"><span class="searchbox__icon wego-iconfont-s icon-sousuo" aria-hidden="true"></span><div class="searchbox__input">' + imageToken + '<input class="searchbox__field" id="order-v2-' + (inCatalog ? 'catalog' : 'context') + '-search" type="search" value="' + escapeHtml(state.desktopProductKeyword) + '" placeholder="搜索商品" aria-label="搜索商品名称或货号" enterkeyhint="search" autocomplete="off" data-header-catalog-search></div><div class="searchbox__actions">' + clearSearch + '<button type="button" class="searchbox__action order-desktop-inline-image-search" data-trigger-image-search aria-label="' + (imageSearchActive ? '重新选择图搜文件' : '选择图搜文件') + '" title="图搜"' + (imageSearchDisabled ? ' disabled' : '') + '><i class="wego-iconfont-s ' + (imageSearchDisabled ? 'icon-shijian' : 'icon-tupian') + '" aria-hidden="true"></i></button></div></div>'
       +     '<input type="file" accept="image/jpeg,image/png,image/jpg,image/bmp,image/webp,video/mp4" multiple data-header-image-input hidden>'
-      +     (inCatalog ? '' : '<button type="button" class="btn btn--medium btn--sm order-desktop-product-search__submit" data-component-slug="button" data-submit-header-search ' + (state.desktopProductKeyword.trim() ? '' : 'hidden') + '>搜索</button>')
       +     (inCatalog ? sidebarFilterButton : '<div class="order-desktop-search-actions">' + collapsedFilterButton)
       +     '<button type="button" class="search-toolbar__action ' + scannerConnectedClass + '" data-scan aria-label="扫条码" title="扫条码"><i class="search-toolbar__action-icon wego-iconfont-s icon-saotiaoma" aria-hidden="true"></i><span>扫条码</span></button>'
       +     (inCatalog ? '' : '<button type="button" class="search-toolbar__action" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="search-toolbar__action-icon wego-iconfont-s icon-yuanjia" aria-hidden="true"></i><span>创建</span></button></div>')
       +   '</div>'
-      +   imageSearchStrip()
-      +   (inCatalog || imageSearchActive ? '' : desktopSearchResultDropdown())
+      +   (inCatalog ? imageSearchStrip() : desktopSearchResultDropdown())
       + '</div>';
   }
 
@@ -4371,6 +4582,204 @@
     return '<button type="button" class="btn btn--weak btn--sm order-desktop-catalog-toggle' + variant + (compact ? ' is-compact' : '') + '" data-component-slug="button" ' + action + ' aria-label="' + label + '商品库"><i class="btn__icon ' + (collapsed ? 'icon-zuojiantou16' : 'icon-youjiantou16') + '" aria-hidden="true"></i><span>' + label + (compact ? '' : '商品库') + '</span></button>';
   }
 
+  // Only explicit landscape toggles animate. Capture the visible position before a
+  // redraw, including an interrupted exit, so rapid opposite clicks stay continuous.
+  var catalogLayoutMotionCleanup = null;
+  function captureCatalogLayoutMotion(root) {
+    if (!root || isTabletPortrait() || !isDesktopWorkbench() || state.desktopOrderFullscreen
+        || !window.getComputedStyle || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return null;
+    var workspace = root.querySelector('.order-desktop__workspace');
+    var order = root.querySelector('.order-desktop__order');
+    if (!workspace || !order || !workspace.animate) return null;
+    var catalog = root.querySelector('[data-catalog-motion-ghost]')
+      || root.querySelector('.order-desktop__catalog:not(.order-desktop__catalog--collapsed)');
+    return {
+      orderWidth: order.getBoundingClientRect().width,
+      orderPadding: window.getComputedStyle(order).paddingRight,
+      catalog: catalog,
+      catalogLeft: catalog ? catalog.getBoundingClientRect().left : 0,
+      catalogWidth: catalog ? catalog.getBoundingClientRect().width : 0,
+      scroll: captureRenderScrollPositions(root)
+    };
+  }
+
+  function animateCatalogLayout(root, before, collapsed) {
+    if (!before) return;
+    var workspace = root.querySelector('.order-desktop__workspace');
+    var order = root.querySelector('.order-desktop__order');
+    var catalog = root.querySelector('.order-desktop__catalog');
+    if (!workspace || !order || !catalog) return;
+    var style = window.getComputedStyle(workspace);
+    var durationToken = style.getPropertyValue('--duration-normal').trim();
+    var duration = parseFloat(durationToken) * (/ms$/.test(durationToken) ? 1 : 1000);
+    var options = { duration: duration || 250, easing: style.getPropertyValue('--ease-standard').trim() || 'ease-in-out' };
+    var finalColumns = style.gridTemplateColumns;
+    var totalWidth = order.getBoundingClientRect().width + catalog.getBoundingClientRect().width;
+    var fromColumns = before.orderWidth + 'px ' + (collapsed ? '' : '0px ')
+      + Math.max(0, totalWidth - before.orderWidth) + 'px';
+    var animations = [];
+    var ghost = null;
+    var catalogStyle = catalog.getAttribute('style');
+    if (collapsed && before.catalog) {
+      // Retain the actual exiting subtree (and its scroll) until it is off screen.
+      ghost = before.catalog;
+      ghost.setAttribute('data-catalog-motion-ghost', '');
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.setAttribute('inert', '');
+      ghost.querySelectorAll('[id]').forEach(function (node) { node.removeAttribute('id'); });
+      var oldToggle = ghost.querySelector('[data-toggle-catalog]');
+      if (oldToggle) oldToggle.remove();
+      ghost.style.width = before.catalogWidth + 'px';
+      workspace.appendChild(ghost);
+      restoreRenderScrollPositions(root, before.scroll);
+      var baseLeft = ghost.getBoundingClientRect().left;
+      animations.push(ghost.animate([
+        { transform: 'translateX(' + (before.catalogLeft - baseLeft) + 'px)' },
+        { transform: 'translateX(' + (before.catalogWidth + parseFloat(style.paddingRight)) + 'px)' }
+      ], options));
+    } else if (!collapsed) {
+      // Keep the catalog's own contents full width while its Grid track opens.
+      catalog.style.width = catalog.getBoundingClientRect().width + 'px';
+      if (before.catalog) {
+        var offset = before.catalogLeft - order.getBoundingClientRect().left - before.orderWidth;
+        animations.push(catalog.animate([{ transform: 'translateX(' + offset + 'px)' }, { transform: 'translateX(0)' }], options));
+      }
+    }
+    workspace.classList.add('is-catalog-animating');
+    if (collapsed) {
+      var collapsedToggle = catalog.querySelector('[data-toggle-catalog]');
+      if (collapsedToggle) animations.push(collapsedToggle.animate([
+        { transform: 'translate(' + (before.orderWidth - totalWidth) + 'px, -50%)' },
+        { transform: 'translate(0, -50%)' }
+      ], options));
+    }
+    animations.push(order.animate([
+      { paddingRight: before.orderPadding },
+      { paddingRight: window.getComputedStyle(order).paddingRight }
+    ], options));
+    var layoutAnimation = workspace.animate([{ gridTemplateColumns: fromColumns }, { gridTemplateColumns: finalColumns }], options);
+    animations.push(layoutAnimation);
+    var cleanup = function () {
+      animations.forEach(function (animation) { animation.cancel(); });
+      if (ghost) ghost.remove();
+      if (catalogStyle === null) catalog.removeAttribute('style');
+      else catalog.setAttribute('style', catalogStyle);
+      workspace.classList.remove('is-catalog-animating');
+      window.removeEventListener('resize', cleanup);
+      if (catalogLayoutMotionCleanup === cleanup) catalogLayoutMotionCleanup = null;
+    };
+    catalogLayoutMotionCleanup = cleanup;
+    window.addEventListener('resize', cleanup);
+    layoutAnimation.onfinish = function () {
+      cleanup();
+      restoreRenderScrollPositions(root, before.scroll);
+    };
+    var toggle = catalog.querySelector('[data-toggle-catalog]');
+    if (toggle) toggle.focus({ preventScroll: true });
+  }
+
+  var orderFullscreenMotionCleanup = null;
+  var fullscreenRegionSelector = '.order-desktop__context, .order-desktop__summary, .order-desktop__catalog:not(.order-tablet-drawer)';
+  function captureOrderFullscreenMotion(root) {
+    if (!root || !isDesktopWorkbench() || !window.getComputedStyle
+        || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return null;
+    var workspace = root.querySelector('.order-desktop__workspace');
+    var card = root.querySelector('.order-desktop__list-card');
+    if (!workspace || !card || !card.animate) return null;
+    return {
+      bounds: card.getBoundingClientRect(),
+      scroll: captureRenderScrollPositions(root),
+      regions: Array.prototype.map.call(workspace.querySelectorAll(fullscreenRegionSelector), function (node) {
+        return { node: node, bounds: node.getBoundingClientRect(), display: window.getComputedStyle(node).display, scroll: captureRenderScrollPositions(node) };
+      }).filter(function (region) { return region.bounds.width && region.bounds.height; })
+    };
+  }
+
+  function fullscreenRegionOffset(node, bounds, workspaceBounds) {
+    if (node.classList.contains('order-desktop__context')) return { x: 0, y: workspaceBounds.top - bounds.bottom };
+    if (node.classList.contains('order-desktop__summary')) return { x: 0, y: workspaceBounds.bottom - bounds.top };
+    return { x: workspaceBounds.right - bounds.left, y: 0 };
+  }
+
+  function fullscreenRegionTranslate(offset) {
+    return 'translate(' + offset.x + 'px, ' + offset.y + 'px)';
+  }
+
+  function animateOrderFullscreen(root, before, fullscreen) {
+    if (!before) return;
+    var workspace = root.querySelector('.order-desktop__workspace');
+    var card = root.querySelector('.order-desktop__list-card');
+    if (!workspace || !card) return;
+    var origin = workspace.getBoundingClientRect();
+    var destination = card.getBoundingClientRect();
+    var style = window.getComputedStyle(workspace);
+    var token = style.getPropertyValue('--duration-normal').trim();
+    var options = { duration: parseFloat(token) * (/ms$/.test(token) ? 1 : 1000) || 250,
+      easing: style.getPropertyValue('--ease-standard').trim() || 'ease-in-out' };
+    var cardStyle = card.getAttribute('style');
+    var margin = window.getComputedStyle(card).margin;
+    // Leave the final flex slot in place while the live card interpolates real
+    // bounds; text, inputs and rows are never scaled like a snapshot image.
+    var placeholder = document.createElement('div');
+    placeholder.setAttribute('aria-hidden', 'true');
+    placeholder.setAttribute('data-fullscreen-motion-slot', '');
+    placeholder.style.cssText = 'flex:1 1 auto;min-height:0;margin:' + margin;
+    card.before(placeholder);
+    card.setAttribute('data-order-fullscreen-motion', '');
+    var boundsFrame = function (bounds) {
+      return { left: (bounds.left - origin.left) + 'px', top: (bounds.top - origin.top) + 'px',
+        width: bounds.width + 'px', height: bounds.height + 'px' };
+    };
+    var animations = [];
+    var ghosts = [];
+    workspace.classList.add('is-fullscreen-animating');
+    if (fullscreen) before.regions.forEach(function (region) {
+      var ghost = region.node.cloneNode(true);
+      ghost.querySelectorAll('[id]').forEach(function (node) { node.removeAttribute('id'); });
+      ghost.removeAttribute('id');
+      ghost.removeAttribute('data-catalog-motion-ghost');
+      ghost.setAttribute('inert', '');
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.setAttribute('data-fullscreen-motion-ghost', '');
+      Object.assign(ghost.style, boundsFrame(region.bounds), { display: region.display });
+      workspace.appendChild(ghost);
+      restoreRenderScrollPositions(ghost, region.scroll);
+      ghosts.push(ghost);
+      var leavingOffset = fullscreenRegionOffset(region.node, region.bounds, origin);
+      animations.push(ghost.animate([{ transform: 'translate(0, 0)' }, { transform: fullscreenRegionTranslate(leavingOffset) }], options));
+    });
+    else workspace.querySelectorAll(fullscreenRegionSelector).forEach(function (node) {
+      if (!node.getClientRects().length) return;
+      var prior = before.regions.find(function (region) { return region.node.className === node.className; });
+      var bounds = node.getBoundingClientRect();
+      var enteringOffset = prior ? { x: prior.bounds.left - bounds.left, y: prior.bounds.top - bounds.top }
+        : fullscreenRegionOffset(node, bounds, origin);
+      animations.push(node.animate([{ transform: fullscreenRegionTranslate(enteringOffset) }, { transform: 'translate(0, 0)' }], options));
+    });
+    var layoutAnimation = card.animate([boundsFrame(before.bounds), boundsFrame(destination)], options);
+    animations.push(layoutAnimation);
+    restoreRenderScrollPositions(root, before.scroll);
+    var cleanup = function () {
+      animations.forEach(function (animation) { animation.cancel(); });
+      ghosts.forEach(function (ghost) { ghost.remove(); });
+      placeholder.remove();
+      card.removeAttribute('data-order-fullscreen-motion');
+      if (cardStyle === null) card.removeAttribute('style');
+      else card.setAttribute('style', cardStyle);
+      workspace.classList.remove('is-fullscreen-animating');
+      window.removeEventListener('resize', cleanup);
+      if (orderFullscreenMotionCleanup === cleanup) orderFullscreenMotionCleanup = null;
+    };
+    orderFullscreenMotionCleanup = cleanup;
+    window.addEventListener('resize', cleanup);
+    layoutAnimation.onfinish = function () {
+      cleanup();
+      restoreRenderScrollPositions(root, before.scroll);
+    };
+    var toggle = card.querySelector('[data-toggle-order-fullscreen]');
+    if (toggle) toggle.focus({ preventScroll: true });
+  }
+
   function setPortraitCatalogCollapsed(collapsed, afterClose) {
     if (collapsed && state.catalogDrawerMotion === 'leaving' && !afterClose) return;
     window.clearTimeout(state.catalogDrawerCloseTimer);
@@ -4382,7 +4791,7 @@
         state.catalogDrawerCloseTimer = null;
         state.tabletCatalogAutoCollapsed = true;
         state.catalogDrawerMotion = '';
-        resetDesktopProductSearch();
+        syncDesktopSearchPresentation();
         renderActive();
         if (afterClose) afterClose();
       }, 180);
@@ -4390,7 +4799,7 @@
     }
     state.tabletCatalogAutoCollapsed = collapsed;
     state.catalogDrawerMotion = collapsed ? '' : 'entering';
-    resetDesktopProductSearch();
+    syncDesktopSearchPresentation();
     renderActive();
     // 入场类只交给这次渲染；切大图/列表、搜索或改数量后的重绘不重复入场。
     state.catalogDrawerMotion = '';
@@ -4454,7 +4863,7 @@
     } else if (!allProducts.length) {
       productBody = catalogEmptyResult();
     } else {
-      productBody = '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component="layout-grid" data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + '</div>';
+      productBody = '<div class="order-desktop__catalog-list order-desktop__catalog-list--' + state.catalogViewMode + (state.catalogViewMode === 'grid' ? ' layout-grid' : '') + '"' + (state.catalogViewMode === 'grid' ? ' data-component="layout-grid" data-component-slug="layout-grid" data-columns="' + catalogGridColumnsForWidth(state.catalogWidth) + '" data-align="stretch"' : '') + '>' + catalogList(true, allProducts, true) + catalogResultsEnd() + '</div>';
     }
     return ''
       +   '<header class="order-catalog-header"><div class="order-catalog-header__title"><strong>商品库</strong>' + segmentControlMarkup('catalog', state.catalogViewMode, [['grid', '大图'], ['list', '列表']], 'data-catalog-view', 'order-catalog-view-switch', '商品库显示模式') + '</div><div class="order-catalog-create-anchor"><button type="button" class="btn btn--weak btn--sm order-catalog-publish" data-component-slug="button" data-toggle-product-create-menu aria-haspopup="listbox" aria-controls="order-catalog-create-menu" aria-expanded="' + state.catalogCreateMenuOpen + '"><i class="btn__icon icon-yuanjia" aria-hidden="true"></i>创建</button></div></header>'
@@ -4629,21 +5038,11 @@
         +   '<button type="button" class="btn btn--medium btn--sm btn--disabled" data-component-slug="button" data-inline-recognize-address disabled>识别</button>'
         + '</div>';
     }
-    var desktopPickupContact = pickupContactValues(state.pickupContact);
-    if (state.delivery === 'pickup' && (!desktopPickupContact.name || !desktopPickupContact.phone)) {
-      var desktopPickupPoint = currentPickupPoint();
-      return ''
-        + '<div class="order-desktop-delivery-inline order-desktop-delivery-inline--pickup">'
-        +   '<button type="button" data-open-panel="delivery"><small><i class="wego-iconfont-s icon-daohang" aria-hidden="true"></i>' + (desktopPickupPoint ? '自提点：' + escapeHtml(desktopPickupPoint.name) : '自提') + '</small><strong>暂无提货人信息</strong><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></button>'
-        +   '<div class="input-group order-desktop-delivery-inline__input" data-component-slug="input"><div class="input-wrapper"><input type="text" aria-label="粘贴提货人信息" placeholder="粘贴姓名和手机号" data-inline-pickup-paste></div></div>'
-        +   '<button type="button" class="btn btn--medium btn--sm btn--disabled" data-component-slug="button" data-inline-recognize-pickup disabled>识别</button>'
-        + '</div>';
-    }
     var summary = deliverySummaryText();
     var summaryParts = deliverySummaryParts();
     var singleLine = !summaryParts.secondary && !summaryParts.meta && (!state.delivery || state.delivery === 'none');
     var addressLine = (state.delivery === 'express' || state.delivery === 'freight') && (state.address || realNameComplete(state.realNameInfo));
-    var pickupLine = state.delivery === 'pickup' && summaryParts.meta;
+    var pickupLine = state.delivery === 'pickup';
     var emptyLine = !state.delivery;
     var deliveryIcon = state.delivery === 'pickup' ? 'icon-daohang' : 'icon-che';
     var deliveryIconMarkup = state.delivery === 'none'
@@ -4651,7 +5050,7 @@
       : '<i class="wego-iconfont-s ' + deliveryIcon + '" aria-hidden="true"></i>';
     var deliveryContent = singleLine
       ? '<small>' + deliveryIconMarkup + escapeHtml(summaryParts.label) + '</small><span class="order-desktop-delivery-tail"><strong>' + escapeHtml(summaryParts.primary) + '</strong><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i></span>'
-      : '<small>' + deliveryIconMarkup + escapeHtml(summaryParts.label) + '</small><span class="order-desktop-delivery-summary"><strong>' + escapeHtml(summaryParts.primary) + '</strong>' + (summaryParts.secondary ? '<em title="' + escapeHtml(summaryParts.secondary) + '">' + escapeHtml(summaryParts.secondary) + '</em>' : '') + (summaryParts.meta ? '<b class="' + (summaryParts.realNamePending ? 'is-warning' : '') + '">' + (summaryParts.realNamePending ? '<i class="wego-iconfont-s icon-tanhao" aria-hidden="true"></i>' : '') + escapeHtml(summaryParts.meta) + '</b>' : '') + '</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i>';
+      : '<small>' + deliveryIconMarkup + escapeHtml(summaryParts.label) + '</small><span class="order-desktop-delivery-summary"><strong>' + escapeHtml(summaryParts.primary) + '</strong>' + (summaryParts.secondary ? '<em title="' + escapeHtml(summaryParts.secondary) + '">' + escapeHtml(summaryParts.secondary) + '</em>' : '') + (summaryParts.meta ? '<b class="' + (summaryParts.realNamePending ? 'is-warning' : (summaryParts.missingPickupContact ? 'is-muted' : '')) + '">' + (summaryParts.realNamePending ? '<i class="wego-iconfont-s icon-tanhao" aria-hidden="true"></i>' : '') + escapeHtml(summaryParts.meta) + '</b>' : '') + '</span><i class="wego-iconfont-s icon-youjiantou16" aria-hidden="true"></i>';
     return ''
       + '<button type="button" class="order-desktop-customer-delivery ' + (singleLine ? 'order-desktop-customer-delivery--single' : '') + (addressLine ? ' order-desktop-customer-delivery--address' : '') + (pickupLine ? ' order-desktop-customer-delivery--pickup' : '') + (emptyLine ? ' order-desktop-customer-delivery--empty' : '') + '" data-open-panel="delivery"' + (summaryParts.realNamePending ? ' data-real-name-pending' : '') + ' title="' + escapeHtml(summary) + '">'
       +   deliveryContent
@@ -4768,6 +5167,8 @@
   }
 
   function quickOpButton(label, op) {
+    var commandIcon = { orderRate: 'icon-youhui', orderAmount: 'icon-yuanjian', rounding: 'icon-jian16' }[op];
+    if (commandIcon) return '<button type="button" class="order-quick-op order-quick-op--command" data-open-panel="quick" data-quick-op="' + op + '" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'quick' && state.quickOp === op) + '"><i class="wego-iconfont-s ' + commandIcon + '" aria-hidden="true"></i><span class="order-quick-op__label">' + label + '</span></button>';
     var status = op === 'coupon' ? null : quickOpStatus(op);
     var statusHtml = status
       ? '<span class="order-quick-op__status">' + escapeHtml(status) + '</span>'
@@ -4788,7 +5189,6 @@
 
   function quickOps() {
     return '<div class="order-desktop__quick-ops" aria-label="快捷优惠操作">'
-      + quickOpButton('优惠券', 'coupon')
       + quickOpButton('整单折扣', 'orderRate')
       + (featureEnabled('pointsDiscount') ? quickOpButton('积分抵扣', 'points') : '')
       + (featureEnabled('promotionDiscount') ? quickOpButton('满减促销', 'promotion') : '')
@@ -5123,23 +5523,46 @@
       + '</div>';
   }
 
+  function acceptsMoneyInput(raw, max) {
+    return raw === '' || (/^(?:0|[1-9]\d{0,9})(?:\.\d{0,2})?$/.test(raw) && Number(raw) <= max);
+  }
+
+  function hasPrivateAmountEntry(draft) {
+    return Boolean(draft && draft.kind === 'private' && draft.mode === 'single' && state.customer);
+  }
+
   function canEditPrivatePaymentAmount(draft) {
-    return Boolean(draft && draft.kind === 'private' && draft.mode === 'single'
-      && state.customer && state.refundCapabilities.balanceEnabled);
+    return Boolean(hasPrivateAmountEntry(draft) && state.refundCapabilities.memberEnabled && state.refundCapabilities.balanceEnabled);
   }
 
   function privatePaymentAmountContent(draft, method) {
     var processing = state.paymentStatus === 'processing';
-    if (draft.editingPrivateAmount === method.id) {
+    if (canEditPrivatePaymentAmount(draft) && draft.editingPrivateAmount === method.id) {
       return '<label class="input number-input order-reference-payment__single-input' + (processing ? ' is-disabled' : '') + '" data-component="input" data-component-slug="input" data-variant-name="Input_32"><input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft.singleAmount || '')) + '" data-payment-amount="' + method.id + '" data-private-payment-amount-input aria-label="' + method.label + '收款金额"' + (processing ? ' disabled' : '') + '><span class="number-input__suffix" aria-hidden="true">元</span></label>';
     }
     return '<div class="input number-input order-reference-payment__single-input order-reference-payment__amount-default' + (processing ? ' is-disabled' : '') + '" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-edit-private-payment-amount="' + method.id + '" data-clickable role="button" tabindex="' + (processing ? '-1' : '0') + '" aria-label="编辑' + method.label + '收款金额" aria-disabled="' + processing + '">'
       + '<input class="number-input__field" type="text" inputmode="decimal" value="' + escapeHtml(String(draft.singleAmount || '')) + '" placeholder="请输入金额" aria-label="' + method.label + '收款金额" readonly tabindex="-1"' + (processing ? ' disabled' : '') + '><span class="number-input__suffix" aria-hidden="true">元</span></div>';
   }
 
+  function requestPrivateAmountEditing(root, methodId) {
+    var draft = state.paymentDraft;
+    if (!hasPrivateAmountEntry(draft) || draft.method !== methodId || state.paymentStatus === 'processing') return;
+    if (!canEditPrivatePaymentAmount(draft)) {
+      draft.balanceGuideContext = 'private-amount';
+      draft.balanceGuideMethod = methodId;
+      draft.balanceGuideStage = state.refundCapabilities.memberEnabled ? 'balance' : 'member';
+      draft.balanceGuideOpen = true;
+      renderPaymentPreservingScroll(root);
+      var cancel = root.querySelector('[data-close-refund-balance-guide]');
+      if (cancel) cancel.focus({ preventScroll: true });
+      return;
+    }
+    setPrivatePaymentAmountEditing(root, methodId, true, true);
+  }
+
   function setPrivatePaymentAmountEditing(root, methodId, editing, restoreFocus) {
     var draft = state.paymentDraft;
-    if (!canEditPrivatePaymentAmount(draft) || draft.method !== methodId || (editing && state.paymentStatus === 'processing')) return;
+    if (!hasPrivateAmountEntry(draft) || draft.method !== methodId || (editing && (state.paymentStatus === 'processing' || !canEditPrivatePaymentAmount(draft)))) return;
     var method = paymentMethodById(methodId);
     if (!method || method.category !== 'private') return;
     if (!editing && draft.editingPrivateAmount !== methodId) return;
@@ -5207,7 +5630,7 @@
     } else {
       content = '<div class="order-reference-payment__private-methods' + (!state.customer ? ' order-reference-payment__methods--compact' : '') + '">' + methods.map(function (method) {
         var active = selectedMethod && selectedMethod.id === method.id;
-        var editable = active && canEditPrivatePaymentAmount(draft);
+        var editable = active && hasPrivateAmountEntry(draft);
         var amount = editable
           ? '<span class="order-reference-payment__single-amount" data-private-payment-amount-slot="' + method.id + '">' + privatePaymentAmountContent(draft, method) + '</span>'
           : (active && state.customer ? paymentAmountMetric(Number(draft.singleAmount || 0), 16, 'black') : '');
@@ -5255,6 +5678,12 @@
   }
 
   function courierCheckoutOption(draft) {
+    if (usesPickupCompletion()) {
+      var pickupDisabled = !canCompletePickup(draft);
+      return '<div class="order-reference-payment__post-option order-reference-payment__post-option--courier">'
+        + '<button type="button" class="checkbox-field order-reference-payment__post-toggle" role="checkbox" aria-checked="' + pickupCompleted(draft) + '" aria-disabled="' + pickupDisabled + '" data-pickup-completed>'
+        + paymentSelectionCheckboxControl(pickupCompleted(draft), true, pickupDisabled) + '<strong class="checkbox-field__text order-reference-payment__post-title">已提货</strong></button></div>';
+    }
     var disabled = Boolean(courierEligibility(draft));
     var checked = !disabled && draft.kind !== 'unpaid' && Boolean(draft.autoDispatch);
     var waybill = courierWaybill(courierState().confirmed);
@@ -5325,11 +5754,15 @@
   function refundBalanceGuideDialog() {
     var draft = state.paymentDraft;
     if (!draft || !draft.balanceGuideOpen) return '';
+    var editingAmount = draft.balanceGuideContext === 'private-amount';
+    var memberStage = editingAmount && draft.balanceGuideStage === 'member';
+    var guideTitle = editingAmount ? (memberStage ? '开通会员服务' : '启用客户余额账户') : '开通会员与余额功能';
+    var guideContent = editingAmount ? (memberStage ? '编辑实收金额前，需要先开通会员服务。当前为原型模拟开通。' : '启用后可使用客户余额支付、开单赊账等功能') : '退至客户余额前，需要先开通会员和余额功能。';
     return ''
       + '<div class="dialog dialog--text order-refund-balance-guide" role="dialog" aria-modal="true" aria-labelledby="order-refund-balance-guide-title" aria-describedby="order-refund-balance-guide-content" data-state="open" data-component="dialog" data-variant-name="Dialog_Text_2" data-variant-cn="按钮数量=2">'
       +   '<section class="dialog__card">'
-      +     '<div class="dialog__body"><div class="dialog__header"><h2 class="dialog__title" id="order-refund-balance-guide-title">开通会员与余额功能</h2></div><div class="dialog__content" id="order-refund-balance-guide-content">退至客户余额前，需要先开通会员和余额功能。</div></div>'
-      +     '<div class="dialog__actions"><div class="dialog__buttons"><button type="button" class="dialog__btn dialog__btn--dismiss" data-close-refund-balance-guide>暂不开通</button><button type="button" class="dialog__btn dialog__btn--confirm" data-enable-refund-balance>去开通</button></div></div>'
+      +     '<div class="dialog__body"><div class="dialog__header"><h2 class="dialog__title" id="order-refund-balance-guide-title">' + guideTitle + '</h2></div><div class="dialog__content" id="order-refund-balance-guide-content">' + guideContent + '</div></div>'
+      +     '<div class="dialog__actions"><div class="dialog__buttons"><button type="button" class="dialog__btn dialog__btn--dismiss" data-close-refund-balance-guide>' + (editingAmount ? '取消' : '暂不开通') + '</button><button type="button" class="dialog__btn dialog__btn--confirm" data-enable-refund-balance>' + (editingAmount && !memberStage ? '开启' : '去开通') + '</button></div></div>'
       +   '</section>'
       + '</div>';
   }
@@ -5698,7 +6131,7 @@
     };
     CUSTOMERS.unshift(created);
     applyCustomer(created);
-    applyDeliveryPreference(customerDeliveryPreference(created));
+    applyCustomerDeliveryHistory(created, null);
     state.customerKeyword = '';
     state.panel = null;
     markDirty(ctx);
@@ -5829,7 +6262,7 @@
     var draft = activeDeliveryDraft();
     return ''
       + '<section class="cell-group order-delivery-choices" data-component-slug="cell"><div class="cell-group__content">'
-      + [['express', '快递'], ['freight', '快运'], ['pickup', '自提'], ['none', '现场取货']].map(function (item) {
+      + [['express', '快递'], ['freight', '快运'], ['pickup', '自提'], ['none', '其他']].map(function (item) {
           var selected = draft.delivery === item[0];
           return ''
             + '<button type="button" class="cell cell--single cell--bg-white cell--clickable order-delivery-option ' + (selected ? 'is-selected' : '') + '" data-component-slug="cell" data-delivery-id="' + item[0] + '" aria-pressed="' + selected + '">'
@@ -5984,7 +6417,7 @@
   function openClipboardRecipientModal(text, preview) {
     var source = String(text || '').trim();
     var key = clipboardContentKey(source);
-    if (!source || (!preview && storedClipboardRecipientKeys().indexOf(key) >= 0) || state.panel) return false;
+    if (!source || (!preview && storedClipboardRecipientKeys().indexOf(key) >= 0) || state.panel || state.pendingCustomerAddress) return false;
     var draft = recognizeClipboardRecipient(source);
     if (!clipboardRecipientCanOpen(draft)) return false;
     state.clipboardAddressDraft = draft;
@@ -6006,12 +6439,12 @@
   }
 
   function scheduleClipboardRecipientCheck() {
-    if (state.clipboardReadPending || state.panel || !currentDeliveryNeedsRecipient()) return;
+    if (state.clipboardReadPending || state.pendingCustomerAddress || state.panel || !currentDeliveryNeedsRecipient()) return;
     state.clipboardReadPending = true;
     window.setTimeout(function () {
       readRecipientClipboard().then(function (text) {
         state.clipboardReadPending = false;
-        if (!currentDeliveryNeedsRecipient() || state.panel) return;
+        if (!currentDeliveryNeedsRecipient() || state.panel || state.pendingCustomerAddress) return;
         openClipboardRecipientModal(text);
       }).catch(function () {
         state.clipboardReadPending = false;
@@ -6367,13 +6800,20 @@
   }
 
   function syncSkuRackAddDraft(draft, refreshViews) {
-    draft.product = skuRackFilteredProduct(draft.product);
+    var previousOverrides = Object.assign({}, draft.skuPriceOverrides);
+    draft.product = skuRackFilteredProduct(draft.catalogProduct || draft.product);
+    if (draft.catalogProduct) draft.catalogProduct = draft.product;
     var valid = draft.product.specs;
+    draft.changePriceSkus = (draft.changePriceSkus || []).filter(function (record) { return valid.indexOf(record.spec || record.id) >= 0; });
     var removed = Object.keys(draft.skuQty).filter(function (spec) { return valid.indexOf(spec) < 0; });
     [draft.skuQty, draft.skuPriceOverrides, draft.confirmedOverstock].forEach(function (map) {
       Object.keys(map || {}).forEach(function (spec) { if (valid.indexOf(spec) < 0) delete map[spec]; });
     });
     valid.forEach(function (spec) { if (!Object.prototype.hasOwnProperty.call(draft.skuQty, spec)) draft.skuQty[spec] = 0; });
+    if (draft.catalogProduct && draft.priceMode !== 'discount') {
+      setAddPriceType(draft, addDraftPriceType(draft));
+      Object.keys(previousOverrides).forEach(function (spec) { if (valid.indexOf(spec) >= 0) draft.skuPriceOverrides[spec] = previousOverrides[spec]; });
+    }
     if (!refreshViews) return removed;
     var matrix = addProductMatrix(draft.product);
     if (matrix.colors.indexOf(draft.selectedColor) < 0) draft.selectedColor = matrix.colors[0] || '';
@@ -6620,7 +7060,13 @@
     var next = state.addDraft;
     next.isEditFormats = true; next.formatGuideVisible = false; next.formatGuideOriginal = original;
     next.mode = draft.mode;
-    ['priceMode', 'unitPrice', 'useSkuPrices', 'note', 'noteOpen', 'lastDiscountTipVisible', 'costPriceVisible', 'searchMeta'].forEach(function (key) { next[key] = draft[key]; });
+    ['priceMode', 'usePriceType', 'unitPrice', 'useSkuPrices', 'note', 'noteOpen', 'lastDiscountTipVisible', 'costPriceVisible', 'searchMeta'].forEach(function (key) { next[key] = draft[key]; });
+    var originalSpec = original.specs[0];
+    next.changePriceSkus = (draft.changePriceSkus || []).reduce(function (changes, record) {
+      if ((record.spec || record.id) !== originalSpec) return changes;
+      product.specs.forEach(function (spec) { changes.push(Object.assign({}, record, { id: spec, spec: spec })); }); return changes;
+    }, []);
+    if (draft.skuPriceOverrides && draft.skuPriceOverrides[originalSpec] != null) product.specs.forEach(function (spec) { next.skuPriceOverrides[spec] = draft.skuPriceOverrides[originalSpec]; });
     product.specs.forEach(function (spec) { next.skuQty[spec] = rows.length === 1 ? 1 : 0; });
     if (rows.length === 1) {
       next.selectedColor = colors[0].name; next.selectedSize = formats[0].name;
@@ -6666,17 +7112,58 @@
         }
         if (!formatGuideCanEdit(draft.product)) { renderActive(); ctx.toast('暂无修改规格所需权限'); return; }
         // Prototype identity mapping uses the displayed spec key to retain quantities/prices.
-        draft.product = persisted; draft.isEditFormats = false;
+        draft.product = persisted; draft.catalogProduct = persisted; draft.isEditFormats = false;
         requestFinishAddDraft(draft, ctx);
       }, 350);
     }, 350);
+  }
+
+  function replaceProductOrderQuantities(product, quantities, draft, pricing) {
+    state.selectedRow = null;
+    var rows = editableProductOrderRows(product);
+    var initialPricing = JSON.parse(draft.initialPricing || '{}');
+    var additions = {};
+    Object.keys(quantities).forEach(function (spec) {
+      var target = Number(quantities[spec] || 0);
+      var originalPrice = (initialPricing.prices || []).find(function (entry) { return entry[0] === spec; });
+      var repriced = initialPricing.type !== addDraftPriceType(draft) || (originalPrice && originalPrice[1] !== addDraftSkuPrice(draft, spec));
+      var matches = rows.filter(function (item) { return !isOrderSkuInvalid(item, spec) && Object.prototype.hasOwnProperty.call(item.skuQty || {}, spec); });
+      var current = matches.reduce(function (sum, item) { return sum + Number(item.skuQty[spec] || 0); }, 0);
+      if (repriced && target !== 0) {
+        matches.forEach(function (item) { delete item.skuQty[spec]; });
+        additions[spec] = target;
+      } else if (!matches.length) {
+        additions[spec] = target;
+      } else if (current !== target) {
+        // Preserve existing prices/discount records. Reduce latest rows first;
+        // increases are assigned to the latest matching row, never added twice.
+        var delta = target - current;
+        for (var index = matches.length - 1; index >= 0 && delta; index -= 1) {
+          var item = matches[index], quantity = Number(item.skuQty[spec] || 0);
+          var change = index === 0 || quantity * delta >= 0 ? delta : Math.sign(delta) * Math.min(Math.abs(delta), Math.abs(quantity));
+          item.skuQty[spec] = quantity + change;
+          delta -= change;
+        }
+      }
+    });
+    rows.forEach(function (item) {
+      item.orderSpecs = itemOrderSpecs(item).filter(function (spec) { return Object.prototype.hasOwnProperty.call(item.skuQty, spec); });
+      Object.keys(item.skuQty || {}).forEach(function (spec) {
+        if (Number(item.skuQty[spec] || 0) !== 0 && item.orderSpecs.indexOf(spec) < 0) item.orderSpecs.push(spec);
+      });
+      item.qty = Object.keys(item.skuQty || {}).reduce(function (sum, spec) { return sum + Number(item.skuQty[spec] || 0); }, 0);
+    });
+    state.products = state.products.filter(function (item) { return rows.indexOf(item) < 0 || item.orderSpecs.length > 0; });
+    if (Object.keys(additions).some(function (spec) { return additions[spec] !== 0; })) {
+      mergeProductIntoOrder(product, additions, draft.mode, draft.note, pricing);
+    }
   }
 
   function finishAddDraft(draft, ctx) {
     if (state.addDraft !== draft || state.panel !== 'add') return;
     if (draft.formatSaveEvents) draft.formatSaveEvents.push('add');
     if (draft.mode === 'batch') rememberBatchPattern(draft);
-    var draftSkuPrices = draft.useSkuPrices || draft.priceMode === 'member' ? {} : null;
+    var draftSkuPrices = {};
     if (draftSkuPrices) draft.product.specs.forEach(function (spec) { draftSkuPrices[spec] = addDraftSkuPrice(draft, spec); });
     if (draft.priceMode === 'member' && state.orderPromotion && state.orderPromotion.type !== 'member') clearOrderPromotion();
     if (draft.formatGuideOriginal) {
@@ -6687,14 +7174,17 @@
       });
     }
     pruneDelistedOrderSpecs(draft.product);
+    draft.changePriceSkus = normalizeSkuPriceChanges(draft.product, draft.changePriceSkus);
     var addedProduct = Object.assign({}, draft.product, { wholeSaleInfo: addPriceConfiguration(draft.product, 'wholesale') });
-    mergeProductIntoOrder(addedProduct, draft.skuQty, draft.mode, draft.note, { priceMode: draft.priceMode, unitPrice: draft.unitPrice, skuPrices: draftSkuPrices, searchMeta: draft.searchMeta });
+    var validQuantities = {}; draft.product.specs.forEach(function (spec) { validQuantities[spec] = Number(draft.skuQty[spec] || 0); });
+    var pricing = { priceMode: draft.priceMode, usePriceType: addDraftPriceType(draft), changePriceSkus: draft.changePriceSkus, unitPrice: draft.unitPrice, skuPrices: draftSkuPrices, searchMeta: draft.searchMeta };
+    replaceProductOrderQuantities(addedProduct, validQuantities, draft, pricing);
     if (draft.priceMode === 'member') {
       state.orderPromotion = { type: 'member', mode: 'member-rate', value: state.memberDiscount };
       state.memberDiscountChoice = 'use';
     }
     clearFormatGuideTimers(); state.panel = null; state.addDraft = null;
-    markDirty(ctx, true); ctx.toast('添加成功');
+    markDirty(ctx, true); ctx.toast(draft.replacesOrderQuantity ? '修改成功' : '添加成功');
   }
 
   function addViewSelector(draft, desktop) {
@@ -6746,9 +7236,7 @@
       var rowUnavailable = Boolean(selectedColor) && !rowSpec;
       var rowState = rowSpec ? resolveSkuRowState(product, rowSpec, rowQuantity, draft.confirmedOverstock && draft.confirmedOverstock[rowSpec]) : null;
       var counterDisabled = rowUnavailable;
-      var rowPriceOriginal = rowState && (draft.skuPriceOverrides && draft.skuPriceOverrides[rowSpec] != null
-        ? addDraftSkuBasePrice(draft, rowSpec)
-        : (rowState.showOriginalPrice ? rowState.sku.price : (rowState.showMaxPrice ? rowState.sku.maxPrice : null)));
+      var rowPriceOriginal = rowState && addDraftSkuBasePrice(draft, rowSpec);
       return '<div class="order-add-spec-counter-row' + (rowState && rowState.showSkuImage ? ' has-sku-image' : ' has-no-sku-image') + (rowState && rowState.showStock ? ' has-sku-stock' : ' has-no-sku-stock') + (rowUnavailable ? ' is-disabled' : '') + (!matrix.hasColor && !matrix.hasSize ? ' order-add-spec-counter-row--default' : '') + '">'
         + (rowState && rowState.showSkuImage ? '<span class="wg-image wg-image--md wg-image--rounded-md order-add-spec-counter-row__image" data-component="image" data-component-slug="image" data-variant-name="Image_40_Rounded"><img class="wg-image__src is-loaded" src="' + escapeHtml(rowState.skuImageUrl) + '" alt=""></span>' : '')
         + '<div class="order-add-spec-counter-row__info"><span class="order-add-spec-counter-row__label">' + escapeHtml(size) + '</span>'
@@ -6864,7 +7352,7 @@
     var productSummary = '<div class="order-add-product order-add-product--pricing">' + image(product, 'order-add-product__image')
       + '<div class="order-add-product__content"><div><strong>' + escapeHtml(product.name) + '</strong><small>' + escapeHtml(product.code) + '</small></div>'
       + '<div class="order-add-product__actions">'
-      +   '<strong class="order-add-current-price" data-last-price-target="' + (desktop ? 'desktop' : 'mobile') + '">' + (desktop ? addProductPrice(unitPrice) : moneyMarkup(unitPrice)) + '</strong>'
+      +   '<strong class="order-add-current-price" data-last-price-target="' + (desktop ? 'desktop' : 'mobile') + '">' + priceRangeMarkup(product.specs.map(function (spec) { return addDraftSkuPrice(draft, spec); })) + '</strong>'
       +   (desktop ? lastPricePopover(draft, true) : '')
       +   (desktop ? '<div class="order-add-product__operation-buttons">' : '')
       +     '<button type="button" data-toggle-add-discount><i class="wego-iconfont-s icon-youhui order-add-discount-icon" aria-hidden="true"></i>优惠</button>'
@@ -6874,12 +7362,16 @@
       + '</div>'
       + (!desktop ? lastPricePopover(draft, false) : '')
       + '</div></div>';
-    var priceModes = '<fieldset class="order-add-price-modes" aria-label="开单价格">'
-      + '<span class="order-add-price-option tag tag--28 ' + (draft.priceMode === 'cost' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag"><button type="button" class="order-add-cost-visibility" data-toggle-cost-price aria-label="' + (draft.costPriceVisible ? '隐藏拿货价' : '显示拿货价') + '"><i class="wego-iconfont-s ' + (draft.costPriceVisible ? 'icon-xianshi' : 'icon-yincang') + '" aria-hidden="true"></i></button><button type="button" class="order-add-price-select" data-add-price-mode="cost" aria-pressed="' + String(draft.priceMode === 'cost') + '"><span class="tag__label">拿货价 ' + (draft.costPriceVisible ? moneyMarkup(productCostPrice(product)) : '***') + '</span></button></span>'
-      + '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'retail' || draft.priceMode === 'discount' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="retail" aria-pressed="' + String(draft.priceMode === 'retail' || draft.priceMode === 'discount') + '"><span class="tag__label">' + (draft.priceMode === 'discount' ? '优惠价 ' + moneyMarkup(unitPrice) : '售价 ' + moneyMarkup(customerPrice(product))) + '</span></button>'
-      + (addPriceConfiguration(product, 'wholesale') ? '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'wholesale' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-add-price-mode="wholesale" aria-pressed="' + String(draft.priceMode === 'wholesale') + '"><span class="tag__label">批发价 ' + moneyMarkup(addSelectedPrice(product, 'wholesale')) + '</span></button>' : '')
-      + (state.customer && Number(state.memberDiscount) < 100 ? '<button type="button" class="tag tag--28 ' + (draft.priceMode === 'member' ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag" data-component-slug="tag" data-add-price-mode="member" aria-pressed="' + String(draft.priceMode === 'member') + '"><span class="tag__label">会员价 ' + moneyMarkup(memberPrice(product.listPrice)) + '</span></button>' : '')
-      + '</fieldset>';
+    var priceNames = { cost: '拿货价', retail: '售价', wholesale: '批发价', pack: '打包价', consignment: '代发价', member: '会员价', 'title-member': '会员价', title: '标题价' };
+    var priceModes = '<fieldset class="order-add-price-modes" aria-label="开单价格">' + [1, 86, 2, 3, 4, 5, -2, -1].filter(function (type) {
+      return availablePriceTypes(draft.catalogProduct || product).indexOf(type) >= 0;
+    }).map(function (type) {
+      var mode = PRICE_TYPE_MODES[type], selected = addDraftPriceType(draft) === type;
+      var label = draft.priceMode === 'discount' && type === 2 ? '优惠价' : priceNames[mode];
+      var price = draft.priceMode === 'discount' && type === 2 ? unitPrice : addSelectedPrice(product, mode);
+      var select = '<button type="button" class="' + (mode === 'cost' ? 'order-add-price-select' : 'tag tag--28 ' + (selected ? 'tag--brand tag--selected' : 'tag--gray tag--normal')) + '" data-component="tag" data-component-slug="tag" data-add-price-mode="' + mode + '" aria-pressed="' + selected + '"><span class="tag__label">' + label + ' ' + (mode === 'cost' && !draft.costPriceVisible ? '***' : moneyMarkup(price)) + '</span></button>';
+      return mode === 'cost' ? '<span class="order-add-price-option tag tag--28 ' + (selected ? 'tag--brand tag--selected' : 'tag--gray tag--normal') + '" data-component="tag"><button type="button" class="order-add-cost-visibility" data-toggle-cost-price aria-label="' + (draft.costPriceVisible ? '隐藏拿货价' : '显示拿货价') + '"><i class="wego-iconfont-s ' + (draft.costPriceVisible ? 'icon-xianshi' : 'icon-yincang') + '" aria-hidden="true"></i></button>' + select + '</span>' : select;
+    }).join('') + '</fieldset>';
     var selectorContent = (desktop ? '' : '<div class="order-segment order-add-mode-switch"><button class="' + (draft.mode === 'single' ? 'is-active' : '') + '" data-add-mode="single">单买</button><button class="' + (draft.mode === 'batch' ? 'is-active' : '') + '" data-add-mode="batch">多买</button></div>')
       + (draft.mode === 'batch' ? addBatchPicker(draft, desktop) : addSinglePicker(draft, desktop))
       + (featureEnabled('addProductNote') ? '<div class="order-add-note-entry' + (draft.noteOpen ? ' is-active' : '') + (draft.note ? ' has-note' : '') + '">'
@@ -6893,14 +7385,15 @@
     return ''
       + (desktop ? '<div class="order-add-product-fixed">' + productSummary + priceModes + '</div><div class="order-add-scroll">' + selectorContent + '</div>'
         : '<div class="order-add-scroll"><div class="order-side-panel__head"><strong>添加商品</strong><button class="link link--12" data-component-slug="link" data-close-panel>关闭</button></div>' + productSummary + priceModes + selectorContent + '</div>')
-      + '<div class="order-add-footer"><span>' + (desktop ? '<strong data-add-total-amount>' + addProductPrice(addDraftAmount(draft)) + '</strong><small>共 <b data-add-total-qty>' + total + '</b> 件</small>' : '合计：<b data-add-total-qty>' + total + '</b> 件 <strong data-add-total-amount>' + moneyMarkup(addDraftAmount(draft)) + '</strong>') + '</span><div class="order-add-footer__actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button('添加', 'strong', 'md', 'data-confirm-add') + '</div></div>' + formatGuideSavingMarkup(draft);
+      + '<div class="order-add-footer"><span>' + (desktop ? '<strong data-add-total-amount>' + addProductPrice(addDraftAmount(draft)) + '</strong><small>共 <b data-add-total-qty>' + total + '</b> 件</small>' : '合计：<b data-add-total-qty>' + total + '</b> 件 <strong data-add-total-amount>' + moneyMarkup(addDraftAmount(draft)) + '</strong>') + '</span><div class="order-add-footer__actions">' + button('取消', 'weak', 'md', 'data-close-panel') + button(draft.replacesOrderQuantity ? '确定' : '添加', 'strong', 'md', 'data-confirm-add') + '</div></div>' + formatGuideSavingMarkup(draft);
   }
 
   function skuPricePreview(edit) {
     var raw = String(edit.input || '').trim();
     var value = Number(raw);
     var valid = raw === '' || (/^\d+(?:\.\d{0,2})?$/.test(raw) && Number.isFinite(value)
-      && (edit.mode !== 'discount' || value <= 100));
+      && (edit.mode !== 'discount' || value <= (edit.scope === 'product' ? 99.99 : 100))
+      && (edit.scope !== 'product' || value <= 9999999.99));
     var hasInput = raw !== '';
     var after = edit.current == null ? edit.original : edit.current;
     if (valid && hasInput) {
@@ -6910,6 +7403,69 @@
     }
     after = Math.round(after * 100) / 100;
     return { valid: valid, hasInput: hasInput, after: after, change: Math.round((after - edit.original) * 100) / 100 };
+  }
+
+  function priceRangeMarkup(prices) {
+    var values = prices.filter(function (price) { return Number.isFinite(price); });
+    if (!values.length) return '—';
+    var min = Math.min.apply(Math, values), max = Math.max.apply(Math, values);
+    return moneyMarkup(min) + (min === max ? '' : '～' + moneyMarkup(max));
+  }
+
+  function orderProductPriceEdits(edit) {
+    var selected = state.products[edit.itemIndex];
+    if (!selected) return [];
+    return state.products.reduce(function (entries, item, itemIndex) {
+      if (item.code !== selected.code || (item.createdType || 'product') !== (selected.createdType || 'product') || isOrderProductInvalid(item)) return entries;
+      var specs = isSkuMode(item.mode) ? itemOrderSpecs(item) : [''];
+      specs.forEach(function (spec) {
+        if (!isOrderSkuInvalid(item, spec)) entries.push(Object.assign({}, edit, { allProduct: false, itemIndex: itemIndex, spec: spec, original: itemSkuOriginalPrice(item, spec), current: itemSkuPrice(item, spec) }));
+      });
+      return entries;
+    }, []);
+  }
+
+  function skuPriceEditRange(edit) {
+    if (edit.source === 'order' && edit.allProduct) return orderProductPriceEdits(edit).map(function (entry) {
+      var preview = skuPricePreview(entry);
+      return { original: entry.original, after: preview.after, change: preview.change };
+    });
+    return edit.scope === 'product' ? productPricePreview(edit) : null;
+  }
+
+  function orderPriceScopeControl(edit) {
+    if (edit.source !== 'order') return '';
+    return '<button type="button" class="checkbox-field order-sku-price-scope" role="checkbox" aria-checked="' + Boolean(edit.allProduct) + '" data-sku-price-all-product>'
+      + '<span class="checkbox checkbox--sm' + (edit.allProduct ? ' checkbox--checked' : '') + '" data-component="checkbox" data-variant-name="size=sm, state=' + (edit.allProduct ? 'checked' : 'unchecked') + ', presentation=with-text, mode=standalone"><span class="checkbox__inner"></span>'
+      + (edit.allProduct ? '<span class="checkbox__icon"><img class="checkbox__asset" src="../assets/design-system/wego-design/assets/icons/checkbox-check.svg" alt=""></span>' : '')
+      + '</span><span class="checkbox-field__text">整个商品生效</span></button>';
+  }
+
+  function productPricePreview(edit) {
+    return edit.specs.map(function (spec) {
+      var original = addDraftSkuBasePrice(state.addDraft, spec);
+      var preview = skuPricePreview(Object.assign({}, edit, { original: original, current: original }));
+      return { spec: spec, original: original, after: preview.after, change: preview.change };
+    });
+  }
+
+  function applyAddPriceEdit(draft, edit, preview) {
+    if (edit.scope !== 'product') {
+      if (preview.hasInput) setAddSkuPriceChange(draft, edit.spec, preview.after, edit.mode, Number(edit.input));
+      return;
+    }
+    if (!preview.hasInput && draft.priceMode === 'discount') { draft.priceMode = PRICE_TYPE_MODES[addDraftPriceType(draft)] || 'retail'; draft.unitPrice = addSelectedPrice(draft.product, draft.priceMode); }
+    edit.specs.forEach(function (spec) {
+      if (!preview.hasInput) {
+        var resolved = addSkuPricing(draft.catalogProduct || draft.product, spec, addDraftPriceType(draft), []);
+        draft.changePriceSkus = (draft.changePriceSkus || []).filter(function (record) { return !(String(record.id) === String(resolved.id) && Number(record.priceType) === resolved.priceType); });
+        // Removing a change restores the native type price, including native member prices.
+        delete draft.skuPriceOverrides[spec];
+      } else {
+        var result = skuPricePreview(Object.assign({}, edit, { original: addDraftSkuBasePrice(draft, spec) }));
+        setAddSkuPriceChange(draft, spec, result.after, edit.mode, Number(edit.input));
+      }
+    });
   }
 
   function skuPriceChangeText(value) {
@@ -6924,12 +7480,17 @@
     var change = root.querySelector('[data-sku-price-change]');
     var after = root.querySelector('[data-sku-price-after]');
     var error = root.querySelector('[data-sku-price-error]');
+    var range = skuPriceEditRange(edit);
     if (change) {
-      change.textContent = skuPriceChangeText(preview.change);
+      if (range) change.innerHTML = priceRangeMarkup(range.map(function (entry) { return entry.change; }));
+      else change.textContent = skuPriceChangeText(preview.change);
       change.classList.toggle('is-negative', preview.change < 0);
     }
-    if (after) setMoneyText(after, preview.after);
-    if (error) error.textContent = edit.input && !preview.valid ? (edit.mode === 'discount' ? '请输入 0–100 的百分比' : '请输入有效金额，最多两位小数') : '';
+    if (after) {
+      if (range) after.innerHTML = priceRangeMarkup(range.map(function (entry) { return entry.after; }));
+      else setMoneyText(after, preview.after);
+    }
+    if (error) error.textContent = edit.input && !preview.valid ? (edit.mode === 'discount' ? (edit.scope === 'product' ? '请输入 0–99.99 的百分比' : '请输入 0–100 的百分比') : '请输入有效金额，最多两位小数') : '';
   }
 
 
@@ -6962,6 +7523,7 @@
     var preview = skuPricePreview(edit);
     var modeNames = { fixed: '一口价', discount: '折扣', amount: '优惠' };
     var unit = edit.mode === 'discount' ? '%' : '元';
+    var range = skuPriceEditRange(edit);
     return '<div class="order-sku-price-modal" role="dialog" aria-modal="true" aria-labelledby="order-sku-price-title" data-state="open">'
       + '<div class="order-sku-price-modal__panel">'
       +   '<header class="order-sku-price-modal__head"><strong id="order-sku-price-title">优惠改价</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-close-sku-price aria-label="关闭优惠改价"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
@@ -6972,13 +7534,17 @@
             }).join('') + '</div></div>'
       +     '<label class="order-sku-price-field"><span>' + (edit.mode === 'discount' ? '折扣比例' : edit.mode === 'amount' ? '优惠金额' : '一口价') + '</span><span class="input number-input order-sku-price-input" data-component="input" data-component-slug="input" data-variant-name="Input_32" data-variant-cn="输入框(数字)" data-number-input data-scenario-component="InputPrice"><input class="number-input__field" type="text" inputmode="decimal" autocomplete="off" value="' + escapeHtml(edit.input) + '" placeholder="请输入" data-sku-price-input aria-label="' + (edit.mode === 'discount' ? '折扣百分比' : '改价金额') + '"><span class="number-input__suffix">' + unit + '</span></span></label>'
       +     '<small class="order-sku-price-error" data-sku-price-error>' + (edit.input && !preview.valid ? '请输入有效金额' : '') + '</small>'
-      +     '<div class="order-sku-price-preview" data-scenario-component="PriceNew"><div><span>原价</span><strong>' + moneyMarkup(edit.original) + '</strong></div><div><span>改价金额</span><strong data-sku-price-change class="' + (preview.change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(preview.change) + '</strong></div><div class="order-sku-price-preview__after"><span>改后价格</span><strong data-sku-price-after>' + moneyMarkup(preview.after) + '</strong></div></div>'
+      +     '<div class="order-sku-price-preview" data-scenario-component="PriceNew"><div><span>原价</span><strong>' + (range ? priceRangeMarkup(range.map(function (entry) { return entry.original; })) : moneyMarkup(edit.original)) + '</strong></div><div><span>改价金额</span><strong data-sku-price-change class="' + (preview.change < 0 ? 'is-negative' : '') + '">' + (range ? priceRangeMarkup(range.map(function (entry) { return entry.change; })) : skuPriceChangeText(preview.change)) + '</strong></div><div class="order-sku-price-preview__after"><span>改后价格</span><strong data-sku-price-after>' + (range ? priceRangeMarkup(range.map(function (entry) { return entry.after; })) : moneyMarkup(preview.after)) + '</strong></div></div>'
       +   '</div>'
-      +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-sku-price') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-sku-price>确认改价</button></footer>'
+      +   '<footer class="order-sku-price-modal__footer">' + orderPriceScopeControl(edit) + '<div class="order-sku-price-modal__actions">' + button('取消', 'weak', 'md', 'data-close-sku-price') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-sku-price>确认改价</button></div></footer>'
       + '</div></div>';
   }
 
   function applyOrderSkuPriceEdit(edit, preview) {
+    if (edit.allProduct) {
+      if (preview.hasInput) orderProductPriceEdits(edit).forEach(function (entry) { applyOrderSkuPriceEdit(entry, skuPricePreview(entry)); });
+      return;
+    }
     var item = state.products[edit.itemIndex];
     if (!item || !preview.hasInput) return;
     var spec = edit.spec;
@@ -7001,6 +7567,10 @@
     }
     if (!item.skuPrices) item.skuPrices = {};
     item.skuPrices[spec] = preview.after;
+    var type = Number(item.usePriceType || priceTypeForMode(item.priceMode));
+    var recordId = detail.id == null ? spec : detail.id;
+    item.changePriceSkus = (item.changePriceSkus || []).filter(function (record) { return !(String(record.id) === String(recordId) && Number(record.priceType) === type); });
+    item.changePriceSkus.push({ id: recordId, spec: spec, priceType: type, originalPrice: edit.original, finallyPrice: preview.after, preferentialType: edit.mode, preferentialValue: Number(edit.input) });
   }
 
   function openOrderPromotion(type) {
@@ -7334,6 +7904,7 @@
   }
 
   function beginProductCreate(type) {
+    state.desktopSearchResultsOpen = false;
     var temporary = type === 'temporary';
     if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
     state.catalogCreateMenuOpen = false;
@@ -7538,7 +8109,7 @@
     if (!guard) return '';
     var details = {
       pickupPhone: { title: '提货人手机号格式有误', body: '请核对提货人手机号，仍可忽略提醒继续。', buttons: [['去看看', 'review'], ['忽略提醒', 'ignore']] },
-      recipient: { title: '未填写收货人信息', body: '请设置收货人信息，或跳过后继续结算。', buttons: [['去设置', 'review'], ['跳过', 'ignore'], ['取消', 'cancel']] },
+      recipient: { title: '您还未设置收货地址', body: '当前运费为 0，设置收货信息后可计算', buttons: [['去设置', 'review'], ['跳过', 'ignore'], ['取消', 'cancel']] },
       recipientPhone: { title: '收货人手机号格式有误', body: '请核对收货人手机号，仍可忽略提醒继续。', buttons: [['去看看', 'review'], ['忽略提醒', 'ignore']] },
       qualification: { title: '暂不能开单', body: '请先开通会员或试用资格。', buttons: [['我知道了', 'cancel']] },
       addProduct: { title: '请添加商品', body: '当前配送方式与收款状态不支持无商品开单。', buttons: [['我知道了', 'cancel']] },
@@ -7548,7 +8119,7 @@
     return '<div class="dialog dialog--text order-checkout-guard-dialog" role="dialog" aria-modal="true" aria-labelledby="order-checkout-guard-title" aria-describedby="order-checkout-guard-content" data-component="dialog" data-variant-name="Dialog_Text_' + details.buttons.length + '" data-state="open">'
       + '<div class="dialog__card"><div class="dialog__body"><div class="dialog__header"><h3 class="dialog__title" id="order-checkout-guard-title">' + details.title + '</h3></div><div class="dialog__content" id="order-checkout-guard-content">' + details.body + '</div></div>'
       + '<div class="dialog__actions"><div class="dialog__buttons' + (details.buttons.length > 1 ? ' dialog__buttons--' + (details.buttons.length === 3 ? 'triple' : 'dual') : '') + '">'
-      + details.buttons.map(function (button, index) { return (index ? '<span class="dialog__divider" aria-hidden="true"></span>' : '') + '<button type="button" class="dialog__btn dialog__btn--' + (button[1] === 'ignore' || button[1] === 'remove' ? 'confirm' : details.buttons.length === 1 ? 'default' : 'dismiss') + '" data-checkout-guard-action="' + button[1] + '">' + button[0] + '</button>'; }).join('')
+      + details.buttons.map(function (button, index) { return (index ? '<span class="dialog__divider" aria-hidden="true"></span>' : '') + '<button type="button" class="dialog__btn dialog__btn--' + ((guard.type === 'recipient' ? button[1] === 'review' : button[1] === 'ignore' || button[1] === 'remove') ? 'confirm' : details.buttons.length === 1 ? 'default' : 'dismiss') + '" data-checkout-guard-action="' + button[1] + '">' + button[0] + '</button>'; }).join('')
       + '</div></div></div></div>';
   }
 
@@ -7674,7 +8245,7 @@
   }
 
   function rootTemplate() {
-    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + skuRackModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + addMinimumDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + orderRowRemovalConfirm() + productAvailabilityDialog() + orderStockWarningDialog() + checkoutGuardDialog() + '</div>';
+    return '<div class="order-v2-page" data-bg="page">' + mobileView() + desktopView() + desktopModal() + employeePickerModal() + mobileModal() + skuPriceModal() + skuRackModal() + orderPromotionModal() + clipboardRecipientModal() + orderNoteModal() + paymentNoteModal() + refundBalanceGuideDialog() + customerAddressConfirmDialog() + freightEditModal() + productImagePreview() + refundImagePreview() + orderRowContextMenu() + desktopDisplayModeMenu() + desktopCatalogCreateMenu() + draftDeleteConfirm() + addStockWarningDialog() + addMinimumDialog() + imageSearchPermissionDialog() + imageSearchDropOverlay() + returnDraftConfirm() + refundSyncDialog() + courierDialog() + orderRowRemovalConfirm() + productAvailabilityDialog() + orderStockWarningDialog() + checkoutGuardDialog() + '</div>';
   }
 
   function openRechargeMenu(trigger, root, ctx) {
@@ -7688,7 +8259,11 @@
     });
   }
   function renderWorkbench(root, ctx) {
+    if (catalogLayoutMotionCleanup) catalogLayoutMotionCleanup();
+    if (orderFullscreenMotionCleanup) orderFullscreenMotionCleanup();
     if (window.WegoRechargeMenu) window.WegoRechargeMenu.close(false);
+    var customerTriggerFocused = root.contains(document.activeElement) && document.activeElement.matches('[data-open-panel="customer"]');
+    var customerConfirmFocus = state.pendingCustomerAddress && document.activeElement && document.activeElement.matches('[data-customer-address-confirm]') ? '[data-customer-address-confirm]' : '[data-customer-address-cancel]';
     var focusedSegment = root.contains(document.activeElement) && document.activeElement.closest('[data-order-segment]');
     var focusScope = focusedSegment && focusedSegment.dataset.orderSegment;
     var focusValue = focusScope && document.activeElement.dataset.value;
@@ -7727,6 +8302,16 @@
     if (courierState().view) {
       root.querySelectorAll('.order-v2-page > :not(.order-courier-modal)').forEach(function (node) { node.setAttribute('inert', ''); });
       positionCourierMenu(root);
+    }
+    if (customerTriggerFocused && !state.pendingCustomerAddress) {
+      var nextCustomerTrigger = Array.prototype.find.call(root.querySelectorAll('[data-open-panel="customer"]'), function (node) { return node.getClientRects().length; });
+      if (nextCustomerTrigger) nextCustomerTrigger.focus({ preventScroll: true });
+    }
+    if (state.pendingCustomerAddress || state.paymentDraft && state.paymentDraft.balanceGuideOpen) {
+      var activeDialog = state.pendingCustomerAddress ? '[data-customer-address-dialog]' : '.order-refund-balance-guide';
+      root.querySelectorAll('.order-v2-page > :not(' + activeDialog + ')').forEach(function (node) { node.setAttribute('inert', ''); });
+      var pendingAction = root.querySelector(state.pendingCustomerAddress ? customerConfirmFocus : '[data-close-refund-balance-guide]');
+      if (pendingAction) pendingAction.focus({ preventScroll: true });
     }
     normalizeGongfengComponentContracts(root);
     var scannerVideo = root.querySelector('[data-barcode-video]');
@@ -7922,6 +8507,17 @@
     return target.closest('.order-desktop__side, .order-desktop-modal__body, .order-v2-modal__body') || root;
   }
 
+  function editableProductOrderRows(product) {
+    return state.products.filter(function (item) {
+      return item.code === product.code && (item.createdType || 'product') === (product.createdType || 'product') && !isOrderProductInvalid(item);
+    });
+  }
+
+  function addDraftPricingSnapshot(draft) {
+    return JSON.stringify({ type: addDraftPriceType(draft), changes: draft.changePriceSkus,
+      prices: draft.product.specs.map(function (spec) { return [spec, addDraftSkuPrice(draft, spec)]; }) });
+  }
+
   function startAdd(productOrId) {
     var product = productOrId && typeof productOrId === 'object'
       ? productOrId
@@ -7938,12 +8534,21 @@
       ? (isDesktopWorkbench() ? (productMatrix.colors[0] || '') : '')
       : (productMatrix.colors[0] || '默认');
     var firstSize = productMatrix.hasSize ? '' : (productMatrix.sizes[0] || '默认规格');
-    product.specs.forEach(function (spec) { skuQty[spec] = 0; });
-    if (!productMatrix.hasColor && !productMatrix.hasSize && product.specs.length === 1) {
+    var orderRows = editableProductOrderRows(product);
+    product.specs.forEach(function (spec) {
+      skuQty[spec] = orderRows.reduce(function (sum, item) { return sum + (isOrderSkuInvalid(item, spec) ? 0 : Number((item.skuQty || {})[spec] || 0)); }, 0);
+    });
+    var firstAddedSpec = product.specs.find(function (spec) { return skuQty[spec] !== 0; });
+    if (firstAddedSpec) { firstColor = splitSpec(firstAddedSpec).color; firstSize = splitSpec(firstAddedSpec).size; }
+    if (!orderRows.length && !productMatrix.hasColor && !productMatrix.hasSize && product.specs.length === 1) {
       var defaultSkuStock = skuRowDetail(product, product.specs[0]).stock;
       skuQty[product.specs[0]] = Number(defaultSkuStock) >= 1 ? 1 : 0;
     }
+    var existingPricing = orderRows[orderRows.length - 1];
     state.addDraft = {
+      catalogProduct: product,
+      replacesOrderQuantity: orderRows.length > 0,
+      changePriceSkus: savedItemPriceChanges(existingPricing, product),
       product: product,
       mode: productMatrix.hasColor || productMatrix.hasSize ? storedAddMode() : 'single',
       priceMode: 'retail',
@@ -7970,7 +8575,7 @@
       selectedSize: firstSize,
       confirmedOverstock: {},
       stockWarning: null,
-      note: '',
+      note: existingPricing ? existingPricing.note || '' : '',
       noteOpen: false,
       batchSelection: null,
       searchMeta: {
@@ -7978,6 +8583,14 @@
         used_picture_precise_search: false
       }
     };
+    setAddPriceType(state.addDraft, defaultAddPriceType(product, existingPricing));
+    state.addDraft.product.specs.forEach(function (spec) {
+      var pricedRow = orderRows.slice().reverse().find(function (item) { return !isOrderSkuInvalid(item, spec) && Object.prototype.hasOwnProperty.call(item.skuQty || {}, spec); });
+      if (pricedRow && Number(pricedRow.usePriceType || priceTypeForMode(pricedRow.priceMode || 'retail')) === addDraftPriceType(state.addDraft)) {
+        state.addDraft.skuPriceOverrides[spec] = itemSkuPrice(pricedRow, spec);
+      }
+    });
+    state.addDraft.initialPricing = addDraftPricingSnapshot(state.addDraft);
     state.panel = 'add';
     renderCatalogPreservingScroll(activeContext && activeContext.root);
     scheduleFormatGuide(state.addDraft);
@@ -8202,10 +8815,11 @@
     var createdType = product.createdType || 'product';
     var skuPriceDetails = {};
     Object.keys(skuQty).forEach(function (spec) {
-      var original = createdType === 'temporary' ? unitPrice : Number(skuRowDetail(product, spec).price);
+      var original = createdType === 'temporary' ? unitPrice : addSkuPricing(product, spec, pricing && pricing.usePriceType || priceTypeForMode(priceMode), []).originalPrice;
       var finalPrice = skuPrices && skuPrices[spec] != null ? Number(skuPrices[spec]) : unitPrice;
       var usesMemberPrice = priceMode === 'member' && toCents(finalPrice) === toCents(memberPrice(original));
       skuPriceDetails[spec] = {
+        id: productSkuId(product, spec),
         price: original,
         basePrice: original,
         finallyPrice: finalPrice,
@@ -8223,6 +8837,8 @@
         && JSON.stringify(item.skuPrices || null) === JSON.stringify(skuPrices);
     });
     if (existing) {
+      if (pricing && pricing.changePriceSkus) existing.changePriceSkus = JSON.parse(JSON.stringify(pricing.changePriceSkus));
+      existing.usePriceType = pricing && pricing.usePriceType || priceTypeForMode(priceMode);
       if (!Array.isArray(existing.orderSpecs)) {
         existing.orderSpecs = itemOrderSpecs(existing);
       }
@@ -8256,6 +8872,8 @@
       allowSellerOverSale: Boolean(product.allowSellerOverSale),
       addAnyway: Boolean(product.addAnyway),
       priceMode: priceMode,
+      usePriceType: pricing && pricing.usePriceType || priceTypeForMode(priceMode),
+      changePriceSkus: JSON.parse(JSON.stringify(pricing && pricing.changePriceSkus || [])),
       image: product.image,
       wholeSaleInfo: product.wholeSaleInfo ? Object.assign({}, product.wholeSaleInfo) : null,
       freightTemplate: product.freightTemplate ? Object.assign({}, product.freightTemplate) : { requiresRealName: false },
@@ -8347,7 +8965,7 @@
     normalizeReturnDelivery();
     var policy = state.checkoutPolicy || {};
     if (!state.products.length && deliverySettlementRule().requiresRecipient && !(state.address && hasText(state.address.name))) {
-      return openCheckoutGuard('addProduct', phase);
+      return openCheckoutGuard('recipient', phase);
     }
     if (!isPureReturnOrder()) {
       var cachedDelivery = Boolean((state.customer && state.customer.lastDelivery && state.customer.lastDelivery !== 'none') || (state.guestDeliveryPreference && state.guestDeliveryPreference.delivery && state.guestDeliveryPreference.delivery !== 'none'));
@@ -8399,7 +9017,7 @@
       return;
     }
     if (action === 'ignore') {
-      if (guard.type === 'recipient' && !state.products.length) { openCheckoutGuard('addProduct', guard.phase); return; }
+      if (guard.type === 'recipient' && !state.products.length) { renderActive(); ctx.toast('请添加商品'); return; }
       state.checkoutWarnings[guard.type] = true;
     }
     if (action === 'remove') removeZeroQuantitySpecs();
@@ -8458,6 +9076,7 @@
       overpaymentHandling: state.customer ? 'balance' : 'change',
       autoPrintReceipt: false,
       autoDispatch: false,
+      pickedUp: false,
       note: '',
       noteEditorValue: '',
       noteEditorOpen: false,
@@ -8530,7 +9149,7 @@
         prices: [{ priceType: 2, price: 89 }, { priceType: 3, price: 79, mixedBatchType: 2, saleUnitType: 'hand', saleUnitPieceQty: 6, miniSaleQty: 10 }]
       });
       startAdd(wholesaleDemo);
-      state.addDraft.priceMode = 'wholesale'; state.addDraft.unitPrice = 79;
+      setAddPriceType(state.addDraft, 3);
       state.addDraft.skuQty['白色/S'] = 2; state.addDraft.skuQty['白色/M'] = 4;
       state.addDraft.mode = 'single'; state.addDraft.listBulkActive = true;
       return;
@@ -8568,6 +9187,17 @@
       state.addDraft.mode = 'single';
       state.addDraft.selectedColor = allDelistedDemo ? '' : '白色';
       state.addDraft.singleRecord.selectedColor = state.addDraft.selectedColor;
+      return;
+    }
+    if (reviewState === 'customer-history-address-preview') {
+      // Prototype-only entry: reach the real customer-switch confirmation using
+      // local fixture addresses, without writing customer history or clipboard.
+      resetOrder();
+      state.address = Object.assign({}, CUSTOMERS[0].lastAddress);
+      var historyCustomer = CUSTOMERS.find(function (customer) { return customer.id === 'c3'; });
+      applyCustomer(historyCustomer);
+      applyCustomerDeliveryHistory(historyCustomer, CUSTOMERS[0].id);
+      state.panel = null;
       return;
     }
     if (reviewState === 'clipboard-recipient-preview') {
@@ -8783,7 +9413,8 @@
     var draft = state.paymentDraft;
     applyPaymentFeatureVisibility(draft);
     var payable = totals().payable;
-    if (!state.products.length && (!deliverySettlementRule().supportsSenderInfo || !draft || !(['private', 'debt'].indexOf(draft.kind) >= 0 || draft.useBalance))) {
+    var addressedEmptyDelivery = (state.delivery === 'express' || state.delivery === 'freight') && state.address && hasText(state.address.name);
+    if (!state.products.length && !addressedEmptyDelivery && (!deliverySettlementRule().supportsSenderInfo || !draft || !(['private', 'debt'].indexOf(draft.kind) >= 0 || draft.useBalance))) {
       openCheckoutGuard('addProduct', 'submit');
       return;
     }
@@ -8830,6 +9461,7 @@
     var differenceCents = paymentDifferenceCents(draft, payable);
     var shortageCents = Math.max(0, -differenceCents);
     var excessCents = Math.max(0, differenceCents);
+    if (hasPrivateAmountEntry(draft) && draft.manualAmountEdited && (!acceptsMoneyInput(String(draft.singleAmount || ''), 100000000) || !canEditPrivatePaymentAmount(draft))) { ctx.toast(Number(draft.singleAmount) > 100000000 ? '实收金额不能大于1亿' : '请先开通会员和余额功能'); return; }
     var adjustsBalance = canEditPrivatePaymentAmount(draft);
     if (adjustsBalance && String(draft.singleAmount).trim() === '') { ctx.toast('请输入收款金额'); return; }
     if (shortageCents > 0 && !adjustsBalance) {
@@ -9223,6 +9855,12 @@
   }
 
   function handleClick(event, root, ctx) {
+    if (state.paymentDraft && state.paymentDraft.balanceGuideOpen && !event.target.closest('[data-close-refund-balance-guide], [data-enable-refund-balance]')) return;
+    if (state.pendingCustomerAddress) {
+      if (event.target.closest('[data-customer-address-confirm]')) finishCustomerAddressChoice(true, ctx);
+      else if (event.target.closest('[data-customer-address-cancel]')) finishCustomerAddressChoice(false, ctx);
+      return;
+    }
     if (state.addDraft && state.addDraft.formatSavePhase) return;
     if (state.addDraft && state.addDraft.minimumPrompt) {
       if (event.target.closest('[data-add-minimum-cancel]')) finishAddMinimum(false, ctx);
@@ -9399,6 +10037,13 @@
         renderActive();
         return;
       }
+      if (target.matches('[data-sku-price-all-product]') && state.skuPriceDraft.source === 'order') {
+        state.skuPriceDraft.allProduct = !state.skuPriceDraft.allProduct;
+        renderActive();
+        var scopeControl = root.querySelector('[data-sku-price-all-product]');
+        if (scopeControl) scopeControl.focus({ preventScroll: true });
+        return;
+      }
       if (target.matches('[data-sku-price-mode]')) {
         state.skuPriceDraft.mode = target.dataset.skuPriceMode;
         state.skuPriceDraft.input = '';
@@ -9416,14 +10061,14 @@
           if (invalidPriceInput) invalidPriceInput.focus({ preventScroll: true });
           return;
         }
-        if (changePreview.hasInput) {
+        if (changePreview.hasInput || skuPriceEdit.scope === 'product') {
           if (skuPriceEdit.source === 'order') applyOrderSkuPriceEdit(skuPriceEdit, changePreview);
-          else state.addDraft.skuPriceOverrides[skuPriceEdit.spec] = changePreview.after;
+          else applyAddPriceEdit(state.addDraft, skuPriceEdit, changePreview);
         }
         state.skuPriceDraft = null;
         if (skuPriceEdit.source === 'order' && changePreview.hasInput) markDirty(ctx);
         renderActive();
-        if (changePreview.hasInput) ctx.toast('当前 SKU 价格已修改');
+        if (changePreview.hasInput) ctx.toast(skuPriceEdit.allProduct ? '整个商品价格已修改' : '当前 SKU 价格已修改');
         return;
       }
       return;
@@ -9431,7 +10076,7 @@
     if (target.matches('[data-edit-sku-price]') && state.addDraft) {
       var editSpec = decodeURIComponent(target.dataset.editSkuPrice || '');
       if (!state.addDraft.product.specs.includes(editSpec)) return;
-      state.skuPriceDraft = { spec: editSpec, original: addDraftSkuPrice(state.addDraft, editSpec), mode: 'fixed', input: '' };
+      state.skuPriceDraft = { spec: editSpec, original: addDraftSkuBasePrice(state.addDraft, editSpec), current: addDraftSkuPrice(state.addDraft, editSpec), mode: 'fixed', input: '' };
       renderActive();
       var priceInput = root.querySelector('[data-sku-price-input]');
       if (priceInput) priceInput.focus({ preventScroll: true });
@@ -9442,7 +10087,7 @@
       var orderItem = state.products[orderItemIndex];
       var orderSpec = decodeURIComponent(target.dataset.orderSkuSpec || '');
       if (!orderItem || isOrderSkuInvalid(orderItem, orderSpec) || (isSkuMode(orderItem.mode) && !Object.prototype.hasOwnProperty.call(orderItem.skuQty || {}, orderSpec))) return;
-      state.skuPriceDraft = { source: 'order', itemIndex: orderItemIndex, spec: orderSpec, original: itemSkuOriginalPrice(orderItem, orderSpec), current: itemSkuPrice(orderItem, orderSpec), mode: 'fixed', input: '' };
+      state.skuPriceDraft = { source: 'order', allProduct: false, itemIndex: orderItemIndex, spec: orderSpec, original: itemSkuOriginalPrice(orderItem, orderSpec), current: itemSkuPrice(orderItem, orderSpec), mode: 'fixed', input: '' };
       renderActive();
       var orderSkuPriceInput = root.querySelector('[data-sku-price-input]');
       if (orderSkuPriceInput) orderSkuPriceInput.focus({ preventScroll: true });
@@ -9678,6 +10323,9 @@
     }
     if (target.matches('[data-toggle-catalog]')) {
       var nextCollapsed = !effectiveCatalogCollapsed();
+      var searchScroller = root.querySelector(effectiveCatalogCollapsed() ? '.order-desktop-search-results__list' : '.order-catalog-products__body');
+      var searchScrollTop = searchScroller ? searchScroller.scrollTop : 0;
+      var catalogMotionBefore = captureCatalogLayoutMotion(root);
       state.catalogToggleUsed[nextCollapsed ? 'collapse' : 'expand'] = true;
       if (isTabletPortrait()) {
         setPortraitCatalogCollapsed(nextCollapsed);
@@ -9686,8 +10334,23 @@
         state.catalogCollapsed = !state.catalogCollapsed;
         try { window.localStorage.setItem('wego-order-catalog-collapsed', String(state.catalogCollapsed)); } catch (error) {}
       }
-      resetDesktopProductSearch();
+      syncDesktopSearchPresentation();
       renderActive();
+      var nextSearchSelector = nextCollapsed ? '.order-desktop-search-results__list' : '.order-catalog-products__body';
+      if (catalogMotionBefore && (state.desktopProductKeyword.trim() || imageSearchHasImages())) {
+        catalogMotionBefore.scroll = catalogMotionBefore.scroll.filter(function (snapshot) { return snapshot.selector !== nextSearchSelector; });
+        catalogMotionBefore.scroll.push({ selector: nextSearchSelector, index: 0, top: searchScrollTop, left: 0 });
+      }
+      animateCatalogLayout(root, catalogMotionBefore, nextCollapsed);
+      if (state.desktopProductKeyword.trim() || imageSearchHasImages()) {
+        var nextSearchScroller = root.querySelector(nextSearchSelector);
+        if (nextSearchScroller) {
+          nextSearchScroller.scrollTop = searchScrollTop;
+          window.requestAnimationFrame(function () {
+            if (nextSearchScroller.isConnected) nextSearchScroller.scrollTop = searchScrollTop;
+          });
+        }
+      }
       return;
     }
     if (target.matches('[data-close-catalog-drawer]')) {
@@ -10458,6 +11121,9 @@
           }
         }
         if (state.addDraft.batchRecord) state.addDraft.batchRecord = copyAddSkuQty(editedProduct, state.addDraft.batchRecord);
+        state.addDraft.catalogProduct = editedProduct;
+        state.addDraft.product = editedProduct;
+        if (state.addDraft.priceMode !== 'discount') setAddPriceType(state.addDraft, addDraftPriceType(state.addDraft));
         if (state.addDraft.priceMode === 'retail') state.addDraft.unitPrice = customerPrice(editedProduct);
         if (state.addDraft.priceMode === 'cost') state.addDraft.unitPrice = productCostPrice(editedProduct);
         if (state.addDraft.priceMode === 'member') state.addDraft.unitPrice = memberPrice(editedProduct.listPrice);
@@ -10550,6 +11216,20 @@
       ctx.toast(createDraft.type === 'temporary' ? '临时商品创建成功' : '商品已发布');
       return;
     }
+    if (target.matches('[data-edit-order-product]')) {
+      var orderProduct = state.products[Number(target.dataset.editOrderProduct)];
+      if (!orderProduct || isOrderProductInvalid(orderProduct)) return;
+      var orderCatalogProduct = activeCatalogProducts().find(function (item) { return item.code === orderProduct.code; });
+      startAdd(orderCatalogProduct || Object.assign({}, orderProduct, { specs: Object.keys(orderProduct.skuQty || {}) }));
+      var clickedSpec = decodeURIComponent(target.dataset.editProductSpec || '');
+      if (state.addDraft && state.addDraft.product.specs.indexOf(clickedSpec) >= 0) {
+        state.addDraft.selectedColor = splitSpec(clickedSpec).color;
+        state.addDraft.selectedSize = splitSpec(clickedSpec).size;
+        saveAddModeRecord(state.addDraft);
+        renderCatalogPreservingScroll(root);
+      }
+      return;
+    }
     if (target.matches('[data-product-id]')) {
       var selectedProduct = activeCatalogProducts().find(function (item) { return item.id === target.dataset.productId; });
       if (!selectedProduct) return;
@@ -10562,12 +11242,15 @@
       return;
     }
     if (target.matches('[data-customer-id]')) {
+      var previousCustomerId = state.customer && state.customer.id;
       applyCustomer(target.dataset.customerId === 'guest' ? null : CUSTOMERS.find(function (item) { return item.id === target.dataset.customerId; }));
-      applyDeliveryPreference(customerDeliveryPreference(state.customer));
+      applyCustomerDeliveryHistory(state.customer, previousCustomerId);
       state.panel = null;
       state.customerKeyword = '';
       markDirty(ctx);
-      ctx.toast(state.customer ? '已切换客户并带入发货信息' : '已设为散客，使用零售价');
+      ctx.toast(state.customer ? '已切换客户' : '已设为散客，使用零售价');
+      var historyConfirm = root.querySelector('[data-customer-address-cancel]');
+      if (historyConfirm) historyConfirm.focus({ preventScroll: true });
       scheduleClipboardRecipientCheck();
       return;
     }
@@ -10708,7 +11391,7 @@
       if (saveDraft.delivery === 'pickup') {
         var pickupName = deliveryScope.querySelector('[data-pickup-name]')?.value.trim();
         var pickupPhone = deliveryScope.querySelector('[data-pickup-phone]')?.value.trim();
-        if (!pickupName || !pickupPhone) {
+        if ((state.checkoutPolicy || {}).requirePickupContact !== false && (!pickupName || !pickupPhone)) {
           state.deliveryPickupAttention = true;
           [deliveryScope.querySelector('[data-pickup-name]'), deliveryScope.querySelector('[data-pickup-phone]')].forEach(function (input) {
             if (!input) return;
@@ -10721,7 +11404,7 @@
           return;
         }
         if (PICKUP_POINTS.length && !currentPickupPoint(saveDraft.pickupPointId)) saveDraft.pickupPointId = PICKUP_POINTS[0].id;
-        saveDraft.pickupContact = { name: pickupName, phone: pickupPhone };
+        saveDraft.pickupContact = pickupName || pickupPhone ? { name: pickupName || '', phone: pickupPhone || '' } : null;
       }
       var savesAddressDelivery = saveDraft.delivery === 'express' || saveDraft.delivery === 'freight';
       if (savesAddressDelivery && saveDraft.senderMode === 'proxy') {
@@ -10796,9 +11479,7 @@
       return;
     }
     if (target.matches('[data-add-price-mode]') && state.addDraft) {
-      state.addDraft.priceMode = target.dataset.addPriceMode;
-      state.addDraft.unitPrice = addSelectedPrice(state.addDraft.product, state.addDraft.priceMode);
-      state.addDraft.skuPriceOverrides = {};
+      setAddPriceType(state.addDraft, priceTypeForMode(target.dataset.addPriceMode));
       renderActive();
       return;
     }
@@ -10808,13 +11489,19 @@
       return;
     }
     if (target.matches('[data-toggle-add-discount]') && state.addDraft) {
-      ctx.toast('弹出优惠弹窗');
+      var scopeSpecs = state.addDraft.product.specs.slice();
+      if (!scopeSpecs.length) { ctx.toast('暂无可改价的规格'); return; }
+      state.skuPriceDraft = { scope: 'product', specs: scopeSpecs, original: addDraftSkuBasePrice(state.addDraft, scopeSpecs[0]), current: addDraftSkuPrice(state.addDraft, scopeSpecs[0]), mode: 'fixed', input: '' };
+      renderActive();
+      var wholePriceInput = root.querySelector('[data-sku-price-input]');
+      if (wholePriceInput) wholePriceInput.focus({ preventScroll: true });
       return;
     }
     if (target.matches('[data-use-last-discount]') && state.addDraft) {
       state.addDraft.priceMode = 'discount';
       state.addDraft.unitPrice = Number(state.addDraft.lastDiscountPrice || 0);
       state.addDraft.skuPriceOverrides = {};
+      state.addDraft.product.specs.forEach(function (spec) { setAddSkuPriceChange(state.addDraft, spec, state.addDraft.unitPrice, 'historical', state.addDraft.unitPrice); });
       state.addDraft.lastDiscountTipVisible = false;
       renderActive();
       return;
@@ -10923,6 +11610,7 @@
     }
     if (target.matches('[data-edit-freight]')) {
       if (isPureReturnOrder()) { ctx.toast('纯退货单运费为 0'); return; }
+      state.freightEditInput = state.freight ? String(state.freight) : '';
       state.freightEditOpen = true;
       renderActive();
       var freightField = activeContext.root.querySelector('[data-freight-edit-value]');
@@ -10937,7 +11625,10 @@
     if (target.matches('[data-freight-edit-confirm]')) {
       var freightScope = target.closest('.order-freight-edit-modal');
       var freightInput = freightScope ? freightScope.querySelector('[data-freight-edit-value]') : null;
-      state.freight = Math.max(0, Math.round(Number(freightInput ? freightInput.value : state.freight) * 100) / 100 || 0);
+      var freightRaw = String(freightInput ? freightInput.value : state.freightEditInput || '');
+      if (!freightRaw.trim()) { ctx.toast('请输入运费'); return; }
+      if (!acceptsMoneyInput(freightRaw, 5000)) { ctx.toast('可设置的运费0~5000元'); return; }
+      state.freight = Number(freightRaw);
       if (state.orderPromotion) state.orderPromotionFreightBase = state.freight;
       state.freightEditOpen = false;
       markDirty(ctx);
@@ -11014,7 +11705,7 @@
         markDirty(ctx, true); ctx.toast('商品已移除'); return;
       }
       var hasDraftSkuQuantity = draft && Object.keys(draft.skuQty || {}).some(function (spec) { return Number(draft.skuQty[spec] || 0) !== 0; });
-      if (!hasDraftSkuQuantity) {
+      if (!hasDraftSkuQuantity && !(draft && draft.replacesOrderQuantity)) {
         ctx.toast('请至少选择一件商品');
         return;
       }
@@ -11144,8 +11835,24 @@
       return;
     }
     if (target.matches('[data-toggle-order-fullscreen]')) {
+      var fullscreenBefore = captureOrderFullscreenMotion(root);
+      var hiddenCatalogScroll = function (snapshot) {
+        return snapshot.selector === '.order-desktop__catalog-scroll' || snapshot.selector === '.order-catalog-category-tabs';
+      };
+      if (!state.desktopOrderFullscreen) state.fullscreenCatalogScroll = captureRenderScrollPositions(root).filter(hiddenCatalogScroll);
       state.desktopOrderFullscreen = !state.desktopOrderFullscreen;
       renderDesktopOrderPreservingScroll(root);
+      if (!state.desktopOrderFullscreen) {
+        // display:none clamps the hidden catalog's offsets to zero; use the
+        // pre-fullscreen offsets when that same catalog becomes visible again.
+        restoreRenderScrollPositions(root, state.fullscreenCatalogScroll || []);
+        var returningCatalogScroll = state.fullscreenCatalogScroll || [];
+        window.requestAnimationFrame(function () {
+          if (!state.desktopOrderFullscreen) restoreRenderScrollPositions(root, returningCatalogScroll);
+        });
+        if (fullscreenBefore) fullscreenBefore.scroll = fullscreenBefore.scroll.filter(function (snapshot) { return !hiddenCatalogScroll(snapshot); }).concat(state.fullscreenCatalogScroll || []);
+      }
+      animateOrderFullscreen(root, fullscreenBefore, state.desktopOrderFullscreen);
       return;
     }
     if (target.matches('[data-open-checkout]')) {
@@ -11270,10 +11977,26 @@
     }
     if (target.matches('[data-close-refund-balance-guide]')) {
       state.paymentDraft.balanceGuideOpen = false;
-      renderActive();
+      state.paymentDraft.balanceGuideContext = '';
+      state.paymentDraft.balanceGuideMethod = '';
+      renderPaymentPreservingScroll(root);
       return;
     }
     if (target.matches('[data-enable-refund-balance]')) {
+      var openingDraft = state.paymentDraft;
+      if (openingDraft.balanceGuideContext === 'private-amount') {
+        if (!hasPrivateAmountEntry(openingDraft) || openingDraft.method !== openingDraft.balanceGuideMethod || state.paymentStatus === 'processing') { openingDraft.balanceGuideOpen = false; renderPaymentPreservingScroll(root); return; }
+        if (openingDraft.balanceGuideStage === 'member') {
+          state.refundCapabilities.memberEnabled = true;
+          ctx.toast('会员服务已模拟开通');
+          if (!state.refundCapabilities.balanceEnabled) { openingDraft.balanceGuideStage = 'balance'; renderPaymentPreservingScroll(root); return; }
+        } else { state.refundCapabilities.balanceEnabled = true; ctx.toast('客户余额帐户功能已开启'); }
+        openingDraft.balanceGuideOpen = false; openingDraft.balanceGuideContext = '';
+        renderPaymentPreservingScroll(root);
+        setPrivatePaymentAmountEditing(root, openingDraft.balanceGuideMethod, true, true);
+        openingDraft.balanceGuideMethod = '';
+        return;
+      }
       // Prototype-only success path; production navigates to the real membership/balance enablement flow.
       state.refundCapabilities.memberEnabled = true;
       state.refundCapabilities.balanceEnabled = true;
@@ -11284,7 +12007,7 @@
       return;
     }
     if (target.matches('[data-edit-private-payment-amount]')) {
-      setPrivatePaymentAmountEditing(root, target.dataset.editPrivatePaymentAmount, true, true);
+      requestPrivateAmountEditing(root, target.dataset.editPrivatePaymentAmount);
       return;
     }
     if (target.matches('[data-payment-kind]')) {
@@ -11298,6 +12021,7 @@
       }
       if (state.paymentDraft.kind === target.dataset.paymentKind) return;
       state.paymentDraft.kind = target.dataset.paymentKind;
+      if (!canCompletePickup(state.paymentDraft)) state.paymentDraft.pickedUp = false;
       state.paymentDraft.mode = 'single';
       state.paymentDraft.method = '';
       state.paymentDraft.singleAmount = '';
@@ -11426,6 +12150,12 @@
     if (target.matches('[data-auto-print-receipt]')) {
       if (state.paymentDraft && !state.paymentDraft.autoPrintReceipt && !receiptPrinter()) { openReceiptPrinter('toggle', ctx); return; }
       if (state.paymentDraft) { state.paymentDraft.autoPrintReceipt = !state.paymentDraft.autoPrintReceipt; renderPaymentPreservingScroll(root); }
+      return;
+    }
+    if (target.matches('[data-pickup-completed]')) {
+      if (!canCompletePickup(state.paymentDraft)) { ctx.toast('未收款不支持已提货'); return; }
+      state.paymentDraft.pickedUp = !state.paymentDraft.pickedUp;
+      renderPaymentPreservingScroll(root);
       return;
     }
     if (target.matches('[data-auto-dispatch]')) {
@@ -11846,7 +12576,7 @@
           imageSearchTimer = 0;
           if (!state.desktopProductKeyword.trim()) return;
           var delayedMatches = desktopProductMatches(state.desktopProductKeyword);
-          state.desktopSearchResultsOpen = effectiveCatalogCollapsed() && delayedMatches.length >= 2;
+          state.desktopSearchResultsOpen = effectiveCatalogCollapsed() && Boolean(state.desktopProductKeyword.trim());
           state.desktopCatalogSearchActive = !effectiveCatalogCollapsed();
           renderActive();
           focusDesktopProductSearch();
@@ -11857,7 +12587,7 @@
       }
       window.clearTimeout(imageSearchTimer);
       imageSearchTimer = 0;
-      state.desktopSearchResultsOpen = effectiveCatalogCollapsed() && headerMatches.length >= 2;
+      state.desktopSearchResultsOpen = effectiveCatalogCollapsed() && Boolean(target.value.trim());
       state.desktopCatalogSearchActive = !effectiveCatalogCollapsed() && Boolean(target.value.trim());
       var headerClear = target.parentElement.querySelector('.input-clear');
       if (headerClear) headerClear.style.display = target.value ? 'block' : 'none';
@@ -11886,8 +12616,15 @@
       if (event.type === 'change') markDirty(ctx);
       return;
     }
+    if (target.matches('[data-freight-edit-value]')) {
+      var freightValue = String(target.value || '');
+      if (!acceptsMoneyInput(freightValue, 5000)) { target.value = state.freightEditInput || ''; if (Number(freightValue) > 5000) ctx.toast('可设置的运费0~5000元'); return; }
+      state.freightEditInput = freightValue;
+      return;
+    }
     if (target.matches('[data-freight]')) {
-      state.freight = Math.max(0, Number(target.value || 0));
+      if (!acceptsMoneyInput(String(target.value || ''), 5000)) { target.value = state.freight; ctx.toast('可设置的运费0~5000元'); return; }
+      state.freight = Number(target.value || 0);
       if (state.orderPromotion) state.orderPromotionFreightBase = state.freight;
       if (event.type === 'change') markDirty(ctx);
       return;
@@ -12023,7 +12760,8 @@
       return;
     }
     if (target.matches('[data-single-payment-amount]') && state.paymentDraft) {
-      state.paymentDraft.singleAmount = target.value.replace(/[^\d.]/g, '');
+      if (!canEditPrivatePaymentAmount(state.paymentDraft) || !acceptsMoneyInput(String(target.value || ''), 100000000)) { target.value = state.paymentDraft.singleAmount; if (Number(event.target.value) > 100000000) ctx.toast('实收金额不能大于1亿'); return; }
+      state.paymentDraft.singleAmount = target.value;
       state.paymentDraft.lastSingleMethod = state.paymentDraft.method || '';
       state.paymentDraft.lastSingleAmount = state.paymentDraft.singleAmount;
       target.value = state.paymentDraft.singleAmount;
@@ -12032,12 +12770,16 @@
     }
     if (target.matches('[data-payment-amount]') && state.paymentDraft) {
       if (state.paymentStatus === 'processing') return;
-      var amountRaw = String(target.value || '').replace(/[^\d.]/g, '');
-      var amountParts = amountRaw.split('.');
-      var amountInteger = amountParts.shift().slice(0, 7);
-      var amountDecimal = amountParts.join('').slice(0, 2);
-      var normalizedAmount = amountInteger + (amountRaw.indexOf('.') >= 0 ? '.' + amountDecimal : '');
-      if (normalizedAmount.charAt(0) === '.') normalizedAmount = '0' + normalizedAmount;
+      var paymentInputDraft = state.paymentDraft;
+      var oldAmount = paymentInputDraft.mode === 'single' ? String(paymentInputDraft.singleAmount || '') : String(paymentInputDraft[target.dataset.paymentAmount] || '');
+      var normalizedAmount = String(target.value || '');
+      if (paymentInputDraft.balanceGuideOpen || (hasPrivateAmountEntry(paymentInputDraft)
+        && (!canEditPrivatePaymentAmount(paymentInputDraft) || paymentInputDraft.editingPrivateAmount !== target.dataset.paymentAmount || paymentInputDraft.method !== target.dataset.paymentAmount))) { target.value = oldAmount; return; }
+      if (!acceptsMoneyInput(normalizedAmount, 100000000)) {
+        target.value = oldAmount;
+        if (Number(normalizedAmount) > 100000000) ctx.toast('实收金额不能大于1亿');
+        return;
+      }
       target.value = normalizedAmount;
       if (state.paymentDraft.mode === 'single') {
         state.paymentDraft.singleAmount = normalizedAmount;
@@ -12054,6 +12796,7 @@
           state.paymentDraft.selectedMethods = state.paymentDraft.selectedMethods.filter(function (id) { return id !== comboAmountMethodId; });
         }
       }
+      state.paymentDraft.manualAmountEdited = true;
       state.paymentDraft.shortageHandling = null;
       refreshPaymentAmountsInPlace(root);
       return;
@@ -12218,7 +12961,7 @@
         state.panel = null;
         renderActive();
       } else if (shouldCloseDesktopSearchResults && state.desktopSearchResultsOpen) {
-        resetDesktopProductSearch();
+        state.desktopSearchResultsOpen = false;
         renderActive();
       } else if (shouldCloseProductCreateMenu && state.catalogCreateMenuOpen) {
         state.catalogCreateMenuOpen = false;
@@ -12320,6 +13063,12 @@
     });
     root.addEventListener('focusin', function (event) {
       var target = event.target;
+      if (!state.panel && target.matches('[data-header-catalog-search]') && effectiveCatalogCollapsed() && !state.desktopSearchResultsOpen && (state.desktopProductKeyword.trim() || imageSearchHasImages())) {
+        syncDesktopSearchPresentation();
+        renderActive();
+        focusDesktopProductSearch();
+        return;
+      }
       if (target.matches('[data-payment-amount][data-online-combo-index]')) {
         fillOnlinePaymentRemainder(target, root);
         return;
@@ -12387,6 +13136,16 @@
       markDirty(ctx);
     }, true);
     root.addEventListener('keydown', function (event) {
+      var blockingDialog = state.pendingCustomerAddress ? '[data-customer-address-dialog]' : (state.paymentDraft && state.paymentDraft.balanceGuideOpen ? '.order-refund-balance-guide' : '');
+      if (blockingDialog) {
+        if (event.key === 'Escape') { event.preventDefault(); if (state.pendingCustomerAddress) { finishCustomerAddressChoice(false, ctx); } else { state.paymentDraft.balanceGuideOpen = false; state.paymentDraft.balanceGuideContext = ''; renderPaymentPreservingScroll(root); } }
+        else if (event.key === 'Tab') {
+          var dialogButtons = Array.from(root.querySelectorAll(blockingDialog + ' button')).filter(function (node) { return node.getClientRects().length; });
+          var firstDialogButton = dialogButtons[0], lastDialogButton = dialogButtons[dialogButtons.length - 1];
+          if (firstDialogButton && (dialogButtons.indexOf(document.activeElement) < 0 || event.shiftKey && document.activeElement === firstDialogButton || !event.shiftKey && document.activeElement === lastDialogButton)) { event.preventDefault(); (event.shiftKey ? lastDialogButton : firstDialogButton).focus({ preventScroll: true }); }
+        }
+        return;
+      }
       if (state.addDraft && state.addDraft.formatSavePhase) { event.preventDefault(); return; }
       if (handleAddMinimumKeydown(event, root, ctx)) return;
       if (handleSkuRackKeydown(event, root)) return;
@@ -12658,6 +13417,8 @@
       }
     });
     ctx.onDestroy(function () {
+      if (orderFullscreenMotionCleanup) orderFullscreenMotionCleanup();
+      if (catalogLayoutMotionCleanup) catalogLayoutMotionCleanup();
       window.clearTimeout(state.catalogDrawerCloseTimer);
       state.catalogDrawerCloseTimer = null;
       state.catalogDrawerMotion = '';
@@ -12698,7 +13459,9 @@
     var response = {
       orderInfo: {
         payAmount: snapshot.totals.payable,
-        orderStatus: snapshot.paymentDraft && snapshot.paymentDraft.kind === 'unpaid' ? 0 : 1,
+        // Prototype-only semantic value; production enum must be mapped by the host.
+        orderStatus: snapshot.paymentDraft && snapshot.paymentDraft.orderBusinessStatus === 'picked-up' ? 'picked-up' : (snapshot.paymentDraft && snapshot.paymentDraft.kind === 'unpaid' ? 0 : 1),
+        orderStatusName: snapshot.paymentDraft && snapshot.paymentDraft.orderBusinessStatus === 'picked-up' ? '已提货' : '',
         expressType: state.delivery === 'pickup' ? 2 : 1
       },
       customer: customer,
