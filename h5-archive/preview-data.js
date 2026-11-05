@@ -96,6 +96,20 @@ window.wegoPreviewProjects = [
         "path": "projects/business-cloud/sales-order/v1.1.0/pages/add-wholesale-preview.html"
       },
       {
+        "name": "add-stock-allow-preview",
+        "title": "允许超卖",
+        "view": "添加商品演示",
+        "scenario": "允许超卖",
+        "path": "projects/business-cloud/sales-order/v1.1.0/pages/add-stock-allow-preview.html"
+      },
+      {
+        "name": "add-stock-deny-preview",
+        "title": "禁止超卖",
+        "view": "添加商品演示",
+        "scenario": "禁止超卖",
+        "path": "projects/business-cloud/sales-order/v1.1.0/pages/add-stock-deny-preview.html"
+      },
+      {
         "name": "delivery-restriction-preview",
         "title": "不可配送地区提醒",
         "view": "已添加区域演示",
