@@ -10,7 +10,7 @@
   var CUSTOMERS = [
     { id: 'c1', name: '玛尼轰', phone: '玛尼大吉', mobile: '13800138001', address: '广东省深圳市南山区科技园18号', tag: '老客 · 微信好友、回头客', priceType: '8.5折', factor: 0.85, lastDelivery: 'express', lastAddress: { name: '玛尼大吉', phone: '13800138001', detail: '广东省深圳市南山区科技园18号' }, avatar: './scenes/bcg/开单/assets/customer-picker/customer-mani.png', number: '99812', level: 'V3', balance: 4000, points: 132, amount: '¥800.00', pieces: '2250', contact: '玛尼大吉', employee: '员工名称', wechatName: '玛尼轰', ipRegion: '广东 深圳', assignedAt: '2025/07/07', assignedTo: '大黄', activity: '近7天添加0条图文，分享0次' },
     { id: 'c4', name: '测试客户（无地址）', phone: '无地址客户', mobile: '13800138004', address: '', tag: '新客 · 微信好友', priceType: '9.5折', factor: 0.95, lastDelivery: 'express', lastAddress: null, avatar: './scenes/bcg/开单/assets/customer-picker/recent-chen.png', number: 'TEST04', level: 'V1', balance: 0, points: 0, amount: '¥0.00', pieces: '0', contact: '无地址客户', employee: '员工名称' },
-    { id: 'c2', name: 'HZP-广州', phone: '刘嘿嘿', mobile: '13600136002', address: '广东省广州市越秀区站西路57号', tag: '老客 · 微信好友、回头客', priceType: '9.5折', factor: 0.95, lastDelivery: 'pickup', lastAddress: null, avatar: './scenes/bcg/开单/assets/customer-picker/customer-mani.png', number: '12345', level: 'V1', balance: 0, points: 100, amount: '¥0.00', pieces: '210', contact: '刘嘿嘿', employee: '员工名称' },
+    { id: 'c2', name: 'HZP-广州', phone: '刘嘿嘿', mobile: '13600136002', address: '广东省广州市越秀区站西路57号', tag: '老客 · 微信好友、回头客', priceType: '9.5折', factor: 0.95, lastDelivery: 'pickup', lastAddress: null, avatar: './scenes/bcg/开单/assets/customer-picker/customer-mani.png', number: '12345', level: 'V1', balance: -50, points: 100, amount: '-¥50.00', pieces: '210', contact: '刘嘿嘿', employee: '员工名称' },
     { id: 'c3', name: '3857-简静', phone: '旺仔小馒头', mobile: '13583084433', address: '浙江省杭州市余杭区财富大厦3楼', tag: '老客 · 微信好友、回头客', priceType: '9.5折', factor: 0.95, lastDelivery: 'freight', lastAddress: { name: '旺仔小馒头', phone: '13583084433', detail: '浙江省杭州市余杭区财富大厦3楼' }, avatar: './scenes/bcg/开单/assets/customer-picker/customer-flower.jpg', number: '3857', level: 'V1', balance: 50, points: 100, amount: '¥50.00', pieces: '1030', contact: '旺仔小馒头', employee: '员工名称' }
   ];
 
@@ -347,6 +347,9 @@
       tags: Array.isArray(item.tags) ? item.tags.map(String).filter(Boolean) : [],
       source: item.createdType === 'temporary' ? '临时商品' : '手动创建',
       listPrice: Number.isFinite(listPrice) && listPrice >= 0 ? listPrice : 0,
+      hasSalePrice: item.hasSalePrice !== false && item.listPrice != null && item.listPrice !== '',
+      hasCostPrice: item.hasCostPrice === true,
+      hasPrice: item.hasPrice,
       costPrice: Number.isFinite(costPrice) && costPrice >= 0 ? costPrice : 0,
       image: image,
       specs: specs,
@@ -748,7 +751,7 @@
     var emptyWaybillPage = c.view === 'waybills' && c.waybills.length === 0;
     if (emptyWaybillPage) content = '<div class="result-page result-page--80 order-courier-waybill-empty" data-component="result" data-variant-name="Result_80"><section class="result-page__info"><div class="result result--in-page" role="group" aria-label="暂无电子面单"><div class="result__copy"><h2 class="result__title">暂无电子面单</h2></div></div><div class="result-gradient" aria-hidden="true"></div><div class="result-actions">' + button('添加电子面单', 'strong', 'lg', 'data-courier-add-waybill') + '</div></section><section class="result-page__actions"></section></div>';
     var addWaybill = c.view === 'waybills' && !emptyWaybillPage ? '<div class="order-courier-add-waybill"><a class="link" data-component="link" data-variant-name="Link_14" data-clickable data-courier-add-waybill href="#">添加电子面单</a></div>' : '';
-    return '<div class="order-note-modal order-courier-modal" role="dialog" aria-modal="true" aria-labelledby="order-courier-title" data-courier-view="' + c.view + '"><div class="order-note-modal__panel"><div class="order-courier-page' + (selectionPage ? ' order-courier-page--enter' : '') + '"><header class="order-note-modal__head"><div class="order-courier-heading">' + back + '<strong id="order-courier-title">' + title + '</strong></div><div class="order-courier-head-actions">' + extra + '<button type="button" class="navbar__left-btn navbar__left-btn--circle" ' + (c.view === 'config' ? 'data-courier-cancel' : 'data-courier-back') + ' aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>' + '</div></header><div class="order-note-modal__body"><div class="cell-group"><div class="cell-group__content"' + (selectionPage || c.view === 'printers' ? ' role="radiogroup" aria-label="' + title + '"' : '') + '>' + content + '</div></div>' + addWaybill + (c.error && c.view !== 'config' ? '<p class="order-courier-error" role="alert">' + escapeHtml(c.error) + '</p>' : '') + '</div>' + (actions ? '<footer class="order-note-modal__actions">' + actions + '</footer>' : '') + '</div></div>' + menu + '</div>';
+    return '<div class="order-note-modal order-courier-modal" role="dialog" aria-modal="true" aria-labelledby="order-courier-title" data-courier-view="' + c.view + '"><div class="order-note-modal__panel"><div class="order-courier-page' + (selectionPage ? ' order-courier-page--enter' : '') + '"><header class="order-note-modal__head"><div class="order-courier-heading">' + back + '<strong id="order-courier-title">' + title + '</strong></div><div class="order-courier-head-actions">' + extra + '<button type="button" class="order-modal-close" ' + (c.view === 'config' ? 'data-courier-cancel' : 'data-courier-back') + ' aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button>' + '</div></header><div class="order-note-modal__body"><div class="cell-group"><div class="cell-group__content"' + (selectionPage || c.view === 'printers' ? ' role="radiogroup" aria-label="' + title + '"' : '') + '>' + content + '</div></div>' + addWaybill + (c.error && c.view !== 'config' ? '<p class="order-courier-error" role="alert">' + escapeHtml(c.error) + '</p>' : '') + '</div>' + (actions ? '<footer class="order-note-modal__actions">' + actions + '</footer>' : '') + '</div></div>' + menu + '</div>';
 
   }
   function closeCourierMenu(root) {
@@ -955,6 +958,7 @@
     rounding: 0,
     roundingMode: null,
     orderPromotion: null,
+    discountDetailSource: null,
     orderPromotionDraft: null,
     orderPromotionFreightBase: null,
     freightEditOpen: false,
@@ -1155,6 +1159,22 @@
     };
   }
 
+  // Catalog taps always require explicit Add confirmation, even for one SKU.
+  function catalogProductHasPrice(product) {
+    if (!product) return false;
+    if (typeof product.hasSalePrice === 'boolean' || typeof product.hasCostPrice === 'boolean') {
+      return product.hasSalePrice === true || product.hasCostPrice === true;
+    }
+    return product.listPrice != null && product.listPrice !== '' && Number.isFinite(Number(product.listPrice)) && Number(product.listPrice) >= 0;
+  }
+
+  function openCatalogProduct(product) {
+    if (!product) return;
+    if (isTabletPortrait()) state.tabletCatalogAutoCollapsed = true;
+    if (catalogProductHasPrice(product)) startAdd(product);
+    else beginProductEdit(product.id);
+  }
+
   function shouldAddSingleSkuDirectly(product) {
     if (!product || product.specs.length !== 1) return false;
     if (Object.prototype.hasOwnProperty.call(state.catalogSkuStatus || {}, skuRackProductKey(product))) return false;
@@ -1205,20 +1225,20 @@
     return sku.finallyPrice != null ? sku.finallyPrice : sku.price;
   }
 
-  function skuRowFinalPrices(product) {
+  function skuRowOriginalPrices(product) {
     return skuRowDetails(product).reduce(function (prices, sku) {
-      var price = skuRowDisplayPrice(sku);
+      var price = sku.price;
       if (prices.indexOf(price) < 0) prices.push(price);
       return prices;
     }, []);
   }
 
-  function resolveSkuRowState(product, spec, quantity, confirmedOverstock) {
+  function resolveSkuRowState(product, spec, quantity, confirmedOverstock, draft) {
     var config = skuRowConfig(product);
     var sku = skuRowDetail(product, spec);
     var allSkus = skuRowDetails(product);
     var showSkuImage = allSkus.some(function (item) { return Boolean(item.img); });
-    var showSkuPrice = skuRowFinalPrices(product).length > 1;
+    var showSkuPrice = draft ? addDraftShowsSkuPrices(draft) : skuRowOriginalPrices(product).length > 1;
     var showOriginalPrice = sku.finallyPrice != null && sku.finallyPrice !== sku.price;
     var showMaxPrice = showSkuPrice
       && !showOriginalPrice
@@ -1421,8 +1441,12 @@
     }, 0);
   }
 
+  function quantityBadgeText(count) {
+    return Number(count) > 99 ? '99+' : String(count);
+  }
+
   function quantityNumberBadge(count, inline, className, attributes) {
-    count = String(count);
+    count = quantityBadgeText(count);
     return '<span class="badge badge--16 ' + (inline ? 'badge--center' : 'badge--corner') + ' badge--number badge--align-right' + (className ? ' ' + className : '') + (count.length > 1 ? ' badge--number-multi' : '') + '" data-component="badge" data-variant-name="' + (inline ? 'Badge_16_center_Number_Right' : 'Badge_16_corner_Number_Right') + '"' + (attributes || '') + '>' + escapeHtml(count) + '</span>';
   }
 
@@ -1442,8 +1466,9 @@
       });
       var count = hasQuantity ? String(addColorQuantity(draft, color)) : '';
       badge.hidden = !hasQuantity;
-      badge.textContent = count;
-      badge.classList.toggle('badge--number-multi', count.length > 1);
+      var text = quantityBadgeText(count);
+      badge.textContent = text;
+      badge.classList.toggle('badge--number-multi', text.length > 1);
       badge.setAttribute('aria-label', color + '已选' + (count || '0') + '件');
     });
   }
@@ -1801,6 +1826,21 @@
   function addDraftSkuBasePrice(draft, spec) {
     if (!spec) return addDraftUnitPrice(draft);
     return addSkuPricing(draft.catalogProduct || draft.product, spec, addDraftPriceType(draft), []).originalPrice;
+  }
+
+  function addDraftShowsSkuPrices(draft) {
+    var originals = draft.product.specs.map(function (spec) { return addDraftSkuBasePrice(draft, spec); });
+    // Empty products have no rendered rows. Compare against the first value,
+    // never use zero as an uninitialized sentinel.
+    return !originals.length || originals.some(function (price) { return price !== originals[0]; });
+  }
+
+  function addDraftHeaderOriginalPrice(draft) {
+    var originals = draft.product.specs.map(function (spec) { return addDraftSkuBasePrice(draft, spec); });
+    var finals = draft.product.specs.map(function (spec) { return addDraftSkuPrice(draft, spec); });
+    var originalRange = priceRangeMarkup(originals);
+    if (!originals.length || originalRange === priceRangeMarkup(finals)) return '';
+    return '<del class="order-add-header-original-price" aria-label="优惠前价格">' + originalRange + '</del>';
   }
 
   function addDraftSkuPrice(draft, spec) {
@@ -2392,6 +2432,7 @@
     if (state.orderPromotionFreightBase != null) state.freight = state.orderPromotionFreightBase;
     state.orderPromotionFreightBase = null;
     state.orderPromotion = null;
+    state.discountDetailSource = null;
     state.discount = 100;
     state.discountMode = null;
     state.discountValue = 0;
@@ -2442,6 +2483,7 @@
       state.freight = calculation.freightCents / 100;
     }
     state.orderPromotion = { type: type, mode: mode, value: value };
+    state.discountDetailSource = 'order';
     if (type !== 'member') state.memberDiscountChoice = '';
     state.discountMode = type === 'orderRate' || type === 'orderAmount' ? mode : null;
     state.discountValue = type === 'orderRate' || type === 'orderAmount' ? value : 0;
@@ -3789,17 +3831,14 @@
   function orderNoteModal() {
     if (!state.orderNoteOpen || !state.orderNoteDraft) return '';
     return ''
-      + '<div class="order-note-modal order-payment-note-modal order-remark-modal order-note-modal--order" role="dialog" aria-modal="true" aria-label="整单备注" data-state="open">'
+      + '<div class="order-note-modal order-payment-note-modal order-remark-modal order-note-modal--order order-modal-form" role="dialog" aria-modal="true" aria-label="整单备注" data-state="open">'
       +   '<div class="order-note-modal__panel">'
-      +     '<div class="order-note-modal__head"><strong>添加备注</strong>' + noteCloseButton('data-note-cancel') + '</div>'
+      +     modalFormHeader('添加备注', 'data-note-cancel')
       +     '<div class="order-note-modal__body">'
       +       '<section class="order-remark-field"><label class="field-label" for="order-note-merchant">商家备注</label>' + noteEditorField(state.orderNoteDraft.merchant, 'merchant', '商家备注', '请输入文字，商家备注仅你可见') + '</section>'
       +       '<section class="order-remark-field"><label class="field-label" for="order-note-buyer">买家留言</label>' + noteEditorField(state.orderNoteDraft.buyer, 'buyer', '买家留言', '请输入文字，买家留言双方可见') + '</section>'
       +     '</div>'
-      +     '<div class="order-note-modal__actions">'
-      +       button('取消', 'weak', 'md', 'data-note-cancel')
-      +       button('确认', 'strong', 'md', 'data-note-confirm')
-      +     '</div>'
+      +     modalFormActions('确定', 'data-note-confirm', 'data-note-cancel')
       +   '</div>'
       + '</div>';
   }
@@ -3809,13 +3848,13 @@
     return ''
       + '<div class="order-sku-price-modal order-promotion-modal order-promotion-modal--total order-freight-edit-modal" role="dialog" aria-modal="true" aria-labelledby="freight-edit-title" data-state="open">'
       +   '<div class="order-sku-price-modal__panel">'
-      +     '<header class="order-sku-price-modal__head"><strong id="freight-edit-title">设置运费</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-freight-edit-cancel aria-label="关闭设置运费"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +     '<header class="order-sku-price-modal__head"><strong id="freight-edit-title">设置运费</strong><button type="button" class="order-modal-close" data-freight-edit-cancel aria-label="关闭设置运费"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></header>'
       +     '<div class="order-sku-price-modal__body">'
       +       '<label class="order-sku-price-field"><span class="input number-input order-sku-price-input" data-component="input" data-variant-name="Input_32"><input class="number-input__field" id="freight-edit-value" type="text" inputmode="decimal" value="' + escapeHtml(state.freightEditInput == null ? String(state.freight || '') : state.freightEditInput) + '" placeholder="请输入运费金额" aria-label="运费金额" data-freight-edit-value><span class="number-input__suffix">元</span></span></label>'
       +     '</div>'
       +     '<footer class="order-sku-price-modal__footer">'
       +       button('取消', 'weak', 'md', 'data-freight-edit-cancel')
-      +       button('确认', 'strong', 'md', 'data-freight-edit-confirm')
+      +       button('确定', 'strong', 'md', 'data-freight-edit-confirm')
       +     '</footer>'
       +   '</div>'
       + '</div>';
@@ -3905,7 +3944,7 @@
       return ''
         + '<article class="order-catalog-item card card--surface card--vertical order-catalog-item--desktop' + (editable ? ' order-catalog-item--editable' : '') + '" data-component-slug="card">'
         +   '<button type="button" class="order-catalog-item__select" data-product-id="' + item.id + '" aria-label="添加' + escapeHtml(item.name) + '">' + content + '</button>'
-        +   '<button type="button" class="order-catalog-item__image-mark" data-product-activity="' + item.id + '" aria-label="查看' + escapeHtml(item.name) + '详情" title="查看详情"><i class="wego-iconfont-s icon-xiangqingzhuangxiu" aria-hidden="true"></i></button>'
+        +   '<button type="button" class="order-catalog-item__image-mark" data-product-activity="' + item.id + '" aria-label="查看' + escapeHtml(item.name) + '详情" title="查看详情"><i class="icon-chakanxiangqing" aria-hidden="true"></i></button>'
         +   (editable ? '<span class="order-catalog-item__actions"><span class="order-catalog-item__grid-price">' + priceMarkup + '</span><button type="button" class="order-catalog-item__edit" data-edit-catalog-product="' + item.id + '" aria-label="编辑' + escapeHtml(item.name) + '" title="编辑商品"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button><span class="order-catalog-item__list-stock">库存' + escapeHtml(String(catalogInventory)) + '</span></span>' : '')
         + '</article>';
     }).join('');
@@ -4587,8 +4626,8 @@
       +   '<div class="wgoo-ffr order-filter-frame">'
       +     '<header class="order-filter-frame__header" data-scene-extension="filter-titlebar">'
       +       '<h2>筛选</h2>'
-      +       '<button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-catalog-filter aria-label="关闭筛选">'
-      +         '<i class="btn__icon icon-cha16" aria-hidden="true"></i>'
+      +       '<button type="button" class="order-modal-close" data-close-catalog-filter aria-label="关闭筛选">'
+      +         '<i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i>'
       +       '</button>'
       +     '</header>'
       +     '<div class="order-filter-frame__scroll">'
@@ -4630,8 +4669,8 @@
       +   '<div class="order-filter-frame order-category-panel">'
       +     '<header class="order-filter-frame__header" data-scene-extension="category-titlebar">'
       +       '<h2>商品分类</h2>'
-      +       '<button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-catalog-category aria-label="关闭商品分类">'
-      +         '<i class="btn__icon icon-cha16" aria-hidden="true"></i>'
+      +       '<button type="button" class="order-modal-close" data-close-catalog-category aria-label="关闭商品分类">'
+      +         '<i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i>'
       +       '</button>'
       +     '</header>'
       +     '<div class="order-filter-frame__scroll order-category-panel__scroll">'
@@ -5095,16 +5134,22 @@
     return '<div class="order-summary-row' + (className ? ' ' + className : '') + '"><span class="order-summary-row__label">' + label + '</span><span class="order-summary-row__value">' + valueHtml + '</span></div>';
   }
 
+  function orderSummaryIsSurcharge(t) {
+    return !!(state.orderPromotion && state.orderPromotion.type === 'total' && state.discountDetailSource !== 'product' && !orderHasReturnSku() && t.totalDiscount < 0);
+  }
+
   function discountDetailText(t) {
     if (t.totalDiscount === 0) return '';
+    if (state.discountDetailSource === 'product') return '商品优惠 ' + compactNumber(t.totalDiscount) + ' 元';
+    if (orderSummaryIsSurcharge(t)) return '整单加价 ' + compactNumber(-t.totalDiscount) + ' 元';
     var name = state.orderPromotion ? ({ member: '会员折扣', orderRate: '整单折扣', orderAmount: '整单优惠', rounding: '整单抹零', total: '整单改价' })[state.orderPromotion.type] : '商品优惠';
     if (state.orderPromotion && t.promotionDiscountAmount !== 0) return name + compactNumber(t.promotionDiscountAmount) + '元';
     return '商品优惠' + compactNumber(t.productDiscountAmount) + '元';
   }
 
-  function discountDisplayAmount(amount) {
+  function discountDisplayAmount(amount, surcharge) {
     var text = money(-amount);
-    return amount < 0 && text !== '¥0.00' ? '+' + text : text;
+    return !surcharge && amount < 0 && text !== '¥0.00' ? '+' + text : text;
   }
 
   function desktopSummaryDetails() {
@@ -5116,9 +5161,9 @@
       + '<div class="order-desktop__summary-details" aria-label="本单金额明细">'
       +   summaryDetailRow('商品总价', '<em class="order-summary-row__meta" data-summary-meta>' + quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces }) + '</em><strong data-summary-product-amount>' + moneyMarkup(t.productAmount) + '</strong>')
       +   (isPureReturnOrder() || !state.products.length || t.totalDiscount === 0 ? '' : '<div class="order-summary-row order-summary-row--deduction">'
-      +     '<span class="order-summary-row__label">优惠</span>'
+      +     '<span class="order-summary-row__label" data-summary-discount-label>' + (orderSummaryIsSurcharge(t) ? '加价金额' : '优惠') + '</span>'
       +     '<span class="order-summary-row__value order-summary-discount">'
-      +       '<strong data-summary-discount-total>' + (t.totalDiscount < 0 ? '+' : '') + moneyMarkup(-t.totalDiscount) + '</strong>'
+      +       '<strong data-summary-discount-total>' + (t.totalDiscount < 0 && !orderSummaryIsSurcharge(t) ? '+' : '') + moneyMarkup(-t.totalDiscount) + '</strong>'
       +       '<span class="order-summary-discount__detail" data-summary-discount-detail' + (discountText ? '' : ' hidden') + '>' + escapeHtml(discountText) + '</span>'
       +     '</span>'
       +   '</div>')
@@ -5137,6 +5182,7 @@
     var nodes = {
       meta: root.querySelector('[data-summary-meta]'),
       product: root.querySelector('[data-summary-product-amount]'),
+      discountLabel: root.querySelector('[data-summary-discount-label]'),
       discountTotal: root.querySelector('[data-summary-discount-total]'),
       discountDetail: root.querySelector('[data-summary-discount-detail]'),
       freight: root.querySelector('[data-summary-freight]'),
@@ -5144,7 +5190,8 @@
     };
     if (nodes.meta) nodes.meta.innerHTML = quantitySummaryHtml({ sales: t.salesPieces, returns: t.returnPieces });
     if (nodes.product) setMoneyText(nodes.product, t.productAmount);
-    if (nodes.discountTotal) nodes.discountTotal.textContent = discountDisplayAmount(t.totalDiscount);
+    if (nodes.discountLabel) nodes.discountLabel.textContent = orderSummaryIsSurcharge(t) ? '加价金额' : '优惠';
+    if (nodes.discountTotal) nodes.discountTotal.textContent = discountDisplayAmount(t.totalDiscount, orderSummaryIsSurcharge(t));
     if (nodes.discountDetail) {
       nodes.discountDetail.textContent = discountDetailText(t);
       nodes.discountDetail.hidden = !nodes.discountDetail.textContent;
@@ -5329,8 +5376,9 @@
   }
 
   function quickOpButton(label, op) {
-    var commandIcon = { orderRate: 'icon-youhui', orderAmount: 'icon-yuanjian', rounding: 'icon-jian16' }[op];
-    if (commandIcon) return '<button type="button" class="order-quick-op order-quick-op--command" data-open-panel="quick" data-quick-op="' + op + '" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'quick' && state.quickOp === op) + '"><i class="wego-iconfont-s ' + commandIcon + '" aria-hidden="true"></i><span class="order-quick-op__label">' + label + '</span></button>';
+    // Project-owned Figma exports: discount 3030:65143, amount 3030:65199, rounding 3030:65152.
+    var commandAsset = { orderRate: 'order-discount.svg', orderAmount: 'order-amount.svg', rounding: 'order-rounding.svg' }[op];
+    if (commandAsset) return '<button type="button" class="order-quick-op order-quick-op--command" data-open-panel="quick" data-quick-op="' + op + '" aria-haspopup="dialog" aria-expanded="' + (state.panel === 'quick' && state.quickOp === op) + '"><img class="order-quick-op__design-icon" src="../assets/icons/' + commandAsset + '" width="20" height="20" alt="" aria-hidden="true"><span class="order-quick-op__label">' + label + '</span></button>';
     var status = op === 'coupon' ? null : quickOpStatus(op);
     var statusHtml = status
       ? '<span class="order-quick-op__status">' + escapeHtml(status) + '</span>'
@@ -5899,16 +5947,13 @@
     var noteLabel = isRefund ? '退款备注' : '收款备注';
     var noteEditorValue = typeof draft.noteEditorValue === 'string' ? draft.noteEditorValue : (draft.note || '');
     return ''
-      + '<div class="order-note-modal order-payment-note-modal order-remark-modal' + (isRefund ? ' order-payment-note-modal--refund' : '') + '" role="dialog" aria-modal="true" aria-labelledby="order-payment-note-title" data-state="open">'
+      + '<div class="order-note-modal order-payment-note-modal order-remark-modal order-modal-form' + (isRefund ? ' order-payment-note-modal--refund' : '') + '" role="dialog" aria-modal="true" aria-labelledby="order-payment-note-title" data-state="open">'
       +   '<div class="order-note-modal__panel">'
-      +     '<div class="order-note-modal__head"><strong id="order-payment-note-title">' + (isRefund && draft.note ? '编辑' : '添加') + noteLabel + '</strong>' + noteCloseButton('data-payment-note-cancel') + '</div>'
+      +     modalFormHeader((isRefund && draft.note ? '编辑' : '添加') + noteLabel, 'data-payment-note-cancel', 'order-payment-note-title')
       +     '<div class="order-note-modal__body">'
       +       noteEditorField(Object.assign({}, draft, { noteEditorValue: noteEditorValue }), 'payment', noteLabel, '请输入' + noteLabel)
       +     '</div>'
-      +     '<div class="order-note-modal__actions">'
-      +       button('取消', 'weak', 'md', 'data-payment-note-cancel')
-      +       button('确定', 'strong', 'md', 'data-payment-note-confirm')
-      +     '</div>'
+      +     modalFormActions('确定', 'data-payment-note-confirm', 'data-payment-note-cancel')
       +   '</div>'
       + '</div>';
   }
@@ -6184,7 +6229,7 @@
       +   '<span class="order-customer-person__avatar">' + customerAvatar(item) + '<b>' + escapeHtml(item.number) + '</b></span>'
       +   '<span class="order-customer-person__content">'
       +     '<span class="order-customer-person__title"><strong>' + escapeHtml(item.name) + '</strong><em class="order-customer-vip order-customer-vip--' + item.level.toLowerCase() + '"><b>' + item.level + '</b><span>' + escapeHtml(item.priceType) + '</span></em></span>'
-      +     '<span class="order-customer-person__metrics"><small>' + escapeHtml(item.amount) + '</small><small>' + escapeHtml(item.pieces) + '</small><span>' + escapeHtml(item.contact) + '</span></span>'
+      +     '<span class="order-customer-person__metrics"><small>' + moneyMarkup(item.balance) + '</small><small>' + escapeHtml(item.pieces) + '</small><span>' + escapeHtml(item.contact) + '</span></span>'
       +     '<span class="order-customer-person__tags"><small class="order-customer-employee"><i class="wego-iconfont-s icon-guwen" aria-hidden="true"></i>' + escapeHtml(item.employee) + '</small><span>老客</span><span>微信好友、回头客</span></span>'
       +   '</span>'
       + '</button>';
@@ -6245,11 +6290,7 @@
   function newCustomerTemplate(prefillName) {
     return ''
       + '<section class="order-customer-create" data-bg="page">'
-      +   '<nav class="navbar order-customer-create__navbar" data-component-slug="navbar"><div class="navbar__body">'
-      +     '<div class="navbar__left navbar__left--text"><button type="button" class="navbar__left-btn" data-cancel-new-customer>取消</button></div>'
-      +     '<div class="navbar__center"><span class="navbar__title">新建客户</span></div>'
-      +     '<div class="navbar__right navbar__right--text">' + button('保存', 'strong', 'sm', 'data-save-new-customer') + '</div>'
-      +   '</div></nav>'
+      +   modalFormHeader('新建客户', 'data-cancel-new-customer')
       +   '<main class="order-customer-create__body">'
       +     '<section class="cell-group order-customer-create__group" data-component-slug="cell"><div class="cell-group__content">'
       +       newCustomerField('名称', 'name', prefillName, '请输入客户名称', { required: true })
@@ -6263,6 +6304,7 @@
       +       newCustomerField('积分', 'points', '', '输入数字', { inputmode: 'numeric', last: true })
       +     '</div></section>'
       +   '</main>'
+      +   modalFormActions('保存', 'data-save-new-customer', 'data-cancel-new-customer')
       + '</section>';
   }
 
@@ -6316,8 +6358,8 @@
       label: '新建客户',
       init: function (overlayCtx) {
         var overlayRoot = overlayCtx.root;
-        overlayRoot.querySelector('[data-cancel-new-customer]')?.addEventListener('click', function () {
-          overlayCtx.close();
+        overlayRoot.querySelectorAll('[data-cancel-new-customer]').forEach(function (control) {
+          control.addEventListener('click', function () { overlayCtx.close(); });
         });
         overlayRoot.querySelector('[data-save-new-customer]')?.addEventListener('click', function () {
           if (!createCustomerFromForm(overlayRoot, overlayCtx)) return;
@@ -6404,7 +6446,7 @@
   function desktopDraftsPanel() {
     return ''
       + '<div class="order-draft-panel">'
-      +   '<div class="order-draft-panel__head"><strong>草稿箱</strong><button type="button" class="link link--14" data-component="link" data-variant-name="Link_14" data-close-panel>关闭</button></div>'
+      +   modalFormHeader('草稿箱', 'data-close-panel').replace('order-modal-heading', 'order-modal-heading order-draft-panel__head')
       +   '<div class="layout-scroll order-draft-panel__list">' + DRAFT_DEMOS.filter(function (draft) { return state.deletedDraftIds.indexOf(draft.id) < 0; }).map(draftCard).join('') + '</div>'
       + '</div>';
   }
@@ -7354,6 +7396,7 @@
       state.orderPromotion = { type: 'member', mode: 'member-rate', value: state.memberDiscount };
       state.memberDiscountChoice = 'use';
     }
+    if (draft.product.specs.some(function (spec) { return validQuantities[spec] !== 0 && draft.summaryPriceEditedSpecs && draft.summaryPriceEditedSpecs[addDraftPriceType(draft) + ':' + spec]; })) state.discountDetailSource = 'product';
     clearFormatGuideTimers(); state.panel = null; state.addDraft = null;
     markDirty(ctx, true); ctx.toast(draft.replacesOrderQuantity ? '修改成功' : '添加成功');
   }
@@ -7405,13 +7448,13 @@
       var rowQuantity = selectedColor ? Number((rowSpec && draft.skuQty[rowSpec]) || 0) : Number((draft.pendingSizeQty && draft.pendingSizeQty[size]) || 0);
       var rowStock = selectedColor ? (rowSpec ? singleQuantityLimit(product, rowSpec) : 0) : pendingSizeStock(product, size);
       var rowUnavailable = Boolean(selectedColor) && !rowSpec;
-      var rowState = rowSpec ? resolveSkuRowState(product, rowSpec, rowQuantity, draft.confirmedOverstock && draft.confirmedOverstock[rowSpec]) : null;
+      var rowState = rowSpec ? resolveSkuRowState(product, rowSpec, rowQuantity, draft.confirmedOverstock && draft.confirmedOverstock[rowSpec], draft) : null;
       var counterDisabled = rowUnavailable;
       var rowPriceOriginal = rowState && addDraftSkuBasePrice(draft, rowSpec);
       return '<div class="order-add-spec-counter-row' + (rowState && rowState.showSkuImage ? ' has-sku-image' : ' has-no-sku-image') + (rowState && rowState.showStock ? ' has-sku-stock' : ' has-no-sku-stock') + (rowUnavailable ? ' is-disabled' : '') + (!matrix.hasColor && !matrix.hasSize ? ' order-add-spec-counter-row--default' : '') + '">'
         + (rowState && rowState.showSkuImage ? '<span class="wg-image wg-image--md wg-image--rounded-md order-add-spec-counter-row__image" data-component="image" data-component-slug="image" data-variant-name="Image_40_Rounded"><img class="wg-image__src is-loaded" src="' + escapeHtml(rowState.skuImageUrl) + '" alt=""></span>' : '')
         + '<div class="order-add-spec-counter-row__info"><span class="order-add-spec-counter-row__label">' + escapeHtml(size) + '</span>'
-        + (rowState && (rowState.showSkuPrice || draft.useSkuPrices) ? '<div class="order-add-sku-price"><span>' + moneyMarkup(addDraftSkuPrice(draft, rowSpec), true) + '</span>' + (rowPriceOriginal != null && rowPriceOriginal !== addDraftSkuPrice(draft, rowSpec) ? '<del class="order-add-sku-original-price">' + moneyMarkup(rowPriceOriginal, true) + '</del>' : '') + '<button type="button" class="order-add-sku-price__edit" data-edit-sku-price="' + encodeURIComponent(rowSpec) + '" aria-label="编辑' + escapeHtml(rowSpec) + '价格"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button></div>' : '')
+        + (rowState && rowState.showSkuPrice ? '<div class="order-add-sku-price"><span>' + moneyMarkup(addDraftSkuPrice(draft, rowSpec), true) + '</span>' + (rowPriceOriginal != null && rowPriceOriginal !== 0 && rowPriceOriginal !== addDraftSkuPrice(draft, rowSpec) ? '<del class="order-add-sku-original-price">' + moneyMarkup(rowPriceOriginal, true) + '</del>' : '') + '<button type="button" class="order-add-sku-price__edit" data-edit-sku-price="' + encodeURIComponent(rowSpec) + '" aria-label="编辑' + escapeHtml(rowSpec) + '价格"><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i></button></div>' : '')
         + '</div>'
         + (!matrix.hasColor && !matrix.hasSize ? addWholesaleRuleTag(draft) : '')
         + '<div class="order-add-sku-operation">'
@@ -7475,6 +7518,7 @@
                 var stock = specStock(product, spec);
                 var qty = Number(draft.skuQty[spec] || 0);
                 var cellClasses = batchSelectionCellClasses(selection, color, size, colorIndex, matrix.sizes.indexOf(size), matrix.colors.length, matrix.sizes.length);
+                if (!spec) cellClasses += ' is-unavailable';
                 return '<td class="' + cellClasses + '">' + (spec ? '<div class="number-input number-input--surface-white" data-component-slug="input"><input class="number-input__field" type="text" inputmode="numeric" maxlength="8" value="' + (qty === 0 ? '' : qty) + '" data-batch-qty="' + encodeURIComponent(spec) + '" data-batch-column="' + escapeHtml(color) + '" aria-label="' + escapeHtml(color + ' ' + size) + '数量"></div>' : '<span class="order-batch-unavailable">—</span>') + (showInventory ? '<small>库存' + (spec && stock > 0 ? stock : '--') + '</small>' : '') + '</td>';
               }).join('');
               var sizeSelected = selection && (selection.type === 'all' || selection.type === 'column' || (selection.type === 'row' && selection.value === size) || (selection.type === 'cell' && selection.size === size));
@@ -7534,9 +7578,10 @@
       + '<div class="order-add-product__content"><div><strong>' + escapeHtml(product.name) + '</strong><small>' + escapeHtml(product.code) + '</small></div>'
       + '<div class="order-add-product__actions">'
       +   '<strong class="order-add-current-price" data-last-price-target="' + (desktop ? 'desktop' : 'mobile') + '">' + priceRangeMarkup(product.specs.map(function (spec) { return addDraftSkuPrice(draft, spec); })) + '</strong>'
+      +   addDraftHeaderOriginalPrice(draft)
       +   (desktop ? lastPricePopover(draft, true) : '')
       +   (desktop ? '<div class="order-add-product__operation-buttons">' : '')
-      +     '<button type="button" data-toggle-add-discount><i class="wego-iconfont-s icon-youhui order-add-discount-icon" aria-hidden="true"></i>优惠</button>'
+      +     '<button type="button" data-toggle-add-discount><i class="order-add-discount-icon icon-gaijia" aria-hidden="true"></i>优惠</button>'
       +     (skuRackCanEdit(product) ? '<button type="button" data-edit-add-product><i class="wego-iconfont-s icon-bianji16" aria-hidden="true"></i>编辑商品</button>' : '')
       +     '<button type="button" data-add-purchase-history><i class="wego-iconfont-s icon-shijian" aria-hidden="true"></i>采购记录</button>'
       +   (desktop ? '</div>' : '')
@@ -7631,13 +7676,22 @@
     });
   }
 
+  function markAddPriceSummary(draft, spec) {
+    if (!draft.summaryPriceEditedSpecs) draft.summaryPriceEditedSpecs = {};
+    draft.summaryPriceEditedSpecs[addDraftPriceType(draft) + ':' + spec] = true;
+  }
+
   function applyAddPriceEdit(draft, edit, preview) {
     if (edit.scope !== 'product') {
-      if (preview.hasInput) setAddSkuPriceChange(draft, edit.spec, preview.after, edit.mode, Number(edit.input));
+      if (preview.hasInput) {
+        setAddSkuPriceChange(draft, edit.spec, preview.after, edit.mode, Number(edit.input));
+        markAddPriceSummary(draft, edit.spec);
+      }
       return;
     }
     if (!preview.hasInput && draft.priceMode === 'discount') { draft.priceMode = PRICE_TYPE_MODES[addDraftPriceType(draft)] || 'retail'; draft.unitPrice = addSelectedPrice(draft.product, draft.priceMode); }
     edit.specs.forEach(function (spec) {
+      var beforePrice = addDraftSkuPrice(draft, spec);
       if (!preview.hasInput) {
         var resolved = addSkuPricing(draft.catalogProduct || draft.product, spec, addDraftPriceType(draft), []);
         draft.changePriceSkus = (draft.changePriceSkus || []).filter(function (record) { return !(String(record.id) === String(resolved.id) && Number(record.priceType) === resolved.priceType); });
@@ -7647,6 +7701,7 @@
         var result = skuPricePreview(Object.assign({}, edit, { original: addDraftSkuBasePrice(draft, spec) }));
         setAddSkuPriceChange(draft, spec, result.after, edit.mode, Number(edit.input));
       }
+      if (preview.hasInput || beforePrice !== addDraftSkuPrice(draft, spec)) markAddPriceSummary(draft, spec);
     });
   }
 
@@ -7708,7 +7763,7 @@
     var range = skuPriceEditRange(edit);
     return '<div class="order-sku-price-modal" role="dialog" aria-modal="true" aria-labelledby="order-sku-price-title" data-state="open">'
       + '<div class="order-sku-price-modal__panel">'
-      +   '<header class="order-sku-price-modal__head"><strong id="order-sku-price-title">优惠改价</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-close-sku-price aria-label="关闭优惠改价"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +   '<header class="order-sku-price-modal__head"><strong id="order-sku-price-title">优惠改价</strong><button type="button" class="order-modal-close" data-close-sku-price aria-label="关闭优惠改价"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></header>'
       +   '<div class="order-sku-price-modal__body">'
       +     '<div class="order-sku-price-method-row"><span class="order-sku-price-method-label" id="order-sku-price-method-label">改价方式</span><div class="order-sku-price-modes" role="radiogroup" aria-labelledby="order-sku-price-method-label" data-scenario-component="CommodityChangePrice">' + Object.keys(modeNames).map(function (mode) {
               var selected = edit.mode === mode;
@@ -7753,6 +7808,7 @@
     var recordId = detail.id == null ? spec : detail.id;
     item.changePriceSkus = (item.changePriceSkus || []).filter(function (record) { return !(String(record.id) === String(recordId) && Number(record.priceType) === type); });
     item.changePriceSkus.push({ id: recordId, spec: spec, priceType: type, originalPrice: edit.original, finallyPrice: preview.after, preferentialType: edit.mode, preferentialValue: Number(edit.input) });
+    state.discountDetailSource = 'product';
   }
 
   function openOrderPromotion(type) {
@@ -7844,7 +7900,7 @@
     var isTotal = draft.type === 'total';
     return '<div class="order-sku-price-modal order-promotion-modal' + (isMember ? ' order-promotion-modal--member' : isTotal ? ' order-promotion-modal--total' : hasInput ? ' order-promotion-modal--entry' : ' order-promotion-modal--rounding') + '" role="dialog" aria-modal="true" aria-labelledby="order-promotion-title" data-state="open">'
       + '<div class="order-sku-price-modal__panel">'
-      +   '<header class="order-sku-price-modal__head"><strong id="order-promotion-title">' + titles[draft.type] + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component="button" data-close-order-promotion aria-label="关闭' + titles[draft.type] + '"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +   '<header class="order-sku-price-modal__head"><strong id="order-promotion-title">' + titles[draft.type] + '</strong><button type="button" class="order-modal-close" data-close-order-promotion aria-label="关闭' + titles[draft.type] + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></header>'
       +   '<div class="order-sku-price-modal__body">'
       +     (isMember ? '<div class="cell-group order-promotion-member-list" data-component="cell" data-variant-name="Cell_Action"><div class="cell-group__content">' + orderMemberChoiceCell('use', '使用会员折扣（' + compactNumber(Number(state.memberDiscount) / 10) + '折）', draft.memberChoice === 'use', true) + orderMemberChoiceCell('none', '不使用', draft.memberChoice === 'none', false) + '</div></div>' : '')
       +     (modes ? '<div class="order-sku-price-method-row"><span class="order-sku-price-method-label" id="order-promotion-method-label">' + methodLabel + '</span><div class="order-sku-price-modes" role="radiogroup" aria-labelledby="order-promotion-method-label">' + options + '</div></div>' : '')
@@ -7853,7 +7909,7 @@
       +     (hasInput ? '<small class="order-sku-price-error" data-order-promotion-error>' + (draft.input && !preview.valid ? preview.error : '') + '</small>' : '')
       +     (isMember || isTotal ? '' : '<div class="order-sku-price-preview"><div><span>订单金额</span><strong data-order-promotion-before>' + moneyMarkup(original / 100) + '</strong></div><div><span>改价金额</span><strong data-order-promotion-change class="' + (change < 0 ? 'is-negative' : '') + '">' + skuPriceChangeText(change / 100) + '</strong></div><div class="order-sku-price-preview__after"><span>应收金额</span><strong data-order-promotion-after>' + moneyMarkup(after / 100) + '</strong></div></div>')
       +   '</div>'
-      +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-order-promotion') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-order-promotion>确认</button></footer>'
+      +   '<footer class="order-sku-price-modal__footer">' + button('取消', 'weak', 'md', 'data-close-order-promotion') + '<button type="button" class="btn btn--strong btn--md" data-component="button" data-confirm-order-promotion>确定</button></footer>'
       + '</div></div>';
   }
 
@@ -7980,7 +8036,7 @@
       +     '</div></section>'
       +     '<button type="button" class="order-customer-create-invite" data-invite-customer-qr><i class="wego-iconfont-s icon-erweima" aria-hidden="true"></i><span>邀请客户扫码</span></button>'
       +   '</div>'
-      +   '<footer class="order-desktop-customer-create__actions">' + button('保存', 'strong', 'md', 'data-save-desktop-new-customer') + '</footer>'
+      +   modalFormActions('保存', 'data-save-desktop-new-customer', 'data-close-panel')
       + '</div>';
   }
 
@@ -8044,8 +8100,8 @@
       orderItemIndex: orderItem ? orderItemIndex : null,
       image: product.image,
       name: product.name,
-      listPrice: String(product.listPrice),
-      costPrice: String(product.costPrice == null ? Math.round(product.listPrice * 0.48 * 100) / 100 : product.costPrice),
+      listPrice: product.hasSalePrice === false ? '' : String(product.listPrice),
+      costPrice: product.hasCostPrice === false ? '' : String(product.costPrice == null ? Math.round(product.listPrice * 0.48 * 100) / 100 : product.costPrice),
       code: product.code,
       specs: sizes.join('、'),
       colors: (product.colors && product.colors.length ? product.colors : colors).join('、'),
@@ -8059,13 +8115,23 @@
     return true;
   }
 
+  // Project form shell: heading/close only; all commit/cancel actions stay in the footer.
+  function modalFormHeader(title, closeAttrs, titleId) {
+    return '<header class="order-modal-heading"><strong' + (titleId ? ' id="' + titleId + '"' : '') + '>' + escapeHtml(title) + '</strong><button type="button" class="order-modal-close" ' + closeAttrs + ' aria-label="关闭' + escapeHtml(title) + '"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></header>';
+  }
+
+  function modalFormActions(label, submitAttrs, cancelAttrs, disabled) {
+    return '<footer class="order-form-actions">' + button('取消', 'weak', 'md', cancelAttrs)
+      + '<button type="button" class="btn btn--strong btn--md" data-component="button" ' + submitAttrs + (disabled ? ' disabled' : '') + '>' + escapeHtml(label) + '</button></footer>';
+  }
+
   function productEditModal() {
     var draft = state.productEditDraft;
     if (!draft) return '';
     return ''
-      + '<div class="order-product-edit-modal" role="dialog" aria-modal="true" aria-label="编辑商品">'
+      + '<div class="order-product-edit-modal order-modal-form" role="dialog" aria-modal="true" aria-label="编辑商品">'
       +   '<div class="order-product-edit-modal__panel">'
-      +     '<header class="order-product-edit-modal__head"><strong>编辑商品</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +     modalFormHeader('编辑商品', 'data-close-panel')
       +     '<div class="order-product-edit-modal__body">'
       +       '<section class="order-product-edit-images" aria-label="商品图片"><span>图片</span><div><span class="wg-image wg-image--rounded-md" data-component-slug="image"><img class="wg-image__src is-loaded" src="' + draft.image + '" alt="' + escapeHtml(draft.name) + '主图"></span><button type="button" class="order-product-edit-images__add" data-product-edit-more aria-label="添加商品图片"><i class="wego-iconfont-s icon-jia16" aria-hidden="true"></i></button></div></section>'
       +       '<div class="order-product-edit-fields">'
@@ -8080,7 +8146,7 @@
       +       '</div>'
       +       '<section class="order-product-edit-meta"><div><button type="button" class="tag tag--28 tag--white tag--normal" data-component-slug="tag" data-product-edit-more><span class="tag__label">加来源</span></button><span class="tag tag--28 tag--white tag--normal" data-component-slug="tag"><span class="tag__label">所有粉丝可见</span></span></div><button type="button" class="link link--14" data-component-slug="link" data-product-edit-more>编辑更多</button></section>'
       +     '</div>'
-      +     '<footer class="order-product-edit-modal__actions"><button type="button" class="link link--14" data-component-slug="link" data-product-edit-more>编辑更多</button><div>' + button('取消', 'weak', 'md', 'data-close-panel') + button('保存', 'strong', 'md', 'data-save-product-edit') + '</div></footer>'
+      +     modalFormActions('保存', 'data-save-product-edit', 'data-close-panel')
       +   '</div>'
       + '</div>';
   }
@@ -8184,9 +8250,9 @@
       ? '<span class="wg-image wg-image--rounded-md" data-component-slug="image"><img class="wg-image__src is-loaded" src="' + draft.image + '" alt="' + escapeHtml(draft.name || '待创建商品') + '主图"></span>'
       : '';
     return ''
-      + '<div class="order-product-edit-modal" role="dialog" aria-modal="true" aria-label="' + title + '">'
+      + '<div class="order-product-edit-modal order-modal-form" role="dialog" aria-modal="true" aria-label="' + title + '">'
       +   '<div class="order-product-edit-modal__panel">'
-      +     '<header class="order-product-edit-modal__head"><strong>' + title + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +     modalFormHeader(title, 'data-close-panel')
       +     '<div class="order-product-edit-modal__body' + (temporary ? ' order-product-create-modal__body--temporary' : '') + '">'
       +       '<section class="order-product-edit-images" aria-label="商品图片"><span>图片</span><div>' + imageHtml + '<button type="button" class="order-product-edit-images__add" data-trigger-product-create-image aria-label="选择商品图片"><i class="wego-iconfont-s icon-jia16" aria-hidden="true"></i></button><input type="file" accept="image/*" data-product-create-image hidden></div></section>'
       +       '<div class="order-product-edit-fields">'
@@ -8200,7 +8266,7 @@
       +       '</div>'
       +       (temporary ? '<div class="order-product-create-spacer" aria-hidden="true"></div>' : '<section class="order-product-edit-meta"><div><button type="button" class="tag tag--28 tag--white tag--normal" data-component-slug="tag" data-product-create-more><span class="tag__label">加来源</span></button><button type="button" class="tag tag--28 tag--white tag--normal" data-component-slug="tag" data-product-create-more><span class="tag__label">所有粉丝可见</span></button></div><button type="button" class="link link--14" data-component-slug="link" data-product-create-more>编辑更多</button></section>')
       +     '</div>'
-      +     '<footer class="order-product-edit-modal__actions">' + (temporary ? '<span></span>' : '<button type="button" class="link link--14" data-component-slug="link" data-product-create-more>编辑更多</button>') + '<div>' + button('取消', 'weak', 'md', 'data-close-panel') + '<button type="button" class="btn btn--strong btn--md" data-component-slug="button" data-publish-product-create ' + (canPublishProductCreate(draft) ? '' : 'disabled') + '>发布</button></div></footer>'
+      +     modalFormActions('发布', 'data-publish-product-create', 'data-close-panel', !canPublishProductCreate(draft))
       +   '</div>'
       + '</div>';
   }
@@ -8216,7 +8282,7 @@
     return ''
       + '<div class="order-product-edit-modal order-fan-profile-modal" role="dialog" aria-modal="true" aria-labelledby="order-fan-profile-title" data-component="modal" data-variant-name="ModalFrame_X_Custom">'
       +   '<div class="order-product-edit-modal__panel order-fan-profile-modal__panel" data-component-slug="modal" data-variant-name="ModalFrame_X_Custom">'
-      +     '<header class="order-product-edit-modal__head"><strong id="order-fan-profile-title">粉丝资料</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></header>'
+      +     '<header class="order-product-edit-modal__head"><strong id="order-fan-profile-title">粉丝资料</strong><button type="button" class="order-modal-close" data-close-panel aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></header>'
       +     '<div class="order-product-edit-modal__body order-fan-profile-modal__body">'
       +       '<section class="order-fan-profile-hero">'
       +         (customer.avatar ? '<span class="avatar avatar--56 avatar--image" data-component="avatar" data-component-slug="avatar" data-variant-name="Avatar_56_Default"><img src="' + escapeHtml(customer.avatar) + '" alt="' + escapeHtml(customer.name) + '"></span>' : '<span class="avatar avatar--56 avatar--initial" data-component="avatar" data-variant-name="Avatar_56_Initial">' + escapeHtml(Array.from(customer.name || '')[0] || '') + '</span>')
@@ -8255,9 +8321,9 @@
     var modalTitle = isQuick && QUICK_OP_DEFS[state.quickOp] ? QUICK_OP_DEFS[state.quickOp].title : (isCustomerCreate ? '新建客户' : (isDelivery ? '选择发货方式' : (isNote ? '商品备注' : (isCheckout ? checkoutTitle : '添加商品'))));
     // Exception: 宿主 modal 当前只有全宽面板，无法承载 PC 中宽新建客户、发货方式与商品录入；此处仅回退承载层，内容仍消费正式组件。
     return ''
-      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : ((isCustomerCreate || isDelivery ? 'order-desktop-modal--customer' : '') + (isCustomerCreate ? ' order-desktop-modal--customer-create' : '') + (isDelivery ? ' order-desktop-modal--delivery' : '') + (isNote ? ' order-desktop-modal--note' : (isCheckout ? ' order-desktop-modal--checkout' + (totals().payable < 0 ? ' order-desktop-modal--refund' : '') : ' order-desktop-modal--add')))) + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
+      + '<div class="order-desktop-modal ' + (isQuick ? 'order-desktop-modal--quick' : isCustomerCreate ? 'order-desktop-modal--customer-create order-modal-form' : isDelivery ? 'order-desktop-modal--delivery' : isNote ? 'order-desktop-modal--note' : isCheckout ? 'order-desktop-modal--checkout' + (totals().payable < 0 ? ' order-desktop-modal--refund' : '') : 'order-desktop-modal--add') + '" role="dialog" aria-modal="true" aria-labelledby="order-desktop-modal-title" data-state="open">'
       +   '<div class="order-desktop-modal__panel">'
-      +     '<div class="order-desktop-modal__head"><strong id="order-desktop-modal-title">' + modalTitle + '</strong><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon ' + (isDelivery ? 'icon-cha' : 'icon-cha16') + '" aria-hidden="true"></i></button></div>'
+      +     (isCustomerCreate ? modalFormHeader(modalTitle, 'data-close-panel', 'order-desktop-modal-title') : '<div class="order-desktop-modal__head"><strong id="order-desktop-modal-title">' + modalTitle + '</strong><button type="button" class="order-modal-close" data-close-panel aria-label="关闭"><i class="wego-iconfont-s icon-cha16" aria-hidden="true"></i></button></div>')
       +     '<div class="order-desktop-modal__body">' + (isQuick ? quickOpPanel(true) : (isCustomerCreate ? desktopNewCustomerModalContent() : (isDelivery ? deliveryPanel() : (isNote ? spuNotePanel() : (isCheckout ? checkoutPanel() : addPanel(true)))))) + '</div>'
       +   '</div>'
       + '</div>';
@@ -8443,7 +8509,7 @@
         + '</div>';
     }
     var isCheckoutModal = state.panel === 'checkout' || state.panel === 'payment';
-    var defaultModalHeader = isCheckoutModal
+    var defaultModalHeader = state.panel === 'drafts' ? modalFormHeader('草稿箱', 'data-close-panel') : isCheckoutModal
       ? '<div class="modal__title order-v2-modal__checkout-head"><span class="order-v2-modal__checkout-title">' + (totals().payable < 0 ? '退款处理' : '支付结算') + '</span><button type="button" class="btn btn--weak btn--sm btn--icon-only" data-component-slug="button" data-close-panel aria-label="关闭"><i class="btn__icon icon-cha16" aria-hidden="true"></i></button></div>'
       : '<div class="modal__title modal__title--default"><nav class="navbar" data-component-slug="navbar"><div class="navbar__body"><div class="navbar__left"><button type="button" class="navbar__left-btn navbar__left-btn--circle" data-close-panel aria-label="收起"><i class="wego-iconfont-s icon-xiajiantou16"></i></button></div><div class="navbar__center"><span class="navbar__title">' + panelTitle() + '</span></div><div class="navbar__right"></div></div></nav></div>';
     return ''
@@ -11330,6 +11396,9 @@
         editedProduct.name = nextName;
         editedProduct.listPrice = Math.round(nextPrice * 100) / 100;
         editedProduct.costPrice = Math.round(nextCost * 100) / 100;
+        editedProduct.hasSalePrice = String(editDraft.listPrice || '').trim() !== '';
+        editedProduct.hasCostPrice = String(editDraft.costPrice || '').trim() !== '';
+        editedProduct.hasPrice = editedProduct.hasSalePrice || editedProduct.hasCostPrice;
         editedProduct.code = nextCode;
         if (nextSizes.length && nextColors.length) {
           editedProduct.specs = [];
@@ -11440,6 +11509,9 @@
         tags: [],
         source: createDraft.type === 'temporary' ? '临时商品' : '手动创建',
         listPrice: Math.round(createPrice * 100) / 100,
+        hasSalePrice: Boolean(createPriceRaw),
+        hasCostPrice: Boolean(createCostRaw),
+        hasPrice: Boolean(createPriceRaw || createCostRaw),
         costPrice: Math.round(createCost * 100) / 100,
         image: createDraft.image || '',
         specs: createSpecs,
@@ -11469,7 +11541,8 @@
         state.catalogFilterPanelOpen = false;
       }
       state.productCreateDraft = null;
-      startAdd(newProduct);
+      if (createDraft.type === 'temporary') startAdd(newProduct);
+      else openCatalogProduct(newProduct);
       ctx.toast(createDraft.type === 'temporary' ? '临时商品创建成功' : '商品已发布');
       return;
     }
@@ -11491,11 +11564,7 @@
       var selectedProduct = activeCatalogProducts().find(function (item) { return item.id === target.dataset.productId; });
       if (!selectedProduct) return;
       resetDesktopProductSearch();
-      if (shouldAddSingleSkuDirectly(selectedProduct)) {
-        addSingleSpecProduct(selectedProduct.id, ctx);
-      } else {
-        startAdd(selectedProduct.id);
-      }
+      openCatalogProduct(selectedProduct);
       return;
     }
     if (target.matches('[data-customer-id]')) {
@@ -11528,8 +11597,9 @@
       return;
     }
     if (target.matches('[data-save-desktop-new-customer]')) {
-      var customerCreateScope = target.closest('.order-desktop-customer-create');
-      if (!createCustomerFromForm(customerCreateScope, ctx)) return;
+      var customerCreateScope = target.closest('.order-desktop-customer-create')
+        || target.closest('.order-desktop-modal--customer-create')?.querySelector('.order-desktop-customer-create');
+      if (!customerCreateScope || !createCustomerFromForm(customerCreateScope, ctx)) return;
       ctx.toast('客户已新建并选中');
       return;
     }
@@ -13919,6 +13989,7 @@
     state.discountValue = 0;
     state.orderTotalAdjustment = 0;
     state.orderPromotion = null;
+    state.discountDetailSource = null;
     state.orderPromotionDraft = null;
     state.orderPromotionFreightBase = null;
     state.memberDiscountChoice = '';
